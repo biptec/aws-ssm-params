@@ -65,6 +65,7 @@ func main() {
 			&cli.BoolFlag{Name: "all-regions", Usage: "search parameters across all enabled AWS regions"},
 			&cli.StringFlag{Name: "profile", Usage: "AWS profile"},
 			&cli.BoolFlag{Name: "no-color", Usage: "disable colored output"},
+			&cli.StringFlag{Name: "keymap", Value: "emacs", Usage: "keyboard navigation style: emacs or vi"},
 		},
 		Action: app.Interactive,
 		Commands: []*cli.Command{

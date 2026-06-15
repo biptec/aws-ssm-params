@@ -25,7 +25,6 @@ AWS SSM Parameter Store is simple and reliable, but day-to-day secret maintenanc
 - Works with all standard SSM parameter types: `SecureString`, `String`, and `StringList`.
 - Reads a simple paths file: one SSM path per line.
 - Single-region, selected multi-region, and all-enabled-regions scanning.
-- Shows status for each parameter: existing, missing, empty, or error.
 - Keeps secret values hidden by default in the TUI.
 - Optional value reveal, SHA-256 prefix, version, tier, user, description, date, source, and metadata columns.
 - Search/filter mode for large parameter lists.
@@ -110,7 +109,7 @@ AWS_PROFILE=target aws-ssm-params --region eu-central-1 import --file values.env
 - AWS credentials configured through environment variables, named profiles, SSO, instance role, or any other AWS CLI-supported method.
 - IAM permissions for the operations you plan to use.
 
-For read-only status checks and export, you typically need:
+For read-only browsing and export, you typically need:
 
 ```json
 {
@@ -214,15 +213,12 @@ aws-ssm-params --profile dev --region eu-north-1 paths.txt
 
 Inside the TUI:
 
-- Use `↑` / `↓` to move.
-- Press `Enter` to see details.
-- Press `e` to edit a value.
-- Press `Tab` / `Shift+Tab` inside the editor to move between editable fields.
-- Press `Enter` inside the editor to open the `Region`/`Type` selector, move from single-line fields, or add a new line inside `Value`.
-- Press `r` to generate a random value.
-- Press `v` to reveal/hide cached value previews.
-- Press `/` to search.
-- Press `q` to quit.
+- Press `?` to open the context-sensitive `Shortcuts` page.
+- Press `d` on the main screen to show/hide full details for the selected parameter.
+- Press `Enter` on the main screen to edit a value.
+- Press `r` inside the editor to generate a random value into `Value`; review it, then press `ctrl+s` to save.
+- Press `/` on the main screen to search.
+- Press `esc` to go back from inner screens; on the main screen, `esc` quits.
 
 ## Paths file format
 
@@ -274,6 +270,7 @@ aws-ssm-params --region eu-north-1 paths.txt
 --all-regions        Search parameters across all enabled AWS regions.
 --profile PROFILE    AWS profile name.
 --no-color           Disable colored output.
+--keymap KEYMAP      Keyboard navigation style: emacs or vi (default: emacs).
 ```
 
 Notes:
@@ -282,6 +279,7 @@ Notes:
 - If `--region` is omitted, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
 - Direct `get`, `set`, and `import` operate on one concrete region.
 - `interactive` and `export` support repeated `--region` and `--all-regions`.
+- `--keymap emacs` uses Emacs-style navigation shortcuts in the TUI. `--keymap vi` uses vi-style navigation shortcuts on list and selector screens.
 
 ## Parameter types
 
@@ -314,87 +312,69 @@ Selected Parameter
 List of N Parameters
 ```
 
-`Selected Parameter` shows the currently focused path and a compact summary. Press `Enter` for the full details page.
+`Selected Parameter` shows the currently focused path and a compact summary. Press `d` to toggle all available metadata on or off. When details are shown, they stay visible while you move through the parameter list until you press `d` again.
 
 `List of N Parameters` shows all loaded paths with optional metadata columns.
 
-### Statuses
+### Footer shortcuts
+
+The footer only shows action shortcuts. Navigation shortcuts are available on the context-sensitive `Shortcuts` page opened with `?`. The `? help` shortcut is always shown first so it remains visible in narrow terminals.
+
+Main footer when details are hidden:
 
 ```text
-OK       Parameter exists and has a non-empty value.
-EMPTY    Parameter exists but the value is empty.
-MISSING  Parameter does not exist in the selected region/search scope.
-ERROR    AWS CLI/API error while reading the parameter.
+? help • enter edit • d show details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
-### Main shortcuts
+Main footer when details are shown:
 
 ```text
-↑ / ctrl+p      previous row
-↓ / ctrl+n      next row
-PgUp / alt+v    page up
-PgDn / ctrl+v   page down
-Home / alt+<    first row
-End / alt+>     last row
-enter / ctrl+j  open details
-/               search
-ctrl+g          exit search
-v               reveal/hide cached value previews
-c               choose visible columns
-e               edit value
-r               generate random value
-x               delete selected value
-D               delete all visible/filtered values
-q               quit
-?               help
+? help • enter edit • d hide details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
-### Details shortcuts
+Editor footer:
 
 ```text
-↑ / ctrl+p      scroll up
-↓ / ctrl+n      scroll down
-PgUp / alt+v    page up
-PgDn / ctrl+v   page down
-e               edit value
-r               generate random value
-x               delete selected value
-v               reveal/hide cached value previews
-q               back
+? help • ctrl+s save • r random • ctrl+r read file • ctrl+w write file • ctrl+k clear • esc back
 ```
 
-### Editor shortcuts
+`r random` is intentionally available in the editor, not on the main screen. It inserts the generated value into `Value`; the value is saved to AWS only after you press `ctrl+s`.
+
+### Shortcuts page
+
+Press `?` to open `Shortcuts`. It shows actions and navigation for the page you opened it from. The navigation section follows the selected keymap.
+
+Emacs-style main/list navigation:
 
 ```text
-ctrl+s          save
-tab             next field
-shift+tab       previous field
-enter           newline in Value; open Region/Type selector; next field in text inputs
-ctrl+o          load File path content into Value
-ctrl+w          write Value to File path
-ctrl+k          clear active text field
-esc / ctrl+g    back
+↑ / ctrl+p / shift+tab     previous row/option
+↓ / ctrl+n / tab           next row/option
+PgUp / alt+v               page up
+PgDn / ctrl+v              page down
+Home / alt+<               first row/option
+End / alt+>                last row/option
 ```
 
-### Selector shortcuts
+Vi-style main/list navigation:
 
 ```text
-↑ / ctrl+p      previous option
-↓ / ctrl+n      next option
-tab             next option
-shift+tab       previous option
-enter           choose option
-q               back
+↑ / k / shift+tab          previous row/option
+↓ / j / tab                next row/option
+PgUp                       page up
+PgDn                       page down
+Home / gg                  first row/option
+End / G                    last row/option
 ```
 
-Plain `q` can be typed into values and file paths on input screens. The `q` shortcut only acts as quit/back on screens where the footer says it does.
+On text input fields, typing remains insert-mode friendly. The `vi` keymap changes list and selector navigation; text fields still use normal terminal text editing keys so characters such as `h`, `j`, `k`, `l`, and `x` can be typed safely.
+
+Hidden duplicate back/quit shortcuts such as `q` and `ctrl+g` remain available and are documented on `Shortcuts`, but the footer shows `esc` as the primary back/quit key.
 
 ### Columns
 
 Press `c` to choose optional columns:
 
 ```text
-STATUS
 REGION
 DATE
 TYPE
@@ -590,7 +570,7 @@ The tool calls `ec2:DescribeRegions`, filters out not-opted-in regions, and scan
 ## Security notes
 
 - Values are hidden by default in the TUI.
-- Pressing `v` reveals cached values on screen; be careful when screen sharing or recording.
+- Pressing `v` reveals cached values on screen; it is documented on `Shortcuts` instead of the footer. Be careful when screen sharing or recording.
 - Exported dotenv/JSON files contain plaintext secrets.
 - Use restrictive file permissions and encrypted storage for exported files.
 - Prefer short-lived AWS credentials or SSO sessions.

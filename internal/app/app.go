@@ -27,6 +27,7 @@ type Config struct {
 	Profile    string
 	AllRegions bool
 	NoColor    bool
+	Keymap     string
 }
 
 const allRegionsSeedRegion = "us-east-1"
@@ -56,6 +57,14 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 			regions = []string{region}
 		}
 	}
+	keymap := strings.ToLower(strings.TrimSpace(ctx.String("keymap")))
+	if keymap == "" {
+		keymap = "emacs"
+	}
+	if keymap != "emacs" && keymap != "vi" {
+		return Config{}, fmt.Errorf("unsupported --keymap %q; expected emacs or vi", keymap)
+	}
+
 	pathsFile := ""
 	switch ctx.Command.Name {
 	case "get", "set":
@@ -70,6 +79,7 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		Profile:    profile,
 		AllRegions: ctx.Bool("all-regions"),
 		NoColor:    ctx.Bool("no-color") || os.Getenv("NO_COLOR") != "",
+		Keymap:     keymap,
 	}, nil
 }
 
@@ -208,6 +218,7 @@ func Interactive(ctx *cli.Context) error {
 		Regions: regions,
 		Profile: cfg.Profile,
 		NoColor: cfg.NoColor,
+		Keymap:  cfg.Keymap,
 	})
 }
 

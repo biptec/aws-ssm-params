@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,7 @@ type Options struct {
 	Regions     []string
 	Profile     string
 	NoColor     bool
+	Keymap      string
 }
 
 // screen identifies the currently active TUI view.
@@ -32,7 +34,6 @@ type screen int
 const (
 	screenLoading screen = iota
 	screenMain
-	screenDetails
 	screenInput
 	screenTextArea
 	screenColumns
@@ -61,6 +62,14 @@ const (
 	editDirectionPrevious
 )
 
+type fileWriteConfirmation int
+
+const (
+	fileWriteConfirmationNone fileWriteConfirmation = iota
+	fileWriteConfirmationSecure
+	fileWriteConfirmationOverwrite
+)
+
 type columnName string
 
 type actionItem struct{ label, value string }
@@ -87,9 +96,8 @@ type model struct {
 	screen       screen
 	returnScreen screen
 
-	selected      int
-	detailsScroll int
-	detailText    string
+	selected         int
+	selectedExpanded bool
 
 	searchMode     bool
 	query          string
@@ -98,27 +106,30 @@ type model struct {
 
 	revealValues bool
 
-	message    string
-	errMessage string
+	message        string
+	warningMessage string
+	errMessage     string
 
 	loadingTitle string
 	loadingLines []string
 
-	input              textinput.Model
-	textArea           textarea.Model
-	editPathInput      textinput.Model
-	editFileInput      textinput.Model
-	inputMode          string
-	generatedValue     string
-	editField          editField
-	editDirection      editDirection
-	editRegionOptions  []string
-	confirmWriteSecure bool
-	editRegion         string
-	editType           ssm.ParameterType
-	regionCursor       int
-	typeCursor         int
-	typeReturnScreen   screen
+	input             textinput.Model
+	textArea          textarea.Model
+	editPathInput     textinput.Model
+	editFileInput     textinput.Model
+	inputMode         string
+	generatedValue    string
+	editField         editField
+	editDirection     editDirection
+	editRegionOptions []string
+	pendingFileWrite  fileWriteConfirmation
+	pendingQuit       bool
+	pendingQuitKey    string
+	editRegion        string
+	editType          ssm.ParameterType
+	regionCursor      int
+	typeCursor        int
+	typeReturnScreen  screen
 
 	columns      map[columnName]bool
 	columnCursor int
@@ -128,6 +139,9 @@ type model struct {
 	confirmPrompt   string
 	confirmExpected string
 	confirmItems    []inventory.Item
+
+	shortcutsFor       screen
+	pendingKeySequence string
 }
 
 // progressMsg is sent from the background status loader to update the loading screen with the current region/chunk.
@@ -157,7 +171,6 @@ type deleteDoneMsg struct {
 
 const (
 	columnIndex       columnName = "index"
-	columnStatus      columnName = "status"
 	columnRegion      columnName = "region"
 	columnDate        columnName = "date"
 	columnType        columnName = "type"
@@ -193,6 +206,7 @@ var (
 	tableHeaderBg    = lipgloss.Color("236")
 	searchPromptFg   = lipgloss.Color("81")
 	statusLineFg     = lipgloss.Color("244")
+	warningFg        = lipgloss.Color("214")
 	hotkeyFg         = lipgloss.Color("255")
 	titleStyle       = lipgloss.NewStyle().Bold(true).Foreground(frameColor)
 	labelStyle       = lipgloss.NewStyle().Foreground(labelFg)
@@ -204,6 +218,7 @@ var (
 	searchStyle      = lipgloss.NewStyle().Foreground(searchPromptFg)
 	errorStyle       = lipgloss.NewStyle().Foreground(errFg)
 	footerStyle      = lipgloss.NewStyle().Foreground(statusLineFg)
+	warningStyle     = lipgloss.NewStyle().Foreground(warningFg)
 	hotkeyStyle      = lipgloss.NewStyle().Bold(true).Foreground(hotkeyFg)
 )
 
@@ -245,13 +260,13 @@ func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
 		opts:          opts,
 		loadCh:        make(chan tea.Msg),
 		screen:        screenLoading,
+		shortcutsFor:  screenMain,
 		input:         input,
 		textArea:      area,
 		editPathInput: editPathInput,
 		editFileInput: editFileInput,
 		columns: map[columnName]bool{
 			columnIndex:       true,
-			columnStatus:      false,
 			columnRegion:      false,
 			columnDate:        false,
 			columnType:        false,
@@ -358,11 +373,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		key := msg.String()
+		if key == "ctrl+c" || key == "ctrl+q" {
+			if m.pendingQuit && m.pendingQuitKey == key {
+				return m, tea.Quit
+			}
+			m.message = ""
+			m.errMessage = ""
+			m.warningMessage = quitConfirmationMessage(key)
+			m.pendingQuit = true
+			m.pendingQuitKey = key
+			m.pendingFileWrite = fileWriteConfirmationNone
+			return m, nil
+		}
+		if !(m.pendingFileWrite != fileWriteConfirmationNone && key == "y") {
+			m.clearTransientStatus()
+		}
+
 		switch m.screen {
 		case screenMain:
 			return m.updateMain(msg)
-		case screenDetails:
-			return m.updateDetails(msg)
 		case screenInput:
 			return m.updateInput(msg)
 		case screenTextArea:
@@ -404,45 +434,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.screen {
 	case screenLoading:
-		return m.renderFullscreen(m.renderLoading(), m.renderFooter("q quit"))
+		return m.renderPage("? help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
-		footer := mainFooterText()
+		footer := mainFooterText(m.selectedExpanded)
 		if m.searchMode {
 			footer = searchFooterText()
 		}
-		return m.renderFullscreen(m.renderMainScreen(), m.renderFooter(footer))
-	case screenDetails:
-		return m.renderFullscreen(m.renderDetailsScreen(), m.renderFooter(detailsFooterText()))
+		return m.renderPage(footer, func(content model) string { return content.renderMainScreen() })
 	case screenInput:
-		return m.renderFullscreen(m.renderInputScreen(), m.renderFooter(m.inputFooterText()))
+		return m.renderPage(m.inputFooterText(), func(content model) string { return content.renderInputScreen() })
 	case screenTextArea:
-		return m.renderFullscreen(m.renderTextAreaScreen(), m.renderFooter(m.textAreaFooterText()))
+		return m.renderPage(m.textAreaFooterText(), func(content model) string { return content.renderTextAreaScreen() })
 	case screenColumns:
-		return m.renderFullscreen(m.renderColumnsScreen(), m.renderFooter("↑/ctrl+p up • ↓/ctrl+n down • tab next option • shift+tab previous option • space toggle • a show all • x hide all • q back"))
+		return m.renderPage("? help • space/enter toggle • a show all • x hide all • esc back", func(content model) string { return content.renderColumnsScreen() })
 	case screenRandom:
-		return m.renderFullscreen(m.renderRandomScreen(), m.renderFooter("↑/ctrl+p up • ↓/ctrl+n down • tab next option • shift+tab previous option • enter choose • q back"))
+		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderRandomScreen() })
 	case screenRandomPreview:
-		return m.renderFullscreen(m.renderRandomPreviewScreen(), m.renderFooter("ctrl+s/enter save • r regenerate • q back"))
+		return m.renderPage("? help • enter insert • r regenerate • esc back", func(content model) string { return content.renderRandomPreviewScreen() })
 	case screenConfirm:
-		return m.renderFullscreen(m.renderConfirmScreen(), m.renderFooter("enter confirm • esc/ctrl+g back"))
+		return m.renderPage("? help • enter confirm • esc back", func(content model) string { return content.renderConfirmScreen() })
 	case screenRegionSelect:
-		return m.renderFullscreen(m.renderRegionSelectScreen(), m.renderFooter("↑/ctrl+p up • ↓/ctrl+n down • tab next option • shift+tab previous option • enter choose • q back"))
+		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderRegionSelectScreen() })
 	case screenTypeSelect:
-		return m.renderFullscreen(m.renderTypeSelectScreen(), m.renderFooter("↑/ctrl+p up • ↓/ctrl+n down • tab next option • shift+tab previous option • enter choose • q back"))
+		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderTypeSelectScreen() })
 	case screenHelp:
-		return m.renderFullscreen(m.renderHelpScreen(), m.renderFooter("q back"))
+		return m.renderPage("esc back", func(content model) string { return content.renderHelpScreen() })
 	default:
 		return ""
 	}
+}
+
+func (m model) renderPage(footerText string, renderBody func(model) string) string {
+	bottom := m.renderFooterWithStatus(footerText)
+	content := m
+	if m.height > 0 {
+		content.height = max(1, m.height-countLines(bottom))
+	}
+	return m.renderFullscreen(renderBody(content), bottom)
 }
 
 // updateMain handles navigation and actions on the main parameter table.
 // It also owns search mode, where printable keys update the active filter instead of triggering table shortcuts.
 func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.message = ""
+	key := msg.String()
 	if m.searchMode {
-		switch msg.String() {
-		case "ctrl+g":
+		switch key {
+		case "?":
+			m.openShortcuts(screenMain)
+			return m, nil
+		case "esc", "ctrl+g":
 			m.searchMode = false
 			if m.searchInvalid {
 				m.query = m.effectiveQuery
@@ -469,103 +510,93 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "down", "ctrl+n", "j":
-		m.move(1)
-	case "up", "ctrl+p", "k":
-		m.move(-1)
-	case "ctrl+v", "pagedown":
-		m.move(pageSize(m.listBodyHeight()))
-	case "alt+v", "pageup":
-		m.move(-pageSize(m.listBodyHeight()))
-	case "home", "alt+<":
-		m.selected = 0
-	case "end", "alt+>":
-		vis := m.visible()
-		if len(vis) > 0 {
-			m.selected = len(vis) - 1
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.applyMainNavigation(action)
 		}
+		m.ensureSelection()
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.applyMainNavigation(action)
+		m.ensureSelection()
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+
+	switch key {
+	case "q", "esc":
+		return m, tea.Quit
 	case "enter", "ctrl+j":
-		m.detailsScroll = 0
-		m.screen = screenDetails
+		return m.startMultiline(screenMain)
 	case "/":
 		m.searchMode = true
 		m.query = m.effectiveQuery
 		m.searchInvalid = false
 	case "v":
 		m.revealValues = !m.revealValues
+	case "d":
+		m.selectedExpanded = !m.selectedExpanded
 	case "c":
 		m.columnCursor = 0
 		m.returnScreen = screenMain
 		m.screen = screenColumns
-	case "e":
-		return m.startMultiline(screenMain)
-	case "r":
-		m.returnScreen = screenMain
-		m.editRegion = m.initialEditRegion()
-		m.editType = m.initialEditType()
-		m.randomCursor = 0
-		m.screen = screenRandom
 	case "x":
 		m.startConfirm("Delete selected parameter?\n\nType DELETE to confirm:", "DELETE", []inventory.Item{m.currentItem()}, screenMain)
-	case "D":
+	case "X":
 		items := m.visibleItems()
 		if len(items) > 0 {
 			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?\n\nType DELETE ALL to confirm:", len(items)), "DELETE ALL", items, screenMain)
 		}
 	case "?":
-		m.screen = screenHelp
+		m.openShortcuts(screenMain)
 	}
 	m.ensureSelection()
 	return m, nil
 }
 
-// updateDetails handles scrolling and actions on the expanded selected-parameter view.
-func (m model) updateDetails(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	m.message = ""
-	switch msg.String() {
-	case "q", "esc", "ctrl+g":
-		m.screen = screenMain
-		return m, nil
-	case "down", "ctrl+n", "j":
-		m.detailsScroll++
-	case "up", "ctrl+p", "k":
-		m.detailsScroll = max(0, m.detailsScroll-1)
-	case "ctrl+v", "pagedown":
-		m.detailsScroll += pageSize(m.height - 8)
-	case "alt+v", "pageup":
-		m.detailsScroll = max(0, m.detailsScroll-pageSize(m.height-8))
-	case "v":
-		m.revealValues = !m.revealValues
-	case "e":
-		return m.startMultiline(screenDetails)
-	case "r":
-		m.returnScreen = screenDetails
-		m.editRegion = m.initialEditRegion()
-		m.editType = m.initialEditType()
-		m.randomCursor = 0
-		m.screen = screenRandom
-	case "x":
-		m.startConfirm("Delete selected parameter?\n\nType DELETE to confirm:", "DELETE", []inventory.Item{m.currentItem()}, screenDetails)
-	case "?":
-		m.screen = screenHelp
+func (m *model) applyMainNavigation(action navigationAction) {
+	switch action {
+	case navPrevious:
+		m.move(-1)
+	case navNext:
+		m.move(1)
+	case navPageUp:
+		m.move(-pageSize(m.listBodyHeight()))
+	case navPageDown:
+		m.move(pageSize(m.listBodyHeight()))
+	case navFirst:
+		m.selected = 0
+	case navLast:
+		vis := m.visible()
+		if len(vis) > 0 {
+			m.selected = len(vis) - 1
+		}
 	}
-	return m, nil
+}
+
+func (m *model) openShortcuts(from screen) {
+	m.shortcutsFor = from
+	m.screen = screenHelp
 }
 
 // updateInput handles single-line input screens used for custom random lengths and confirmation prompts.
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+g":
+	case "?":
+		m.openShortcuts(screenInput)
+		return m, nil
+	case "q", "esc", "ctrl+g":
 		m.input.Blur()
 		m.screen = m.returnScreen
 		return m, nil
 	case "ctrl+k":
 		m.input.SetValue("")
 		return m, nil
-	case "enter", "ctrl+s", "ctrl+o":
+	case "enter", "ctrl+s":
 		if m.inputMode == "random-custom" {
 			return m.generateRandom("base64-custom")
 		}
@@ -580,24 +611,29 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateTextArea handles the unified edit form: editable SSM path, region/type selectors, file path, multiline value, and save/file operations.
 func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	resetWriteConfirmation := func() {
-		m.confirmWriteSecure = false
+	resetFileConfirmation := func() {
+		m.pendingFileWrite = fileWriteConfirmationNone
+		m.warningMessage = ""
 	}
 
 	switch msg.String() {
-	case "esc", "ctrl+g":
+	case "?":
+		m.openShortcuts(screenTextArea)
+		return m, nil
+	case "q", "esc", "ctrl+g":
 		m.blurEditFields()
-		m.confirmWriteSecure = false
+		m.pendingFileWrite = fileWriteConfirmationNone
+		m.warningMessage = ""
 		m.screen = m.returnScreen
 		return m, nil
 	case "tab":
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		return m.focusNextEditField()
 	case "shift+tab":
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		return m.focusPreviousEditField()
 	case "enter", "ctrl+j":
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		switch m.editField {
 		case editFieldSSMPath, editFieldFilePath:
 			return m.focusNextEditField()
@@ -607,7 +643,7 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.startTypeSelect(screenTextArea)
 		}
 	case "ctrl+k":
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		switch m.editField {
 		case editFieldSSMPath:
 			m.editPathInput.SetValue("")
@@ -619,16 +655,33 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.message = ""
 		m.errMessage = ""
 		return m, nil
-	case "ctrl+o":
-		resetWriteConfirmation()
+	case "r":
+		resetFileConfirmation()
+		m.returnScreen = screenTextArea
+		m.randomCursor = 0
+		m.screen = screenRandom
+		return m, nil
+	case "ctrl+r":
+		resetFileConfirmation()
 		return m.loadValueFromFile()
 	case "ctrl+w":
-		return m.writeValueToFile()
+		return m.writeValueToFile(false, false)
+	case "y":
+		switch m.pendingFileWrite {
+		case fileWriteConfirmationSecure:
+			m.pendingFileWrite = fileWriteConfirmationNone
+			m.warningMessage = ""
+			return m.writeValueToFile(true, false)
+		case fileWriteConfirmationOverwrite:
+			m.pendingFileWrite = fileWriteConfirmationNone
+			m.warningMessage = ""
+			return m.writeValueToFile(true, true)
+		}
 	case "ctrl+v", "pagedown":
 		if m.editField != editFieldValue {
 			break
 		}
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		for i := 0; i < pageSize(m.textArea.Height()); i++ {
 			m.textArea.CursorDown()
 		}
@@ -637,13 +690,13 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.editField != editFieldValue {
 			break
 		}
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		for i := 0; i < pageSize(m.textArea.Height()); i++ {
 			m.textArea.CursorUp()
 		}
 		return m, nil
 	case "ctrl+s":
-		resetWriteConfirmation()
+		resetFileConfirmation()
 		return m.saveValue(m.textArea.Value())
 	}
 
@@ -656,7 +709,8 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case editFieldValue:
 		m.textArea, cmd = m.textArea.Update(msg)
 	}
-	m.confirmWriteSecure = false
+	m.pendingFileWrite = fileWriteConfirmationNone
+	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
 	return m, cmd
@@ -665,13 +719,26 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateColumns handles the column visibility picker and returns to the screen that opened it.
 func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cols := columnItems()
-	switch msg.String() {
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "?":
+		m.openShortcuts(screenColumns)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.returnScreen
-	case "down", "ctrl+n", "j", "tab":
-		m.columnCursor = min(len(cols)-1, m.columnCursor+1)
-	case "up", "ctrl+p", "k", "shift+tab":
-		m.columnCursor = max(0, m.columnCursor-1)
 	case " ", "enter":
 		key := cols[m.columnCursor]
 		m.columns[key] = !m.columns[key]
@@ -687,16 +754,51 @@ func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func cursorFromNavigation(cursor, length int, action navigationAction) int {
+	if length <= 0 {
+		return 0
+	}
+	switch action {
+	case navPrevious:
+		return previousCursor(cursor, length)
+	case navNext:
+		return nextCursor(cursor, length)
+	case navFirst:
+		return 0
+	case navLast:
+		return length - 1
+	case navPageUp:
+		return max(0, cursor-10)
+	case navPageDown:
+		return min(length-1, cursor+10)
+	default:
+		return cursor
+	}
+}
+
 // updateRandom handles the random-value generator menu and dispatches generation for the selected format.
 func (m model) updateRandom(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	items := randomItems()
-	switch msg.String() {
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.randomCursor = cursorFromNavigation(m.randomCursor, len(items), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.randomCursor = cursorFromNavigation(m.randomCursor, len(items), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "?":
+		m.openShortcuts(screenRandom)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.returnScreen
-	case "down", "ctrl+n", "j", "tab":
-		m.randomCursor = min(len(items)-1, m.randomCursor+1)
-	case "up", "ctrl+p", "k", "shift+tab":
-		m.randomCursor = max(0, m.randomCursor-1)
 	case "enter":
 		choice := items[m.randomCursor]
 		if choice.value == "base64-custom" {
@@ -710,12 +812,14 @@ func (m model) updateRandom(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateRandomPreview lets users save the generated value, regenerate it, or return to the generator menu.
 func (m model) updateRandomPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "?":
+		m.openShortcuts(screenRandomPreview)
 	case "q", "esc", "ctrl+g":
 		m.screen = screenRandom
 	case "r":
 		return m.generateRandom(m.inputMode)
 	case "enter", "ctrl+s":
-		return m.saveValue(m.generatedValue)
+		return m.insertGeneratedValue()
 	}
 	return m, nil
 }
@@ -723,7 +827,10 @@ func (m model) updateRandomPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateConfirm verifies a typed confirmation phrase before running destructive delete operations.
 func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "ctrl+g":
+	case "?":
+		m.openShortcuts(screenConfirm)
+		return m, nil
+	case "q", "esc", "ctrl+g":
 		m.screen = m.returnScreen
 		return m, nil
 	case "enter":
@@ -749,14 +856,27 @@ func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenTextArea
 		return m, nil
 	}
-	switch msg.String() {
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "?":
+		m.openShortcuts(screenRegionSelect)
 	case "q", "esc", "ctrl+g":
 		m.screen = screenTextArea
 		m = m.focusEditField(editFieldRegion)
-	case "down", "ctrl+n", "j", "tab":
-		m.regionCursor = min(len(regions)-1, m.regionCursor+1)
-	case "up", "ctrl+p", "k", "shift+tab":
-		m.regionCursor = max(0, m.regionCursor-1)
 	case "enter", "ctrl+j":
 		m.editRegion = regions[m.regionCursor]
 		m.screen = screenTextArea
@@ -773,16 +893,29 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = m.typeReturnScreen
 		return m, nil
 	}
-	switch msg.String() {
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "?":
+		m.openShortcuts(screenTypeSelect)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.typeReturnScreen
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
-	case "down", "ctrl+n", "j", "tab":
-		m.typeCursor = min(len(items)-1, m.typeCursor+1)
-	case "up", "ctrl+p", "k", "shift+tab":
-		m.typeCursor = max(0, m.typeCursor-1)
 	case "enter", "ctrl+j":
 		m.editType = items[m.typeCursor].value
 		m.screen = m.typeReturnScreen
@@ -797,16 +930,19 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
-		m.screen = screenMain
+		m.screen = m.shortcutsFor
 	}
 	return m, nil
 }
 
 // updateLoading handles shortcuts that must remain available while long SSM scans are running.
-// The footer advertises q quit on the loading screen, so q and ctrl+c both terminate the Bubble Tea program.
+// The footer advertises q quit on the loading screen, while ctrl+c is handled globally with confirmation.
 func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "ctrl+c":
+	case "?":
+		m.openShortcuts(screenLoading)
+		return m, nil
+	case "q", "esc":
 		return m, tea.Quit
 	}
 	return m, nil
@@ -844,7 +980,8 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editField = editFieldValue
 	m.editDirection = editDirectionNext
 	m.textArea.Focus()
-	m.confirmWriteSecure = false
+	m.pendingFileWrite = fileWriteConfirmationNone
+	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
 	m.screen = screenTextArea
@@ -960,48 +1097,83 @@ func (m model) regionSelectOptions() []string {
 func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
 	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
-		m.errMessage = "file path is required"
+		m.errMessage = "File path is required."
 		m.message = ""
+		m.warningMessage = ""
 		return m, nil
 	}
-	data, err := os.ReadFile(path)
+	expandedPath, err := expandLocalPath(path)
 	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
+		m.warningMessage = ""
+		return m, nil
+	}
+	data, err := os.ReadFile(expandedPath)
+	if err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		m.warningMessage = ""
 		return m, nil
 	}
 	m.textArea.SetValue(string(data))
 	m = m.focusEditField(editFieldValue)
 	m.errMessage = ""
+	m.warningMessage = ""
 	m.message = "Loaded value from " + path
 	return m, nil
 }
 
 // writeValueToFile writes the current multiline value to the path from the edit screen.
-// SecureString values require pressing ctrl+w twice to reduce the risk of accidentally writing a secret to disk.
-func (m model) writeValueToFile() (tea.Model, tea.Cmd) {
+// SecureString and overwrite operations require explicit y confirmation to reduce accidental local writes.
+func (m model) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.Model, tea.Cmd) {
 	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
-		m.errMessage = "file path is required"
+		m.errMessage = "File path is required."
 		m.message = ""
-		m.confirmWriteSecure = false
+		m.warningMessage = ""
+		m.pendingFileWrite = fileWriteConfirmationNone
 		return m, nil
 	}
-	if m.normalizedEditType() == ssm.ParameterTypeSecureString && !m.confirmWriteSecure {
-		m.errMessage = ""
-		m.message = "This is a SecureString value. Press ctrl+w again to write it to a local file."
-		m.confirmWriteSecure = true
-		return m, nil
-	}
-	if err := os.WriteFile(path, []byte(m.textArea.Value()), 0600); err != nil {
+	expandedPath, err := expandLocalPath(path)
+	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
-		m.confirmWriteSecure = false
+		m.warningMessage = ""
+		m.pendingFileWrite = fileWriteConfirmationNone
+		return m, nil
+	}
+	if m.normalizedEditType() == ssm.ParameterTypeSecureString && !secureConfirmed {
+		m.errMessage = ""
+		m.message = ""
+		m.warningMessage = `This is a SecureString value. Press "y" to write it to a local file.`
+		m.pendingFileWrite = fileWriteConfirmationSecure
+		return m, nil
+	}
+	if _, err := os.Stat(expandedPath); err == nil && !overwriteConfirmed {
+		m.errMessage = ""
+		m.message = ""
+		m.warningMessage = `File already exists. Press "y" to overwrite it.`
+		m.pendingFileWrite = fileWriteConfirmationOverwrite
+		return m, nil
+	} else if err != nil && !os.IsNotExist(err) {
+		m.errMessage = err.Error()
+		m.message = ""
+		m.warningMessage = ""
+		m.pendingFileWrite = fileWriteConfirmationNone
+		return m, nil
+	}
+	if err := os.WriteFile(expandedPath, []byte(m.textArea.Value()), 0600); err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		m.warningMessage = ""
+		m.pendingFileWrite = fileWriteConfirmationNone
 		return m, nil
 	}
 	m.errMessage = ""
+	m.warningMessage = ""
 	m.message = "Wrote value to " + path
-	m.confirmWriteSecure = false
+	m.pendingFileWrite = fileWriteConfirmationNone
 	return m, nil
 }
 
@@ -1055,6 +1227,17 @@ func (m model) generateRandom(kind string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) insertGeneratedValue() (tea.Model, tea.Cmd) {
+	m.textArea.SetValue(m.generatedValue)
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m = m.focusEditField(editFieldValue)
+	m.message = "Random value inserted. Press Ctrl-s to save."
+	m.errMessage = ""
+	m.warningMessage = ""
+	return m, nil
+}
+
 // saveValue captures the current item/region and switches to the loading screen while the save command runs.
 func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	item := m.currentItem()
@@ -1067,6 +1250,12 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		item.Path = newPath
+	}
+	if value == "" {
+		m.errMessage = "Value cannot be empty."
+		m.message = ""
+		m.warningMessage = ""
+		return m, nil
 	}
 	if m.editRegion != "" {
 		item.Region = m.editRegion
@@ -1116,28 +1305,10 @@ func deleteCmd(client ssm.Client, items []inventory.Item) tea.Cmd {
 // renderMainScreen composes the selected-parameter summary and the scrollable table of visible statuses.
 func (m model) renderMainScreen() string {
 	blocks := []string{
-		m.renderSelectedParameterBlock(false),
+		m.renderSelectedParameterBlock(m.selectedExpanded),
 		m.renderListBlock(),
 	}
-	if m.errMessage != "" {
-		blocks = append(blocks, "", m.applyErr(m.errMessage))
-	}
 	return strings.Join(blocks, "\n")
-}
-
-// renderDetailsScreen renders the expanded parameter metadata/value view and any contextual message or error.
-func (m model) renderDetailsScreen() string {
-	body := m.renderSelectedParameterBlock(true)
-	if m.detailText != "" {
-		body = m.renderBox("Help", strings.Split(m.detailText, "\n"), m.height-2)
-	}
-	if m.message != "" {
-		body += "\n\n" + m.muted(m.message)
-	}
-	if m.errMessage != "" {
-		body += "\n\n" + m.applyErr(m.errMessage)
-	}
-	return body
 }
 
 // renderInputScreen renders the single-line form used for direct values, file paths, and custom random byte counts.
@@ -1148,10 +1319,7 @@ func (m model) renderInputScreen() string {
 		"",
 		"  > " + m.input.View(),
 	}
-	if m.errMessage != "" {
-		lines = append(lines, "", "  "+m.applyErr(m.errMessage))
-	}
-	return m.renderBox(title, lines, m.height-2)
+	return m.renderBox(title, lines, m.height)
 }
 
 // renderTextAreaScreen renders the unified editor for multiline values plus editable metadata/file fields.
@@ -1167,22 +1335,57 @@ func (m model) renderTextAreaScreen() string {
 		m.label("Value:"),
 	}
 
-	textAreaLines := strings.Split(m.textArea.View(), "\n")
-	contentLines := promptLineCount(m.textArea.Value())
-	for i, line := range textAreaLines {
-		if i >= contentLines {
-			break
-		}
+	preferredHeight := m.textAreaBodyHeight()
+	innerHeight := max(1, preferredHeight-2)
+	maxValueRows := max(1, innerHeight-len(lines))
+
+	for _, line := range m.renderTextAreaValueLines(maxValueRows) {
 		lines = append(lines, "> "+line)
 	}
 
-	if m.message != "" {
-		lines = append(lines, "", "  "+m.muted(m.message))
+	return m.renderBox(title, lines, preferredHeight)
+}
+
+func (m model) renderTextAreaValueLines(maxRows int) []string {
+	maxRows = max(1, maxRows)
+	lineCount := max(1, m.textArea.LineCount())
+	valueLines := strings.Split(m.textArea.Value(), "\n")
+	for len(valueLines) < lineCount {
+		valueLines = append(valueLines, "")
 	}
-	if m.errMessage != "" {
-		lines = append(lines, "", "  "+m.applyErr(m.errMessage))
+	if len(valueLines) > lineCount {
+		valueLines = valueLines[:lineCount]
 	}
-	return m.renderBox(title, lines, m.height-2)
+
+	cursorLine := min(max(0, m.textArea.Line()), lineCount-1)
+	start := 0
+	if lineCount > maxRows {
+		start = min(max(0, cursorLine-maxRows+1), lineCount-maxRows)
+	}
+	end := min(lineCount, start+maxRows)
+
+	visible := make([]string, 0, end-start)
+	for i := start; i < end; i++ {
+		line := valueLines[i]
+		if m.editField == editFieldValue && m.textArea.Focused() && i == cursorLine {
+			line = withCursorMarker(line, m.textArea.LineInfo().CharOffset)
+		}
+		visible = append(visible, line)
+	}
+	return visible
+}
+
+func withCursorMarker(line string, offset int) string {
+	runes := []rune(line)
+	offset = min(max(0, offset), len(runes))
+	return string(runes[:offset]) + "█" + string(runes[offset:])
+}
+func (m model) textAreaBodyHeight() int {
+	if m.height <= 0 {
+		return max(8, m.height-2)
+	}
+	bodyHeight := m.height
+	return max(8, bodyHeight)
 }
 
 func (m model) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
@@ -1216,7 +1419,7 @@ func (m model) renderColumnsScreen() string {
 		}
 		lines = append(lines, "  "+row)
 	}
-	return m.renderBox("Columns", lines, m.height-2)
+	return m.renderBox("Columns", lines, m.height)
 }
 
 // renderRandomScreen renders the random-value generator menu.
@@ -1232,7 +1435,7 @@ func (m model) renderRandomScreen() string {
 		}
 		lines = append(lines, "  "+row)
 	}
-	return m.renderBox("Generate Random Value", lines, m.height-2)
+	return m.renderBox("Generate Random Value", lines, m.height)
 }
 
 // renderRandomPreviewScreen displays the generated value before the user saves it to SSM.
@@ -1244,7 +1447,7 @@ func (m model) renderRandomPreviewScreen() string {
 		"",
 		"  " + m.generatedValue,
 	}
-	return m.renderBox("Generated Value", lines, m.height-2)
+	return m.renderBox("Generated Value", lines, m.height)
 }
 
 // renderConfirmScreen renders the destructive-action confirmation prompt and input field.
@@ -1254,10 +1457,7 @@ func (m model) renderConfirmScreen() string {
 		lines = append(lines, "  "+line)
 	}
 	lines = append(lines, "", "  > "+m.input.View())
-	if m.errMessage != "" {
-		lines = append(lines, "", "  "+m.applyErr(m.errMessage))
-	}
-	return m.renderBox("Confirm", lines, m.height-2)
+	return m.renderBox("Confirm", lines, m.height)
 }
 
 // renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.
@@ -1276,7 +1476,7 @@ func (m model) renderRegionSelectScreen() string {
 		}
 		lines = append(lines, "  "+row)
 	}
-	return m.renderBox("Region", lines, m.height-2)
+	return m.renderBox("Region", lines, m.height)
 }
 
 // renderTypeSelectScreen renders the AWS SSM parameter type picker used by value editors.
@@ -1294,20 +1494,20 @@ func (m model) renderTypeSelectScreen() string {
 		}
 		lines = append(lines, "  "+row)
 	}
-	return m.renderBox("Parameter Type", lines, m.height-2)
+	return m.renderBox("Parameter Type", lines, m.height)
 }
 
 // renderHelpScreen renders the full shortcut reference.
 func (m model) renderHelpScreen() string {
 	lines := []string{}
-	for _, line := range strings.Split(helpText(), "\n") {
+	for _, line := range strings.Split(m.shortcutsText(), "\n") {
 		if line == "" {
 			lines = append(lines, "")
 			continue
 		}
 		lines = append(lines, "  "+line)
 	}
-	return m.renderBox("More", lines, m.height-2)
+	return m.renderBox("Shortcuts", lines, m.height)
 }
 
 // renderLoading renders current background-operation progress, including the region and paths currently being scanned.
@@ -1316,53 +1516,85 @@ func (m model) renderLoading() string {
 	for _, line := range m.loadingLines {
 		lines = append(lines, "  "+line)
 	}
-	return m.renderBox("Loading", lines, m.height-2)
+	return m.renderBox("Loading", lines, m.height)
 }
 
-// renderSelectedParameterBlock renders either the compact selected-parameter summary or the full details block.
-// SecureString values stay hidden until revealValues is enabled; String and StringList values are safe to show immediately.
+// renderSelectedParameterBlock renders the compact or expanded selected-parameter summary shown above the main table.
+// Missing parameters only have an expected path, so every field except Path is displayed as a dash.
 func (m model) renderSelectedParameterBlock(full bool) string {
 	st := m.currentStatus()
 	if st.Item.Path == "" {
 		return m.renderBox("Selected Parameter", []string{"No parameters found."}, 8)
 	}
 
-	value := m.displayValue(st, full)
-
-	fields := [][2]string{{"Path", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Status", m.statusText(st)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
-	if full {
-		fields = [][2]string{{"Path", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Status", m.statusText(st)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
-		if st.Error != "" {
-			fields = append(fields, [2]string{"Error", st.Error})
-		}
-	}
-
+	fields := m.selectedParameterFields(st, full)
 	labelWidth := 6
 	if full {
 		labelWidth = 11
 	}
 	lines := m.renderFieldPairs(fields, labelWidth)
-	maxHeight := len(lines) + 2
-	if full {
-		// Keep one fixed separator line before the footer so the hotkey line
-		// remains on the same terminal row as on the main screen.
-		maxHeight = max(8, m.height-2)
-		lines = sliceForScroll(lines, m.detailsScroll, maxHeight-2)
+	return m.renderBox("Selected Parameter", lines, len(lines)+2)
+}
+
+func (m model) selectedParameterFields(st Status, full bool) [][2]string {
+	if !st.Exists && st.Error == "" {
+		if full {
+			return [][2]string{{"Path", st.Item.Path}, {"Region", "-"}, {"Type", "-"}, {"Tier", "-"}, {"Version", "-"}, {"Len", "-"}, {"SHA256", "-"}, {"Description", "-"}, {"User", "-"}, {"Date", "-"}, {"Value", "-"}}
+		}
+		return [][2]string{{"Path", st.Item.Path}, {"Region", "-"}, {"Type", "-"}, {"Date", "-"}, {"Value", "-"}}
 	}
-	return m.renderBox("Selected Parameter", lines, maxHeight)
+
+	value := m.displayValue(st, full)
+	fields := [][2]string{{"Path", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
+	if full {
+		fields = [][2]string{{"Path", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
+		if st.Error != "" {
+			fields = append(fields, [2]string{"Error", st.Error})
+		}
+	}
+	return fields
 }
 
 // displayValue returns the user-facing value for selected blocks and VALUE table cells.
 // SecureString values are treated as sensitive and hidden until the user presses v; String/StringList are shown by default.
 func (m model) displayValue(st Status, full bool) string {
+	if st.Item.Path != "" && !st.Exists && st.Error == "" {
+		return "-"
+	}
 	if m.shouldHideValue(st) {
 		return "(hidden)"
 	}
-	value := valueOrDash(st.Value)
+	width := max(20, m.boxInnerWidth()-22)
 	if full {
-		return value
+		width = max(20, m.boxInnerWidth()-18)
 	}
-	return truncateInline(value, max(20, m.boxInnerWidth()-22))
+	return oneLineValuePreview(st.Value, width)
+}
+
+func oneLineValuePreview(value string, width int) string {
+	if value == "" {
+		return "-"
+	}
+	if width < 4 {
+		width = 4
+	}
+	normalized := strings.ReplaceAll(value, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	multiline := strings.Contains(normalized, "\n")
+	preview := strings.ReplaceAll(normalized, "\n", `\n`)
+	suffix := ""
+	if multiline {
+		suffix = "..."
+	}
+	available := width - len(suffix)
+	if available < 1 {
+		available = 1
+	}
+	runes := []rune(preview)
+	if len(runes) > available {
+		return string(runes[:available]) + "..."
+	}
+	return preview + suffix
 }
 
 func (m model) shouldHideValue(st Status) bool {
@@ -1398,10 +1630,6 @@ func (m model) renderListBlock() string {
 	}
 	for len(lines) < 2+bodyHeight {
 		lines = append(lines, "")
-	}
-
-	if m.message != "" {
-		lines = append(lines, "  "+m.muted(m.message))
 	}
 
 	if m.searchMode || m.effectiveQuery != "" {
@@ -1519,10 +1747,6 @@ func (m model) renderListRow(index int, st Status, selected bool, cols []tableCo
 	parts := make([]string, 0, len(cols))
 	for _, col := range cols {
 		value := m.tableCellValue(col.key, index, st)
-		if col.key == columnStatus && !selected {
-			parts = append(parts, padVisible(m.statusText(st), col.width))
-			continue
-		}
 		parts = append(parts, pad(truncateInline(value, col.width), col.width))
 	}
 	row := strings.Join(parts, "  ")
@@ -1568,8 +1792,6 @@ func (m model) tableCellValue(key columnName, index int, st Status) string {
 	switch key {
 	case columnIndex:
 		return strconv.Itoa(index)
-	case columnStatus:
-		return statusDisplayLabel(st)
 	case columnRegion:
 		return m.statusRegion(st)
 	case columnDate:
@@ -1636,9 +1858,10 @@ func (m model) renderBox(title string, lines []string, preferredHeight int) stri
 	top := m.boxTop(title, innerWidth)
 	bottom := m.boxBottom(innerWidth)
 
-	if preferredHeight < len(lines)+2 {
+	if preferredHeight <= 0 {
 		preferredHeight = len(lines) + 2
 	}
+	preferredHeight = max(3, preferredHeight)
 	innerHeight := max(1, preferredHeight-2)
 
 	out := []string{top}
@@ -1693,7 +1916,10 @@ func (m model) boxLine(content string, innerWidth int) string {
 }
 
 func (m model) inputFooterText() string {
-	return "ctrl+s save • ctrl+k clear • esc/ctrl+g back"
+	if m.inputMode == "random-custom" {
+		return "? help • enter generate • ctrl+k clear • esc back"
+	}
+	return "? help • ctrl+s save • ctrl+k clear • esc back"
 }
 
 // renderFooter formats the fixed bottom hotkey/status line.
@@ -1723,17 +1949,29 @@ func (m model) renderFullscreen(body, footer string) string {
 		}
 		return body + "\n" + footer
 	}
-	bodyLines := countLines(body)
-	footerLines := countLines(footer)
-	padLines := m.height - bodyLines - footerLines
-	if padLines < 0 {
-		padLines = 0
+
+	bodyLines := renderLines(body)
+	footerLines := renderLines(footer)
+	bodyHeight := max(0, m.height-len(footerLines))
+	if len(bodyLines) > bodyHeight {
+		bodyLines = bodyLines[:bodyHeight]
 	}
-	separator := strings.Repeat("\n", padLines)
-	if separator == "" {
-		separator = "\n"
+
+	padLines := max(0, m.height-len(bodyLines)-len(footerLines))
+	out := make([]string, 0, m.height)
+	out = append(out, bodyLines...)
+	for i := 0; i < padLines; i++ {
+		out = append(out, "")
 	}
-	return body + separator + footer
+	out = append(out, footerLines...)
+	return strings.Join(out, "\n")
+}
+
+func renderLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
 }
 
 func (m model) label(s string) string {
@@ -1810,6 +2048,92 @@ func (m model) applyErr(s string) string {
 		return s
 	}
 	return errorStyle.Render(s)
+}
+
+func (m model) applyWarning(s string) string {
+	if m.opts.NoColor {
+		return s
+	}
+	return warningStyle.Render(s)
+}
+
+func (m model) renderFooterWithStatus(text string) string {
+	footer := m.renderFooter(text)
+	status := m.renderStatusMessage()
+	if status == "" {
+		return strings.Join([]string{" ", footer, " "}, "\n")
+	}
+	return strings.Join([]string{" ", status, " ", footer, " "}, "\n")
+}
+
+func (m model) renderFooterWithFixedStatus(text string) string {
+	status := m.renderStatusMessage()
+	if status == "" {
+		status = " "
+	}
+	return strings.Join([]string{status, " ", m.renderFooter(text), " "}, "\n")
+}
+func quitConfirmationMessage(key string) string {
+	switch key {
+	case "ctrl+q":
+		return "Press Ctrl-q again to quit."
+	default:
+		return "Press Ctrl-c again to quit."
+	}
+}
+
+func (m model) renderStatusMessage() string {
+	switch {
+	case m.errMessage != "":
+		return m.applyErr(m.errMessage)
+	case m.warningMessage != "":
+		return m.applyWarning(m.warningMessage)
+	case m.message != "":
+		return m.muted(m.message)
+	default:
+		return ""
+	}
+}
+
+func (m *model) clearTransientStatus() {
+	m.message = ""
+	m.warningMessage = ""
+	m.errMessage = ""
+	m.pendingQuit = false
+	m.pendingQuitKey = ""
+	m.pendingFileWrite = fileWriteConfirmationNone
+}
+
+func nextCursor(current, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	return (current + 1) % count
+}
+
+func previousCursor(current, count int) int {
+	if count <= 0 {
+		return 0
+	}
+	return (current - 1 + count) % count
+}
+
+func expandLocalPath(path string) (string, error) {
+	if path == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return home, nil
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
+	}
+	return path, nil
 }
 
 func (m model) statusRegion(st Status) string {
@@ -1934,19 +2258,21 @@ func (m model) boxInnerWidth() int {
 }
 
 func (m model) listBlockHeight() int {
-	// Main page layout:
-	// selected parameter block + list block + footer.
-	selectedBlockHeight := 8
-	footerHeight := 2
-	return max(8, m.height-selectedBlockHeight-footerHeight)
+	// Main page content layout: selected parameter block + dynamic list block.
+	return max(8, m.height-m.selectedParameterBlockHeight())
+}
+
+func (m model) selectedParameterBlockHeight() int {
+	st := m.currentStatus()
+	if st.Item.Path == "" {
+		return 8
+	}
+	return len(m.renderFieldPairs(m.selectedParameterFields(st, m.selectedExpanded), 11)) + 2
 }
 
 func (m model) listBodyHeight() int {
-	// Top/bottom border + header + header divider + optional message/filter/search lines.
-	reserved := 5
-	if m.message != "" {
-		reserved++
-	}
+	// Top/bottom border + header + header divider + optional filter/search lines.
+	reserved := 4
 	if m.searchMode || m.effectiveQuery != "" {
 		reserved += 2
 	}
@@ -1998,7 +2324,6 @@ func sameItem(a, b inventory.Item) bool {
 func columnItems() []columnName {
 	return []columnName{
 		columnIndex,
-		columnStatus,
 		columnRegion,
 		columnDate,
 		columnType,
@@ -2028,8 +2353,6 @@ func columnLabel(c columnName) string {
 	switch c {
 	case columnIndex:
 		return "Index"
-	case columnStatus:
-		return "Status"
 	case columnRegion:
 		return "Region"
 	case columnDate:
@@ -2145,19 +2468,15 @@ func (m model) regionOptions() []string {
 
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (m model) textAreaFooterText() string {
-	common := "ctrl+s save • tab next field • shift+tab previous field"
-	suffix := " • esc/ctrl+g back"
+	common := "? help • ctrl+s save • r random • ctrl+r read file • ctrl+w write file"
+	suffix := " • esc back"
 	switch m.editField {
-	case editFieldValue:
-		return common + " • enter newline • ctrl+o load file • ctrl+w write file • ctrl+k clear" + suffix
-	case editFieldSSMPath:
-		return common + " • enter next field • ctrl+k clear" + suffix
 	case editFieldRegion:
-		return common + " • enter choose region" + suffix
+		return "? help • enter choose region • ctrl+s save • r random • ctrl+r read file • ctrl+w write file" + suffix
 	case editFieldType:
-		return common + " • enter choose type" + suffix
-	case editFieldFilePath:
-		return common + " • enter next field • ctrl+o load file • ctrl+w write file • ctrl+k clear" + suffix
+		return "? help • enter choose type • ctrl+s save • r random • ctrl+r read file • ctrl+w write file" + suffix
+	case editFieldSSMPath, editFieldFilePath, editFieldValue:
+		return common + " • ctrl+k clear" + suffix
 	default:
 		return common + suffix
 	}
@@ -2173,57 +2492,156 @@ func indexOf(values []string, value string) int {
 }
 
 // mainFooterText returns shortcuts for the main table screen.
-func mainFooterText() string {
-	return "↑/ctrl+p up • ↓/ctrl+n down • enter open • / search • v values • c columns • ? help • q quit"
+func mainFooterText(detailsShown bool) string {
+	detailsAction := "d show details"
+	if detailsShown {
+		detailsAction = "d hide details"
+	}
+	return "? help • enter edit • " + detailsAction + " • / search • c columns • x delete • X delete visible • esc quit"
 }
 
 func searchFooterText() string {
-	return "ctrl+g exit search"
+	return "? help • enter apply • esc cancel"
 }
 
-func detailsFooterText() string {
-	return "↑/ctrl+p scroll up • ↓/ctrl+n scroll down • e edit • r random • x delete • v values • q back"
+// shortcutsText returns the context-sensitive shortcut reference shown by the Shortcuts screen.
+func (m model) shortcutsText() string {
+	forScreen := m.shortcutsFor
+	if forScreen == 0 && m.screen == screenHelp {
+		forScreen = screenMain
+	}
+	sections := []string{m.actionsShortcuts(forScreen), m.navigationShortcuts(forScreen), globalShortcuts(forScreen)}
+	out := []string{}
+	for _, section := range sections {
+		section = strings.TrimSpace(section)
+		if section == "" {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, "")
+		}
+		out = append(out, strings.Split(section, "\n")...)
+	}
+	return strings.Join(out, "\n")
 }
 
-// helpText returns the multi-line shortcut reference shown by the help screen.
-func helpText() string {
-	return strings.TrimSpace(`Navigation:
-  ↑ / ctrl+p      previous
-  ↓ / ctrl+n      next
-  PgUp / alt+v    page up
-  PgDn / ctrl+v   page down
-  Home / alt+<    first
-  End / alt+>     last
+func (m model) actionsShortcuts(forScreen screen) string {
+	switch forScreen {
+	case screenMain:
+		return strings.TrimSpace(`Actions
+  enter        edit value
+  d            show/hide details
+  /            search
+  c            columns
+  x            delete selected value
+  X            delete visible/filtered values
+  v            reveal/hide values
+  esc / q      quit`)
+	case screenInput:
+		if m.inputMode == "random-custom" {
+			return strings.TrimSpace(`Actions
+  enter        generate random value
+  ctrl+k       clear input
+  esc / q      back`)
+		}
+		return strings.TrimSpace(`Actions
+  ctrl+s       save
+  enter        save
+  ctrl+k       clear input
+  esc / q      back`)
+	case screenTextArea:
+		return strings.TrimSpace(`Actions
+  ctrl+s       save
+  r            generate random value into Value
+  ctrl+r       read File path content into Value
+  ctrl+w       write Value to File path
+  ctrl+k       clear active text field
+  enter        newline in Value / choose Region or Type / next field in text inputs
+  y            confirm pending file write warning
+  esc / q / ctrl+g  back`)
+	case screenColumns:
+		return strings.TrimSpace(`Actions
+  space/enter  toggle column
+  a            show all columns
+  x            hide all optional columns
+  esc / q / ctrl+g  back`)
+	case screenRandom:
+		return strings.TrimSpace(`Actions
+  enter        choose generator
+  esc / q / ctrl+g  back`)
+	case screenRandomPreview:
+		return strings.TrimSpace(`Actions
+  enter        insert generated value into Value
+  r            regenerate
+  esc / q / ctrl+g  back`)
+	case screenConfirm:
+		return strings.TrimSpace(`Actions
+  enter        confirm
+  esc / q / ctrl+g  back`)
+	case screenRegionSelect, screenTypeSelect:
+		return strings.TrimSpace(`Actions
+  enter        choose option
+  esc / q / ctrl+g  back`)
+	case screenLoading:
+		return strings.TrimSpace(`Actions
+  esc / q      quit`)
+	default:
+		return strings.TrimSpace(`Actions
+  esc / q      back`)
+	}
+}
 
-View:
-  /               search
-  v               reveal/hide values
-  c               columns selector
-  ?               more
+func (m model) navigationShortcuts(forScreen screen) string {
+	if forScreen == screenMain || forScreen == screenColumns || forScreen == screenRandom || forScreen == screenRegionSelect || forScreen == screenTypeSelect {
+		if m.keymapStyle() == keymapVi {
+			return strings.TrimSpace(`Navigation
+  ↑ / k / shift+tab          previous row/option
+  ↓ / j / tab                next row/option
+  PgUp                       page up
+  PgDn                       page down
+  Home / gg                  first row/option
+  End / G                    last row/option`)
+		}
+		return strings.TrimSpace(`Navigation
+  ↑ / ctrl+p / shift+tab     previous row/option
+  ↓ / ctrl+n / tab           next row/option
+  PgUp / alt+v               page up
+  PgDn / ctrl+v              page down
+  Home / alt+<               first row/option
+  End / alt+>                last row/option`)
+	}
+	if forScreen == screenTextArea || forScreen == screenInput {
+		if m.keymapStyle() == keymapVi {
+			return strings.TrimSpace(`Navigation
+  tab                        next field
+  shift+tab                  previous field
+  arrows                     move cursor / rows
+  Home / End                 start/end of line
+  PgUp / PgDn                page in Value
 
-Actions:
-  e               edit value
-  r               generate random value
-  x               delete current value
-  D               delete visible/filtered values
+Vi note
+  Text fields keep insert-mode typing so h/j/k/l/w/b/x are not captured while editing text.`)
+		}
+		return strings.TrimSpace(`Navigation
+  tab                        next field
+  shift+tab                  previous field
+  ctrl+f / ctrl+b            forward/backward character
+  ctrl+p / ctrl+n            previous/next line
+  ctrl+a / ctrl+e            start/end of line
+  alt+f / alt+b              forward/backward word
+  alt+< / alt+>              start/end of text
+  ctrl+d                     delete current character
+  alt+d                      delete next word
+  alt+backspace              delete previous word`)
+	}
+	return ""
+}
 
-Edit form:
-  ctrl+s          save
-  tab             next field
-  shift+tab       previous field
-  enter           newline in Value; open Region/Type selector; next field in text inputs
-  ctrl+o          load File path content into Value
-  ctrl+w          write Value to File path
-  ctrl+k          clear active text field
-
-Selectors:
-  tab             next option
-  shift+tab       previous option
-  enter           choose option
-
-Exit:
-  q               quit on main page / back on sub-pages
-  ctrl+g / esc    back from input screens`)
+func globalShortcuts(forScreen screen) string {
+	return strings.TrimSpace(`Global
+  ?            open shortcuts
+  ctrl-c       press twice to quit
+  ctrl-q       press twice to quit`)
 }
 
 func promptLineCount(value string) int {
@@ -2250,6 +2668,17 @@ func countLines(s string) int {
 		return 0
 	}
 	return strings.Count(s, "\n") + 1
+}
+
+func firstLines(s string, maxLines int) string {
+	if s == "" || maxLines <= 0 {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n")
 }
 
 func indentBlock(s string, spaces int) string {
