@@ -51,7 +51,7 @@ func TestUpdateTypeSelectChangesEditTypeAndReturnsToEditor(t *testing.T) {
 
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, ssm.ParameterTypeString, m.editType)
-	assert.Equal(t, editFieldFilePath, m.editField)
+	assert.Equal(t, editFieldType, m.editField)
 }
 
 func TestSaveValueCmdWritesSelectedParameterType(t *testing.T) {
@@ -108,19 +108,61 @@ func TestStartMultilineInitializesEditableFields(t *testing.T) {
 	assert.Equal(t, "hello", actual.textArea.Value())
 }
 
-func TestUpdateTextAreaCyclesThroughEditableFields(t *testing.T) {
-	m := newModel(nil, nil, Options{})
+func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
+	m := newModel(fakeSSMClient{regions: []string{"eu-north-1", "us-east-1"}}, nil, Options{Region: "eu-north-1"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
+	m.editRegion = "eu-north-1"
 	m.textArea.Focus()
 
-	for _, expected := range []editField{editFieldSSMPath, editFieldRegion, editFieldType, editFieldFilePath, editFieldValue} {
-		updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
-		m = updated.(model)
-		assert.Equal(t, expected, m.editField)
-	}
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, editFieldSSMPath, m.editField)
 
-	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, editFieldRegion, m.editField)
+	assert.Empty(t, m.editRegionOptions)
+	assert.Contains(t, m.renderTextAreaScreen(), "eu-north-1 ⌵")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenRegionSelect, m.screen)
+	assert.Equal(t, editFieldRegion, m.editField)
+	assert.Equal(t, []string{"eu-north-1", "us-east-1"}, m.editRegionOptions)
+
+	updated, _ = m.updateRegionSelect(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, editFieldRegion, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, editFieldType, m.editField)
+	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditType().String()+" ⌵")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTypeSelect, m.screen)
+	assert.Equal(t, editFieldType, m.editField)
+
+	updated, _ = m.updateTypeSelect(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, editFieldType, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, editFieldFilePath, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, editFieldValue, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
 	assert.Equal(t, editFieldFilePath, m.editField)
 }
@@ -214,6 +256,42 @@ func TestRenderTextAreaScreenShowsAlignedSSMAndFilePath(t *testing.T) {
 	assert.Contains(t, view, "Value:")
 }
 
+func TestRenderTextAreaScreenDoesNotIndentValueWhenFilePathFocused(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldFilePath
+	m.editType = ssm.ParameterTypeString
+	m.editRegion = "eu-north-1"
+	m.editPathInput.SetValue("/app/value")
+	m.editFileInput.Focus()
+	m.textArea.SetValue("test-value")
+
+	view := m.renderTextAreaScreen()
+
+	assert.Contains(t, view, "Value:")
+	assert.Contains(t, view, "> test-value")
+	assert.False(t, strings.Contains(view, "\n   > test-value"))
+}
+
+func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Region: "eu-central-1"})
+	m.width = 120
+	m.height = 30
+	m.screen = screenRegionSelect
+	m.editRegion = "eu-central-1"
+	m.editRegionOptions = []string{"eu-central-1", "us-east-1", "ap-southeast-1"}
+	m.regionCursor = 1
+
+	view := m.renderRegionSelectScreen()
+
+	assert.Contains(t, view, "eu-central-1")
+	assert.Contains(t, view, "us-east-1")
+	assert.Contains(t, view, "ap-southeast-1")
+	assert.Contains(t, view, "| us-east-1")
+}
+
 func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
 	m := model{statuses: []Status{
 		{Item: inventory.Item{Path: "/old/path", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "eu"},
@@ -228,15 +306,39 @@ func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
 	assert.Equal(t, "updated", m.statuses[1].Value)
 }
 
-func TestTextAreaFooterUsesStableColonSeparatedHotkeys(t *testing.T) {
+func TestOptionSelectorsSupportTabNavigation(t *testing.T) {
 	m := newModel(nil, nil, Options{})
-	m.editField = editFieldRegion
+	m.editRegionOptions = []string{"eu-central-1", "us-east-1", "ap-southeast-1"}
+	m.regionCursor = 0
+
+	updated, _ := m.updateRegionSelect(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, 1, m.regionCursor)
+
+	updated, _ = m.updateRegionSelect(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(model)
+	assert.Equal(t, 0, m.regionCursor)
+
+	m.typeCursor = 0
+	updated, _ = m.updateTypeSelect(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, 1, m.typeCursor)
+
+	updated, _ = m.updateTypeSelect(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(model)
+	assert.Equal(t, 0, m.typeCursor)
+}
+
+func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.editField = editFieldValue
 
 	footer := m.textAreaFooterText()
 
-	assert.Contains(t, footer, "ctrl+s: save • tab: next field • shift+tab: previous field")
-	assert.Contains(t, footer, "enter: choose region")
+	assert.Contains(t, footer, "ctrl+s save • tab next field • shift+tab previous field")
+	assert.Contains(t, footer, "enter newline")
 	assert.False(t, strings.Contains(footer, "save AWS"))
 	assert.False(t, strings.Contains(footer, "ctrl+r"))
 	assert.False(t, strings.Contains(footer, "ctrl+t"))
+	assert.False(t, strings.Contains(footer, ":"))
 }
