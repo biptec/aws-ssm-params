@@ -217,8 +217,9 @@ Inside the TUI:
 - Use `↑` / `↓` to move.
 - Press `Enter` to see details.
 - Press `e` to edit a value.
+- Press `Tab` / `Shift+Tab` inside the editor to move between editable fields.
+- Press `Enter` inside the editor to choose `Region`/`Type`, move from single-line fields, or add a new line inside `Value`.
 - Press `r` to generate a random value.
-- Press `Ctrl-t` in an editor/preview to choose `String`, `StringList`, or `SecureString`.
 - Press `v` to reveal/hide cached value previews.
 - Press `/` to search.
 - Press `q` to quit.
@@ -329,50 +330,50 @@ ERROR    AWS CLI/API error while reading the parameter.
 ### Main shortcuts
 
 ```text
-↑ / C-p        Previous row
-↓ / C-n        Next row
-PgUp / M-v     Page up
-PgDn / C-v     Page down
-Home / M-<     First row
-End / M->      Last row
-Enter / C-j    Open details
-/              Search
-Ctrl-g         Exit search input
-v              Reveal/hide cached value previews
-c              Choose visible columns
-e              Edit value
-f              Open value from file
-r              Generate random value
-x              Delete selected value
-D              Delete all visible/filtered values
-q              Quit
-?              Help
+↑ / ctrl+p:      previous row
+↓ / ctrl+n:      next row
+PgUp / alt+v:    page up
+PgDn / ctrl+v:   page down
+Home / alt+<:    first row
+End / alt+>:     last row
+enter / ctrl+j:  open details
+/:               search
+ctrl+g:          exit search
+v:               reveal/hide cached value previews
+c:               choose visible columns
+e:               edit value
+r:               generate random value
+x:               delete selected value
+D:               delete all visible/filtered values
+q:               quit
+?:               help
 ```
 
 ### Details shortcuts
 
 ```text
-↑ / C-p        Scroll up
-↓ / C-n        Scroll down
-PgUp / M-v     Page up
-PgDn / C-v     Page down
-e              Edit value
-f              Open value from file
-r              Generate random value
-x              Delete selected value
-v              Reveal/hide cached value previews
-q              Back
+↑ / ctrl+p:      scroll up
+↓ / ctrl+n:      scroll down
+PgUp / alt+v:    page up
+PgDn / ctrl+v:   page down
+e:               edit value
+r:               generate random value
+x:               delete selected value
+v:               reveal/hide cached value previews
+q:               back
 ```
 
 ### Editor shortcuts
 
 ```text
-Ctrl-s         Save
-Ctrl-g / Esc   Cancel
-Ctrl-r         Choose target region when editing wildcard/all-region items
-Ctrl-t         Choose SSM parameter type
-Ctrl-v         Page down
-M-v            Page up
+ctrl+s:          save
+tab:             next field
+shift+tab:       previous field
+enter:           newline in Value; choose/select Region or Type; next field in text inputs
+ctrl+o:          load File path content into Value
+ctrl+w:          write Value to File path
+ctrl+k:          clear active text field
+esc / ctrl+g:    back
 ```
 
 Plain `q` can be typed into values and file paths on input screens. The `q` shortcut only acts as quit/back on screens where the footer says it does.

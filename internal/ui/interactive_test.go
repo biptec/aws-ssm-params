@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -36,7 +37,10 @@ func TestStartMultilinePreservesExistingParameterType(t *testing.T) {
 }
 
 func TestUpdateTypeSelectChangesEditTypeAndReturnsToEditor(t *testing.T) {
-	m := model{screen: screenTextArea, editType: ssm.ParameterTypeSecureString}
+	m := newModel(nil, nil, Options{})
+	m.screen = screenTextArea
+	m.editType = ssm.ParameterTypeSecureString
+	m.editField = editFieldType
 	updated, _ := m.startTypeSelect(screenTextArea)
 	m = updated.(model)
 
@@ -47,13 +51,14 @@ func TestUpdateTypeSelectChangesEditTypeAndReturnsToEditor(t *testing.T) {
 
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, ssm.ParameterTypeString, m.editType)
+	assert.Equal(t, editFieldFilePath, m.editField)
 }
 
 func TestSaveValueCmdWritesSelectedParameterType(t *testing.T) {
 	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
 	item := inventory.Item{Path: "/app/hosts", Region: "eu-north-1"}
 
-	msg := saveValueCmd(client, item, "api.example.com,www.example.com", ssm.ParameterTypeStringList)()
+	msg := saveValueCmd(client, item, item.Path, "api.example.com,www.example.com", ssm.ParameterTypeStringList)()
 
 	updated, ok := msg.(statusUpdatedMsg)
 	require.True(t, ok)
@@ -87,7 +92,7 @@ func TestDisplayValueOnlyHidesSecureStringByDefault(t *testing.T) {
 	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
 }
 
-func TestStartMultilineInitializesFilePathField(t *testing.T) {
+func TestStartMultilineInitializesEditableFields(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "hello"}}
 
@@ -95,26 +100,29 @@ func TestStartMultilineInitializesFilePathField(t *testing.T) {
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
-	assert.False(t, actual.editFileFocused)
-	assert.Equal(t, "", actual.input.Value())
-	assert.Equal(t, "Path to file", actual.input.Placeholder)
+	assert.Equal(t, editFieldValue, actual.editField)
+	assert.Equal(t, "/app/value", actual.editPathInput.Value())
+	assert.Equal(t, "", actual.editPathInput.Placeholder)
+	assert.Equal(t, "", actual.editFileInput.Value())
+	assert.Equal(t, "", actual.editFileInput.Placeholder)
 	assert.Equal(t, "hello", actual.textArea.Value())
 }
 
-func TestUpdateTextAreaTogglesBetweenValueAndFilePath(t *testing.T) {
+func TestUpdateTextAreaCyclesThroughEditableFields(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	m.screen = screenTextArea
+	m.editField = editFieldValue
 	m.textArea.Focus()
 
-	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	for _, expected := range []editField{editFieldSSMPath, editFieldRegion, editFieldType, editFieldFilePath, editFieldValue} {
+		updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+		m = updated.(model)
+		assert.Equal(t, expected, m.editField)
+	}
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
-
-	assert.True(t, m.editFileFocused)
-
-	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
-	m = updated.(model)
-
-	assert.False(t, m.editFileFocused)
+	assert.Equal(t, editFieldFilePath, m.editField)
 }
 
 func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
@@ -122,7 +130,7 @@ func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0600))
 	m.screen = screenTextArea
-	m.input.SetValue(path)
+	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("old")
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
@@ -132,7 +140,7 @@ func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
 	assert.Equal(t, "from-file\nsecond-line", actual.textArea.Value())
 	assert.Equal(t, "Loaded value from "+path, actual.message)
 	assert.Empty(t, actual.errMessage)
-	assert.False(t, actual.editFileFocused)
+	assert.Equal(t, editFieldValue, actual.editField)
 }
 
 func TestUpdateTextAreaWritesNonSecureValueToFile(t *testing.T) {
@@ -140,7 +148,7 @@ func TestUpdateTextAreaWritesNonSecureValueToFile(t *testing.T) {
 	path := t.TempDir() + "/value.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
-	m.input.SetValue(path)
+	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("plain-value")
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
@@ -159,7 +167,7 @@ func TestUpdateTextAreaRequiresSecondCtrlWForSecureStringFileWrite(t *testing.T)
 	path := t.TempDir() + "/secret.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeSecureString
-	m.input.SetValue(path)
+	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("secret-value")
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
@@ -195,7 +203,7 @@ func TestRenderTextAreaScreenShowsAlignedSSMAndFilePath(t *testing.T) {
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}}
 	updated, _ := m.startMultiline(screenMain)
 	m = updated.(model)
-	m.input.SetValue("/tmp/value.txt")
+	m.editFileInput.SetValue("/tmp/value.txt")
 
 	view := m.renderTextAreaScreen()
 
@@ -204,4 +212,31 @@ func TestRenderTextAreaScreenShowsAlignedSSMAndFilePath(t *testing.T) {
 	assert.Contains(t, view, "Type:      SecureString")
 	assert.Contains(t, view, "File path: /tmp/value.txt")
 	assert.Contains(t, view, "Value:")
+}
+
+func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
+	m := model{statuses: []Status{
+		{Item: inventory.Item{Path: "/old/path", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "eu"},
+		{Item: inventory.Item{Path: "/old/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "us"},
+	}}
+
+	m.replaceStatus("/old/path", Status{Item: inventory.Item{Path: "/new/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
+
+	assert.Equal(t, "/old/path", m.statuses[0].Item.Path)
+	assert.Equal(t, "eu", m.statuses[0].Value)
+	assert.Equal(t, "/new/path", m.statuses[1].Item.Path)
+	assert.Equal(t, "updated", m.statuses[1].Value)
+}
+
+func TestTextAreaFooterUsesStableColonSeparatedHotkeys(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.editField = editFieldRegion
+
+	footer := m.textAreaFooterText()
+
+	assert.Contains(t, footer, "ctrl+s: save • tab: next field • shift+tab: previous field")
+	assert.Contains(t, footer, "enter: choose region")
+	assert.False(t, strings.Contains(footer, "save AWS"))
+	assert.False(t, strings.Contains(footer, "ctrl+r"))
+	assert.False(t, strings.Contains(footer, "ctrl+t"))
 }

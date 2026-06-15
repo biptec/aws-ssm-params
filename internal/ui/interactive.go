@@ -44,6 +44,16 @@ const (
 	screenHelp
 )
 
+type editField int
+
+const (
+	editFieldValue editField = iota
+	editFieldSSMPath
+	editFieldRegion
+	editFieldType
+	editFieldFilePath
+)
+
 type columnName string
 
 type actionItem struct{ label, value string }
@@ -89,9 +99,11 @@ type model struct {
 
 	input              textinput.Model
 	textArea           textarea.Model
+	editPathInput      textinput.Model
+	editFileInput      textinput.Model
 	inputMode          string
 	generatedValue     string
-	editFileFocused    bool
+	editField          editField
 	confirmWriteSecure bool
 	editRegion         string
 	editType           ssm.ParameterType
@@ -122,6 +134,7 @@ type loadedMsg []Status
 // statusUpdatedMsg reports the result of saving one parameter value from an edit screen.
 type statusUpdatedMsg struct {
 	path    string
+	oldPath string
 	status  Status
 	message string
 	err     error
@@ -200,19 +213,31 @@ func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
 	input.CharLimit = 0
 	input.Width = 80
 
+	editPathInput := textinput.New()
+	editPathInput.Prompt = ""
+	editPathInput.CharLimit = 0
+	editPathInput.Width = 80
+
+	editFileInput := textinput.New()
+	editFileInput.Prompt = ""
+	editFileInput.CharLimit = 0
+	editFileInput.Width = 80
+
 	area := textarea.New()
 	area.Prompt = ""
 	area.CharLimit = 0
 	area.ShowLineNumbers = false
 
 	return model{
-		client:   client,
-		items:    items,
-		opts:     opts,
-		loadCh:   make(chan tea.Msg),
-		screen:   screenLoading,
-		input:    input,
-		textArea: area,
+		client:        client,
+		items:         items,
+		opts:          opts,
+		loadCh:        make(chan tea.Msg),
+		screen:        screenLoading,
+		input:         input,
+		textArea:      area,
+		editPathInput: editPathInput,
+		editFileInput: editFileInput,
 		columns: map[columnName]bool{
 			columnIndex:       true,
 			columnStatus:      false,
@@ -266,6 +291,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.Width = max(20, msg.Width-12)
+		m.editPathInput.Width = max(20, msg.Width-18)
+		m.editFileInput.Width = max(20, msg.Width-18)
 		m.textArea.SetWidth(max(20, msg.Width-14))
 		m.textArea.SetHeight(max(8, msg.Height-10))
 		return m, nil
@@ -294,7 +321,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = m.returnScreen
 			return m, nil
 		}
-		m.replaceStatus(msg.path, msg.status)
+		matchPath := msg.oldPath
+		if matchPath == "" {
+			matchPath = msg.path
+		}
+		m.replaceStatus(matchPath, msg.status)
 		m.message = msg.message
 		m.errMessage = ""
 		m.screen = m.returnScreen
@@ -362,7 +393,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.screen {
 	case screenLoading:
-		return m.renderFullscreen(m.renderLoading(), m.renderFooter("q quit"))
+		return m.renderFullscreen(m.renderLoading(), m.renderFooter("q: quit"))
 	case screenMain:
 		footer := mainFooterText()
 		if m.searchMode {
@@ -376,19 +407,19 @@ func (m model) View() string {
 	case screenTextArea:
 		return m.renderFullscreen(m.renderTextAreaScreen(), m.renderFooter(m.textAreaFooterText()))
 	case screenColumns:
-		return m.renderFullscreen(m.renderColumnsScreen(), m.renderFooter("↑/C-p up • ↓/C-n down • space toggle • a show all • x hide all • q back"))
+		return m.renderFullscreen(m.renderColumnsScreen(), m.renderFooter("↑/ctrl+p: up • ↓/ctrl+n: down • space: toggle • a: show all • x: hide all • q: back"))
 	case screenRandom:
-		return m.renderFullscreen(m.renderRandomScreen(), m.renderFooter("↑/C-p up • ↓/C-n down • enter choose • q back"))
+		return m.renderFullscreen(m.renderRandomScreen(), m.renderFooter("↑/ctrl+p: up • ↓/ctrl+n: down • enter: choose • q: back"))
 	case screenRandomPreview:
-		return m.renderFullscreen(m.renderRandomPreviewScreen(), m.renderFooter("ctrl+s save • ctrl+t type • r regenerate • q back"))
+		return m.renderFullscreen(m.renderRandomPreviewScreen(), m.renderFooter("ctrl+s/enter: save • r: regenerate • q: back"))
 	case screenConfirm:
-		return m.renderFullscreen(m.renderConfirmScreen(), m.renderFooter("type confirmation phrase • enter confirm • ctrl-g back"))
+		return m.renderFullscreen(m.renderConfirmScreen(), m.renderFooter("enter: confirm • esc/ctrl+g: back"))
 	case screenRegionSelect:
-		return m.renderFullscreen(m.renderRegionSelectScreen(), m.renderFooter("↑/C-p up • ↓/C-n down • enter choose • q back"))
+		return m.renderFullscreen(m.renderRegionSelectScreen(), m.renderFooter("↑/ctrl+p: up • ↓/ctrl+n: down • enter: choose • q: back"))
 	case screenTypeSelect:
-		return m.renderFullscreen(m.renderTypeSelectScreen(), m.renderFooter("↑/C-p up • ↓/C-n down • enter choose • q back"))
+		return m.renderFullscreen(m.renderTypeSelectScreen(), m.renderFooter("↑/ctrl+p: up • ↓/ctrl+n: down • enter: choose • q: back"))
 	case screenHelp:
-		return m.renderFullscreen(m.renderHelpScreen(), m.renderFooter("q back"))
+		return m.renderFullscreen(m.renderHelpScreen(), m.renderFooter("q: back"))
 	default:
 		return ""
 	}
@@ -536,30 +567,42 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateTextArea handles multiline editing, file import/export, paging, region selection, and saving edited parameter values.
+// updateTextArea handles the unified edit form: editable SSM path, region/type selectors, file path, multiline value, and save/file operations.
 func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Any key other than the second ctrl+w confirmation should cancel the pending
-	// SecureString-to-file confirmation, so an accidental later write is not accepted.
 	resetWriteConfirmation := func() {
 		m.confirmWriteSecure = false
 	}
 
 	switch msg.String() {
 	case "esc", "ctrl+g":
-		m.textArea.Blur()
-		m.input.Blur()
-		m.editFileFocused = false
+		m.blurEditFields()
 		m.confirmWriteSecure = false
 		m.screen = m.returnScreen
 		return m, nil
 	case "tab":
 		resetWriteConfirmation()
-		return m.toggleEditFocus(), nil
+		return m.focusNextEditField(), nil
+	case "shift+tab":
+		resetWriteConfirmation()
+		return m.focusPreviousEditField(), nil
+	case "enter", "ctrl+j":
+		resetWriteConfirmation()
+		switch m.editField {
+		case editFieldSSMPath, editFieldFilePath:
+			return m.focusNextEditField(), nil
+		case editFieldRegion:
+			return m.openRegionSelect()
+		case editFieldType:
+			return m.startTypeSelect(screenTextArea)
+		}
 	case "ctrl+k":
 		resetWriteConfirmation()
-		if m.editFileFocused {
-			m.input.SetValue("")
-		} else {
+		switch m.editField {
+		case editFieldSSMPath:
+			m.editPathInput.SetValue("")
+		case editFieldFilePath:
+			m.editFileInput.SetValue("")
+		case editFieldValue:
 			m.textArea.SetValue("")
 		}
 		m.message = ""
@@ -571,7 +614,7 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+w":
 		return m.writeValueToFile()
 	case "ctrl+v", "pagedown":
-		if m.editFileFocused {
+		if m.editField != editFieldValue {
 			break
 		}
 		resetWriteConfirmation()
@@ -580,7 +623,7 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "alt+v", "pageup":
-		if m.editFileFocused {
+		if m.editField != editFieldValue {
 			break
 		}
 		resetWriteConfirmation()
@@ -588,27 +631,18 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.textArea.CursorUp()
 		}
 		return m, nil
-	case "ctrl+r":
-		resetWriteConfirmation()
-		regions := m.regionOptions()
-		if len(regions) == 0 {
-			return m, nil
-		}
-		m.regionCursor = indexOf(regions, m.editRegion)
-		m.screen = screenRegionSelect
-		return m, nil
-	case "ctrl+t":
-		resetWriteConfirmation()
-		return m.startTypeSelect(screenTextArea)
 	case "ctrl+s":
 		resetWriteConfirmation()
 		return m.saveValue(m.textArea.Value())
 	}
 
 	var cmd tea.Cmd
-	if m.editFileFocused {
-		m.input, cmd = m.input.Update(msg)
-	} else {
+	switch m.editField {
+	case editFieldSSMPath:
+		m.editPathInput, cmd = m.editPathInput.Update(msg)
+	case editFieldFilePath:
+		m.editFileInput, cmd = m.editFileInput.Update(msg)
+	case editFieldValue:
 		m.textArea, cmd = m.textArea.Update(msg)
 	}
 	m.confirmWriteSecure = false
@@ -669,8 +703,6 @@ func (m model) updateRandomPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenRandom
 	case "r":
 		return m.generateRandom(m.inputMode)
-	case "ctrl+t":
-		return m.startTypeSelect(screenRandomPreview)
 	case "enter", "ctrl+s":
 		return m.saveValue(m.generatedValue)
 	}
@@ -709,6 +741,7 @@ func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+g":
 		m.screen = screenTextArea
+		m = m.focusEditField(editFieldRegion)
 	case "down", "ctrl+n", "j":
 		m.regionCursor = min(len(regions)-1, m.regionCursor+1)
 	case "up", "ctrl+p", "k":
@@ -716,6 +749,7 @@ func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "ctrl+j":
 		m.editRegion = regions[m.regionCursor]
 		m.screen = screenTextArea
+		m = m.focusEditField(editFieldType)
 	}
 	return m, nil
 }
@@ -731,6 +765,9 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+g":
 		m.screen = m.typeReturnScreen
+		if m.typeReturnScreen == screenTextArea {
+			m = m.focusEditField(editFieldType)
+		}
 	case "down", "ctrl+n", "j":
 		m.typeCursor = min(len(items)-1, m.typeCursor+1)
 	case "up", "ctrl+p", "k":
@@ -738,6 +775,9 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", "ctrl+j":
 		m.editType = items[m.typeCursor].value
 		m.screen = m.typeReturnScreen
+		if m.typeReturnScreen == screenTextArea {
+			m = m.focusEditField(editFieldFilePath)
+		}
 	}
 	return m, nil
 }
@@ -784,11 +824,14 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editRegion = m.initialEditRegion()
 	m.editType = m.initialEditType()
 	m.textArea.SetValue(m.currentStatus().Value)
+	m.editPathInput.SetValue(m.currentItem().Path)
+	m.editPathInput.Placeholder = ""
+	m.editPathInput.Blur()
+	m.editFileInput.SetValue("")
+	m.editFileInput.Placeholder = ""
+	m.editFileInput.Blur()
+	m.editField = editFieldValue
 	m.textArea.Focus()
-	m.input.SetValue("")
-	m.input.Placeholder = "Path to file"
-	m.input.Blur()
-	m.editFileFocused = false
 	m.confirmWriteSecure = false
 	m.message = ""
 	m.errMessage = ""
@@ -796,14 +839,16 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// toggleEditFocus switches the edit screen between the multiline value editor and the file-path input.
-func (m model) toggleEditFocus() model {
-	m.editFileFocused = !m.editFileFocused
-	if m.editFileFocused {
-		m.textArea.Blur()
-		m.input.Focus()
-	} else {
-		m.input.Blur()
+// focusEditField moves the edit-screen focus to one field and focuses/blurs the underlying input widgets.
+func (m model) focusEditField(field editField) model {
+	m.blurEditFields()
+	m.editField = field
+	switch field {
+	case editFieldSSMPath:
+		m.editPathInput.Focus()
+	case editFieldFilePath:
+		m.editFileInput.Focus()
+	case editFieldValue:
 		m.textArea.Focus()
 	}
 	m.message = ""
@@ -811,9 +856,67 @@ func (m model) toggleEditFocus() model {
 	return m
 }
 
+// blurEditFields removes focus from all concrete input widgets used by the edit screen.
+func (m *model) blurEditFields() {
+	m.textArea.Blur()
+	m.editPathInput.Blur()
+	m.editFileInput.Blur()
+}
+
+// focusNextEditField advances the edit-screen focus in the visual field order.
+func (m model) focusNextEditField() model {
+	return m.focusEditField(nextEditField(m.editField))
+}
+
+// focusPreviousEditField moves the edit-screen focus backwards in the visual field order.
+func (m model) focusPreviousEditField() model {
+	return m.focusEditField(previousEditField(m.editField))
+}
+
+func nextEditField(field editField) editField {
+	switch field {
+	case editFieldValue:
+		return editFieldSSMPath
+	case editFieldSSMPath:
+		return editFieldRegion
+	case editFieldRegion:
+		return editFieldType
+	case editFieldType:
+		return editFieldFilePath
+	default:
+		return editFieldValue
+	}
+}
+
+func previousEditField(field editField) editField {
+	switch field {
+	case editFieldValue:
+		return editFieldFilePath
+	case editFieldFilePath:
+		return editFieldType
+	case editFieldType:
+		return editFieldRegion
+	case editFieldRegion:
+		return editFieldSSMPath
+	default:
+		return editFieldValue
+	}
+}
+
+// openRegionSelect opens the region picker from the edit form.
+func (m model) openRegionSelect() (tea.Model, tea.Cmd) {
+	regions := m.regionOptions()
+	if len(regions) == 0 {
+		return m, nil
+	}
+	m.regionCursor = indexOf(regions, m.editRegion)
+	m.screen = screenRegionSelect
+	return m, nil
+}
+
 // loadValueFromFile reads the path from the edit screen and replaces the multiline value with that file content.
 func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
-	path := strings.TrimSpace(m.input.Value())
+	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
 		m.errMessage = "file path is required"
 		m.message = ""
@@ -826,9 +929,7 @@ func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.textArea.SetValue(string(data))
-	m.input.Blur()
-	m.textArea.Focus()
-	m.editFileFocused = false
+	m = m.focusEditField(editFieldValue)
 	m.errMessage = ""
 	m.message = "Loaded value from " + path
 	return m, nil
@@ -837,7 +938,7 @@ func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
 // writeValueToFile writes the current multiline value to the path from the edit screen.
 // SecureString values require pressing ctrl+w twice to reduce the risk of accidentally writing a secret to disk.
 func (m model) writeValueToFile() (tea.Model, tea.Cmd) {
-	path := strings.TrimSpace(m.input.Value())
+	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
 		m.errMessage = "file path is required"
 		m.message = ""
@@ -915,28 +1016,38 @@ func (m model) generateRandom(kind string) (tea.Model, tea.Cmd) {
 // saveValue captures the current item/region and switches to the loading screen while the save command runs.
 func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	item := m.currentItem()
+	oldPath := item.Path
+	if m.screen == screenTextArea {
+		newPath := strings.TrimSpace(m.editPathInput.Value())
+		if newPath == "" {
+			m.errMessage = "SSM path is required"
+			m.message = ""
+			return m, nil
+		}
+		item.Path = newPath
+	}
 	if m.editRegion != "" {
 		item.Region = m.editRegion
 	}
 	m.loadingTitle = "Saving parameter..."
 	m.loadingLines = []string{item.Path}
 	m.screen = screenLoading
-	return m, saveValueCmd(m.client, item, value, m.normalizedEditType())
+	return m, saveValueCmd(m.client, item, oldPath, value, m.normalizedEditType())
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
 // Wildcard items must be converted to a concrete region before saving, otherwise the command returns an inline error.
-func saveValueCmd(client ssm.Client, item inventory.Item, value string, parameterType ssm.ParameterType) tea.Cmd {
+func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType) tea.Cmd {
 	return func() tea.Msg {
 		if item.Region == "*" {
-			return statusUpdatedMsg{path: item.Path, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
+			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
 		}
 		regionalClient := client.ForRegion(item.Region)
 		if err := regionalClient.PutParameter(item.Path, value, parameterType); err != nil {
-			return statusUpdatedMsg{path: item.Path, err: err}
+			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: err}
 		}
 		st := LoadStatuses(regionalClient, []inventory.Item{item}, true)[0]
-		return statusUpdatedMsg{path: item.Path, status: st, message: "Updated " + item.Path}
+		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path}
 	}
 }
 
@@ -1001,15 +1112,15 @@ func (m model) renderInputScreen() string {
 	return m.renderBox(title, lines, m.height-2)
 }
 
-// renderTextAreaScreen renders the unified editor for multiline values plus optional file import/export.
+// renderTextAreaScreen renders the unified editor for multiline values plus editable metadata/file fields.
 func (m model) renderTextAreaScreen() string {
 	title := "Edit Value"
 	labelWidth := 9
 	lines := []string{
-		"  " + m.fieldLine("SSM path", m.value(m.currentItem().Path), labelWidth),
-		"  " + m.fieldLine("Region", m.value(valueOrDash(m.editRegion)), labelWidth),
-		"  " + m.fieldLine("Type", m.value(m.normalizedEditType().String()), labelWidth),
-		"  " + m.fieldLine("File path", m.input.View(), labelWidth),
+		m.editFieldLine(editFieldSSMPath, "SSM path", m.editPathInput.View(), labelWidth),
+		m.editFieldLine(editFieldRegion, "Region", m.value(valueOrDash(m.editRegion)), labelWidth),
+		m.editFieldLine(editFieldType, "Type", m.value(m.normalizedEditType().String()), labelWidth),
+		m.editFieldLine(editFieldFilePath, "File path", m.editFileInput.View(), labelWidth),
 		"",
 		"  " + m.label("Value:"),
 	}
@@ -1020,7 +1131,11 @@ func (m model) renderTextAreaScreen() string {
 		if i >= contentLines {
 			break
 		}
-		lines = append(lines, "  > "+line)
+		prefix := "  > "
+		if m.editField != editFieldValue {
+			prefix = "    "
+		}
+		lines = append(lines, prefix+line)
 	}
 
 	if m.message != "" {
@@ -1030,6 +1145,14 @@ func (m model) renderTextAreaScreen() string {
 		lines = append(lines, "", "  "+m.applyErr(m.errMessage))
 	}
 	return m.renderBox(title, lines, m.height-2)
+}
+
+func (m model) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
+	prefix := "  "
+	if m.editField == field {
+		prefix = "> "
+	}
+	return "  " + prefix + m.fieldLine(name, renderedValue, labelWidth)
 }
 
 // renderColumnsScreen renders the table-column chooser with checked/unchecked state.
@@ -1529,7 +1652,7 @@ func (m model) boxLine(content string, innerWidth int) string {
 }
 
 func (m model) inputFooterText() string {
-	return "ctrl+s save • ctrl+k clear • ctrl-g back"
+	return "ctrl+s: save • ctrl+k: clear • esc/ctrl+g: back"
 }
 
 // renderFooter formats the fixed bottom hotkey/status line.
@@ -1793,6 +1916,10 @@ func (m *model) replaceStatus(path string, st Status) {
 			m.statuses[i] = st
 			return
 		}
+		if m.statuses[i].Item.Region == st.Item.Region {
+			fallback = i
+			continue
+		}
 		if fallback < 0 || m.statuses[i].Item.Region == "*" {
 			fallback = i
 		}
@@ -1968,11 +2095,22 @@ func (m model) regionOptions() []string {
 
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (m model) textAreaFooterText() string {
-	footer := "ctrl+s save AWS • tab field • ctrl+o load file • ctrl+w write file • ctrl+t type • ctrl+k clear"
-	if len(m.regionOptions()) > 1 || m.currentItem().Region == "*" {
-		footer += " • ctrl-r region"
+	common := "ctrl+s: save • tab: next field • shift+tab: previous field"
+	suffix := " • esc/ctrl+g: back"
+	switch m.editField {
+	case editFieldValue:
+		return common + " • enter: newline • ctrl+o: load file • ctrl+w: write file • ctrl+k: clear" + suffix
+	case editFieldSSMPath:
+		return common + " • enter: next field • ctrl+k: clear" + suffix
+	case editFieldRegion:
+		return common + " • enter: choose region" + suffix
+	case editFieldType:
+		return common + " • enter: choose type" + suffix
+	case editFieldFilePath:
+		return common + " • enter: next field • ctrl+o: load file • ctrl+w: write file • ctrl+k: clear" + suffix
+	default:
+		return common + suffix
 	}
-	return footer + " • esc/ctrl-g back"
 }
 
 func indexOf(values []string, value string) int {
@@ -1986,54 +2124,51 @@ func indexOf(values []string, value string) int {
 
 // mainFooterText returns shortcuts for the main table screen.
 func mainFooterText() string {
-	return "↑/C-p move up • ↓/C-n move down • enter open • / search • v values • c columns • ? more • q quit"
+	return "↑/ctrl+p: up • ↓/ctrl+n: down • enter: open • /: search • v: values • c: columns • ?: help • q: quit"
 }
 
 func searchFooterText() string {
-	return "Ctrl-g exit search input"
+	return "ctrl+g: exit search"
 }
 
 func detailsFooterText() string {
-	return "↑/C-p scroll up • ↓/C-n scroll down • e edit • r random • x delete • v values • q back"
+	return "↑/ctrl+p: scroll up • ↓/ctrl+n: scroll down • e: edit • r: random • x: delete • v: values • q: back"
 }
 
 // helpText returns the multi-line shortcut reference shown by the help screen.
 func helpText() string {
 	return strings.TrimSpace(`Navigation:
-  ↑ / C-p          previous
-  ↓ / C-n          next
-  PgUp / M-v       page up
-  PgDn / C-v       page down
-  Home / M-<       first
-  End / M->        last
+  ↑ / ctrl+p:      previous
+  ↓ / ctrl+n:      next
+  PgUp / alt+v:    page up
+  PgDn / ctrl+v:   page down
+  Home / alt+<:    first
+  End / alt+>:     last
 
 View:
-  /                search
-  v                reveal/hide values
-  c                columns selector
-  ?                more
+  /:               search
+  v:               reveal/hide values
+  c:               columns selector
+  ?:               more
 
-Edit:
-  e                edit value
-  r                generate random value
-  Ctrl-t           choose SSM parameter type while editing/previewing
-  x                delete current value
-  D                delete visible/filtered values
+Actions:
+  e:               edit value
+  r:               generate random value
+  x:               delete current value
+  D:               delete visible/filtered values
 
-Multiline editor:
-  C-a              line start
-  C-e              line end
-  C-v              page down
-  M-v              page up
-  Tab              switch between Value and File path
-  Ctrl-o           load File path content into Value
-  Ctrl-w           write Value to File path
-  Ctrl-s           save Value to AWS SSM
-  Ctrl-t           choose String, StringList, or SecureString
+Edit form:
+  ctrl+s:          save
+  tab:             next field
+  shift+tab:       previous field
+  enter:           newline in Value; choose/select Region or Type; next field in text inputs
+  ctrl+o:          load File path content into Value
+  ctrl+w:          write Value to File path
+  ctrl+k:          clear active text field
 
 Exit:
-  q                quit on main page / back on sub-pages
-  Ctrl-g / Esc     back from input screens`)
+  q:               quit on main page / back on sub-pages
+  ctrl+g / esc:    back from input screens`)
 }
 
 func promptLineCount(value string) int {
