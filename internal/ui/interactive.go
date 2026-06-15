@@ -87,15 +87,17 @@ type model struct {
 	loadingTitle string
 	loadingLines []string
 
-	input            textinput.Model
-	textArea         textarea.Model
-	inputMode        string
-	generatedValue   string
-	editRegion       string
-	editType         ssm.ParameterType
-	regionCursor     int
-	typeCursor       int
-	typeReturnScreen screen
+	input              textinput.Model
+	textArea           textarea.Model
+	inputMode          string
+	generatedValue     string
+	editFileFocused    bool
+	confirmWriteSecure bool
+	editRegion         string
+	editType           ssm.ParameterType
+	regionCursor       int
+	typeCursor         int
+	typeReturnScreen   screen
 
 	columns      map[columnName]bool
 	columnCursor int
@@ -458,8 +460,6 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenColumns
 	case "e":
 		return m.startMultiline(screenMain)
-	case "f":
-		return m.startEdit("file", screenMain)
 	case "r":
 		m.returnScreen = screenMain
 		m.editRegion = m.initialEditRegion()
@@ -499,8 +499,6 @@ func (m model) updateDetails(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.revealValues = !m.revealValues
 	case "e":
 		return m.startMultiline(screenDetails)
-	case "f":
-		return m.startEdit("file", screenDetails)
 	case "r":
 		m.returnScreen = screenDetails
 		m.editRegion = m.initialEditRegion()
@@ -515,7 +513,7 @@ func (m model) updateDetails(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateInput handles single-line input screens used for file paths, direct values, and custom random lengths.
+// updateInput handles single-line input screens used for custom random lengths and confirmation prompts.
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "ctrl+g":
@@ -526,20 +524,6 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.SetValue("")
 		return m, nil
 	case "enter", "ctrl+s", "ctrl+o":
-		if m.inputMode == "file" {
-			data, err := os.ReadFile(strings.TrimSpace(m.input.Value()))
-			if err != nil {
-				m.errMessage = err.Error()
-				return m, nil
-			}
-			m.input.Blur()
-			m.textArea.SetValue(string(data))
-			m.textArea.Focus()
-			m.screen = screenTextArea
-			m.errMessage = ""
-			return m, nil
-		}
-
 		if m.inputMode == "random-custom" {
 			return m.generateRandom("base64-custom")
 		}
@@ -552,27 +536,60 @@ func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// updateTextArea handles multiline editing, paging, region selection, and saving edited secret values.
+// updateTextArea handles multiline editing, file import/export, paging, region selection, and saving edited parameter values.
 func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any key other than the second ctrl+w confirmation should cancel the pending
+	// SecureString-to-file confirmation, so an accidental later write is not accepted.
+	resetWriteConfirmation := func() {
+		m.confirmWriteSecure = false
+	}
+
 	switch msg.String() {
 	case "esc", "ctrl+g":
 		m.textArea.Blur()
+		m.input.Blur()
+		m.editFileFocused = false
+		m.confirmWriteSecure = false
 		m.screen = m.returnScreen
 		return m, nil
+	case "tab":
+		resetWriteConfirmation()
+		return m.toggleEditFocus(), nil
 	case "ctrl+k":
-		m.textArea.SetValue("")
+		resetWriteConfirmation()
+		if m.editFileFocused {
+			m.input.SetValue("")
+		} else {
+			m.textArea.SetValue("")
+		}
+		m.message = ""
+		m.errMessage = ""
 		return m, nil
+	case "ctrl+o":
+		resetWriteConfirmation()
+		return m.loadValueFromFile()
+	case "ctrl+w":
+		return m.writeValueToFile()
 	case "ctrl+v", "pagedown":
+		if m.editFileFocused {
+			break
+		}
+		resetWriteConfirmation()
 		for i := 0; i < pageSize(m.textArea.Height()); i++ {
 			m.textArea.CursorDown()
 		}
 		return m, nil
 	case "alt+v", "pageup":
+		if m.editFileFocused {
+			break
+		}
+		resetWriteConfirmation()
 		for i := 0; i < pageSize(m.textArea.Height()); i++ {
 			m.textArea.CursorUp()
 		}
 		return m, nil
 	case "ctrl+r":
+		resetWriteConfirmation()
 		regions := m.regionOptions()
 		if len(regions) == 0 {
 			return m, nil
@@ -581,12 +598,22 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenRegionSelect
 		return m, nil
 	case "ctrl+t":
+		resetWriteConfirmation()
 		return m.startTypeSelect(screenTextArea)
 	case "ctrl+s":
+		resetWriteConfirmation()
 		return m.saveValue(m.textArea.Value())
 	}
+
 	var cmd tea.Cmd
-	m.textArea, cmd = m.textArea.Update(msg)
+	if m.editFileFocused {
+		m.input, cmd = m.input.Update(msg)
+	} else {
+		m.textArea, cmd = m.textArea.Update(msg)
+	}
+	m.confirmWriteSecure = false
+	m.message = ""
+	m.errMessage = ""
 	return m, cmd
 }
 
@@ -734,8 +761,8 @@ func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startEdit prepares the single-line input screen for a value/file/random-length workflow.
-// ret records where to return after canceling or after a save completes.
+// startEdit prepares the single-line input screen used by the random custom-length workflow.
+// ret records where to return after canceling.
 func (m model) startEdit(mode string, ret screen) (tea.Model, tea.Cmd) {
 	m.returnScreen = ret
 	m.inputMode = mode
@@ -745,12 +772,6 @@ func (m model) startEdit(mode string, ret screen) (tea.Model, tea.Cmd) {
 	if mode == "random-custom" {
 		m.input.SetValue("32")
 		m.input.Placeholder = "Bytes length"
-	} else if mode == "file" {
-		m.input.SetValue("")
-		m.input.Placeholder = "Path to file"
-	} else {
-		m.input.SetValue(m.currentStatus().Value)
-		m.input.Placeholder = "New value"
 	}
 	m.input.Focus()
 	m.screen = screenInput
@@ -764,7 +785,80 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editType = m.initialEditType()
 	m.textArea.SetValue(m.currentStatus().Value)
 	m.textArea.Focus()
+	m.input.SetValue("")
+	m.input.Placeholder = "Path to file"
+	m.input.Blur()
+	m.editFileFocused = false
+	m.confirmWriteSecure = false
+	m.message = ""
+	m.errMessage = ""
 	m.screen = screenTextArea
+	return m, nil
+}
+
+// toggleEditFocus switches the edit screen between the multiline value editor and the file-path input.
+func (m model) toggleEditFocus() model {
+	m.editFileFocused = !m.editFileFocused
+	if m.editFileFocused {
+		m.textArea.Blur()
+		m.input.Focus()
+	} else {
+		m.input.Blur()
+		m.textArea.Focus()
+	}
+	m.message = ""
+	m.errMessage = ""
+	return m
+}
+
+// loadValueFromFile reads the path from the edit screen and replaces the multiline value with that file content.
+func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
+	path := strings.TrimSpace(m.input.Value())
+	if path == "" {
+		m.errMessage = "file path is required"
+		m.message = ""
+		return m, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		return m, nil
+	}
+	m.textArea.SetValue(string(data))
+	m.input.Blur()
+	m.textArea.Focus()
+	m.editFileFocused = false
+	m.errMessage = ""
+	m.message = "Loaded value from " + path
+	return m, nil
+}
+
+// writeValueToFile writes the current multiline value to the path from the edit screen.
+// SecureString values require pressing ctrl+w twice to reduce the risk of accidentally writing a secret to disk.
+func (m model) writeValueToFile() (tea.Model, tea.Cmd) {
+	path := strings.TrimSpace(m.input.Value())
+	if path == "" {
+		m.errMessage = "file path is required"
+		m.message = ""
+		m.confirmWriteSecure = false
+		return m, nil
+	}
+	if m.normalizedEditType() == ssm.ParameterTypeSecureString && !m.confirmWriteSecure {
+		m.errMessage = ""
+		m.message = "This is a SecureString value. Press ctrl+w again to write it to a local file."
+		m.confirmWriteSecure = true
+		return m, nil
+	}
+	if err := os.WriteFile(path, []byte(m.textArea.Value()), 0600); err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		m.confirmWriteSecure = false
+		return m, nil
+	}
+	m.errMessage = ""
+	m.message = "Wrote value to " + path
+	m.confirmWriteSecure = false
 	return m, nil
 }
 
@@ -896,9 +990,6 @@ func (m model) renderDetailsScreen() string {
 // renderInputScreen renders the single-line form used for direct values, file paths, and custom random byte counts.
 func (m model) renderInputScreen() string {
 	title := "Set Parameter Value"
-	if m.inputMode == "file" {
-		title = "Open Value From File"
-	}
 	lines := []string{
 		"  " + m.formField("Path", m.currentItem().Path),
 		"",
@@ -910,14 +1001,17 @@ func (m model) renderInputScreen() string {
 	return m.renderBox(title, lines, m.height-2)
 }
 
-// renderTextAreaScreen renders the multiline editor and shows the concrete region that will receive the saved value.
+// renderTextAreaScreen renders the unified editor for multiline values plus optional file import/export.
 func (m model) renderTextAreaScreen() string {
 	title := "Edit Value"
+	labelWidth := 9
 	lines := []string{
-		"  " + m.formField("Path", m.currentItem().Path),
-		"  " + m.formField("Region", valueOrDash(m.editRegion)),
-		"  " + m.formField("Type", m.normalizedEditType().String()),
+		"  " + m.fieldLine("SSM path", m.value(m.currentItem().Path), labelWidth),
+		"  " + m.fieldLine("Region", m.value(valueOrDash(m.editRegion)), labelWidth),
+		"  " + m.fieldLine("Type", m.value(m.normalizedEditType().String()), labelWidth),
+		"  " + m.fieldLine("File path", m.input.View(), labelWidth),
 		"",
+		"  " + m.label("Value:"),
 	}
 
 	textAreaLines := strings.Split(m.textArea.View(), "\n")
@@ -929,6 +1023,9 @@ func (m model) renderTextAreaScreen() string {
 		lines = append(lines, "  > "+line)
 	}
 
+	if m.message != "" {
+		lines = append(lines, "", "  "+m.muted(m.message))
+	}
 	if m.errMessage != "" {
 		lines = append(lines, "", "  "+m.applyErr(m.errMessage))
 	}
@@ -1432,9 +1529,6 @@ func (m model) boxLine(content string, innerWidth int) string {
 }
 
 func (m model) inputFooterText() string {
-	if m.inputMode == "file" {
-		return "Ctrl-o Open • ctrl+k clear • ctrl-g back"
-	}
 	return "ctrl+s save • ctrl+k clear • ctrl-g back"
 }
 
@@ -1874,11 +1968,11 @@ func (m model) regionOptions() []string {
 
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (m model) textAreaFooterText() string {
-	footer := "ctrl+s save • ctrl+t type • ctrl+k clear • C-a line start • C-e line end • C-v page down • M-v page up"
+	footer := "ctrl+s save AWS • tab field • ctrl+o load file • ctrl+w write file • ctrl+t type • ctrl+k clear"
 	if len(m.regionOptions()) > 1 || m.currentItem().Region == "*" {
 		footer += " • ctrl-r region"
 	}
-	return footer + " • ctrl-g back"
+	return footer + " • esc/ctrl-g back"
 }
 
 func indexOf(values []string, value string) int {
@@ -1900,7 +1994,7 @@ func searchFooterText() string {
 }
 
 func detailsFooterText() string {
-	return "↑/C-p scroll up • ↓/C-n scroll down • e edit • f file • r random • x delete • v values • q back"
+	return "↑/C-p scroll up • ↓/C-n scroll down • e edit • r random • x delete • v values • q back"
 }
 
 // helpText returns the multi-line shortcut reference shown by the help screen.
@@ -1921,7 +2015,6 @@ View:
 
 Edit:
   e                edit value
-  f                open value from file
   r                generate random value
   Ctrl-t           choose SSM parameter type while editing/previewing
   x                delete current value
@@ -1932,6 +2025,10 @@ Multiline editor:
   C-e              line end
   C-v              page down
   M-v              page up
+  Tab              switch between Value and File path
+  Ctrl-o           load File path content into Value
+  Ctrl-w           write Value to File path
+  Ctrl-s           save Value to AWS SSM
   Ctrl-t           choose String, StringList, or SecureString
 
 Exit:
@@ -1940,11 +2037,10 @@ Exit:
 }
 
 func promptLineCount(value string) int {
-	trimmed := strings.TrimRight(value, "\n")
-	if trimmed == "" {
+	if value == "" {
 		return 1
 	}
-	return len(strings.Split(trimmed, "\n"))
+	return len(strings.Split(value, "\n"))
 }
 
 // statusDisplayLabel converts Status to the longer labels used in the interactive table.

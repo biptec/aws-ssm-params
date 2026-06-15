@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -84,4 +85,123 @@ func TestDisplayValueOnlyHidesSecureStringByDefault(t *testing.T) {
 
 	m.revealValues = true
 	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
+}
+
+func TestStartMultilineInitializesFilePathField(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "hello"}}
+
+	updated, _ := m.startMultiline(screenMain)
+	actual := updated.(model)
+
+	assert.Equal(t, screenTextArea, actual.screen)
+	assert.False(t, actual.editFileFocused)
+	assert.Equal(t, "", actual.input.Value())
+	assert.Equal(t, "Path to file", actual.input.Placeholder)
+	assert.Equal(t, "hello", actual.textArea.Value())
+}
+
+func TestUpdateTextAreaTogglesBetweenValueAndFilePath(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.screen = screenTextArea
+	m.textArea.Focus()
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	assert.True(t, m.editFileFocused)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	assert.False(t, m.editFileFocused)
+}
+
+func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	path := t.TempDir() + "/value.txt"
+	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0600))
+	m.screen = screenTextArea
+	m.input.SetValue(path)
+	m.textArea.SetValue("old")
+
+	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
+	actual := updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "from-file\nsecond-line", actual.textArea.Value())
+	assert.Equal(t, "Loaded value from "+path, actual.message)
+	assert.Empty(t, actual.errMessage)
+	assert.False(t, actual.editFileFocused)
+}
+
+func TestUpdateTextAreaWritesNonSecureValueToFile(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	path := t.TempDir() + "/value.txt"
+	m.screen = screenTextArea
+	m.editType = ssm.ParameterTypeString
+	m.input.SetValue(path)
+	m.textArea.SetValue("plain-value")
+
+	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
+	actual := updated.(model)
+
+	assert.Nil(t, cmd)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "plain-value", string(data))
+	assert.Equal(t, "Wrote value to "+path, actual.message)
+	assert.Empty(t, actual.errMessage)
+}
+
+func TestUpdateTextAreaRequiresSecondCtrlWForSecureStringFileWrite(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	path := t.TempDir() + "/secret.txt"
+	m.screen = screenTextArea
+	m.editType = ssm.ParameterTypeSecureString
+	m.input.SetValue(path)
+	m.textArea.SetValue("secret-value")
+
+	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.True(t, m.confirmWriteSecure)
+	assert.Contains(t, m.message, "Press ctrl+w again")
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err))
+
+	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
+	m = updated.(model)
+
+	assert.Nil(t, cmd)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "secret-value", string(data))
+	assert.False(t, m.confirmWriteSecure)
+}
+
+func TestPromptLineCountPreservesTrailingEmptyLines(t *testing.T) {
+	assert.Equal(t, 1, promptLineCount(""))
+	assert.Equal(t, 2, promptLineCount("one\n"))
+	assert.Equal(t, 3, promptLineCount("one\n\n"))
+	assert.Equal(t, 4, promptLineCount("\n\n\n"))
+}
+
+func TestRenderTextAreaScreenShowsAlignedSSMAndFilePath(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}}
+	updated, _ := m.startMultiline(screenMain)
+	m = updated.(model)
+	m.input.SetValue("/tmp/value.txt")
+
+	view := m.renderTextAreaScreen()
+
+	assert.Contains(t, view, "SSM path:  /app/value")
+	assert.Contains(t, view, "Region:    eu-north-1")
+	assert.Contains(t, view, "Type:      SecureString")
+	assert.Contains(t, view, "File path: /tmp/value.txt")
+	assert.Contains(t, view, "Value:")
 }
