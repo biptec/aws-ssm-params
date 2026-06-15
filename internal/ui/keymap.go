@@ -88,3 +88,7 @@ func (m model) handlePendingNavigationSequence(key string) (navigationAction, bo
 	}
 	return navNone, false, true
 }
+
+func isHelpKey(key string) bool {
+	return key == "ctrl+_" || key == "ctrl+/" || key == "ctrl+?"
+}

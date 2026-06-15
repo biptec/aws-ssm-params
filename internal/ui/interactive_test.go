@@ -192,7 +192,7 @@ func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
 	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("old")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
 	actual := updated.(model)
 
 	assert.Nil(t, cmd)
@@ -254,7 +254,7 @@ func TestUpdateTextAreaReportsMissingFilePathForReadAndWrite(t *testing.T) {
 	m.editField = editFieldSSMPath
 	m.textArea.SetValue("value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
 	m = updated.(model)
 	assert.Nil(t, cmd)
 	assert.Equal(t, "File path is required.", m.errMessage)
@@ -336,8 +336,8 @@ func TestRenderTextAreaScreenDoesNotIndentValueWhenFilePathFocused(t *testing.T)
 	view := m.renderTextAreaScreen()
 
 	assert.Contains(t, view, "Value:")
-	assert.Contains(t, view, "> test-value")
-	assert.False(t, strings.Contains(view, "\n   > test-value"))
+	assert.Contains(t, view, "1 │ test-value")
+	assert.False(t, strings.Contains(view, "\n   1 │ test-value"))
 }
 
 func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
@@ -610,7 +610,7 @@ func TestCommonBottomLayoutKeepsLoadingAndHelpFootersStable(t *testing.T) {
 		screen screen
 		hotkey string
 	}{
-		{name: "loading", screen: screenLoading, hotkey: "? help"},
+		{name: "loading", screen: screenLoading, hotkey: "ctrl+/ help"},
 		{name: "help", screen: screenHelp, hotkey: "esc back"},
 	}
 
@@ -651,9 +651,12 @@ func TestRenderTextAreaDoesNotAddFakeRowsWhenHeightChanges(t *testing.T) {
 	m.warningMessage = ""
 	afterStatus := m.View()
 
-	assert.Equal(t, 2, strings.Count(withoutStatus, "> "))
-	assert.Equal(t, 2, strings.Count(withStatus, "> "))
-	assert.Equal(t, 2, strings.Count(afterStatus, "> "))
+	assert.Equal(t, 1, strings.Count(withoutStatus, "1 │ one"))
+	assert.Equal(t, 1, strings.Count(withoutStatus, "2 │ two"))
+	assert.Equal(t, 1, strings.Count(withStatus, "1 │ one"))
+	assert.Equal(t, 1, strings.Count(withStatus, "2 │ two"))
+	assert.Equal(t, 1, strings.Count(afterStatus, "1 │ one"))
+	assert.Equal(t, 1, strings.Count(afterStatus, "2 │ two"))
 }
 
 func TestBackspaceRemovesEmptyTextareaRows(t *testing.T) {
@@ -696,7 +699,7 @@ func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
 	m.textArea.SetValue(strings.Join(valueLines, "\n"))
 
 	before := m.View()
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
 	m = updated.(model)
 	withError := m.View()
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -787,7 +790,7 @@ func TestMainUpperXDeletesVisibleParameters(t *testing.T) {
 }
 
 func TestMainFooterDetailsLabelIsDynamic(t *testing.T) {
-	assert.Contains(t, mainFooterText(false), "? help")
+	assert.Contains(t, mainFooterText(false), "ctrl+/ help")
 	assert.Contains(t, mainFooterText(false), "d show details")
 	assert.Contains(t, mainFooterText(true), "d hide details")
 	assert.Contains(t, mainFooterText(false), "X delete visible")
@@ -831,6 +834,10 @@ func TestMainRandomShortcutIsMovedToEditor(t *testing.T) {
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlR})
 	m = updated.(model)
 	assert.Equal(t, screenRandom, m.screen)
 	assert.Equal(t, screenTextArea, m.returnScreen)
@@ -949,10 +956,174 @@ func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
 
 	footer := m.textAreaFooterText()
 
-	assert.Contains(t, footer, "? help • ctrl+s save")
-	assert.Contains(t, footer, "r random")
+	assert.Contains(t, footer, "ctrl+/ help • ctrl+s save")
+	assert.Contains(t, footer, "ctrl+r random")
 	assert.False(t, strings.Contains(footer, "save AWS"))
-	assert.Contains(t, footer, "ctrl+r read file")
+	assert.Contains(t, footer, "ctrl+o read file")
 	assert.False(t, strings.Contains(footer, "ctrl+t"))
 	assert.False(t, strings.Contains(footer, ":"))
+}
+
+func TestViEditorStartsNormalAndInsertModeLabelsActiveTextField(t *testing.T) {
+	m := newModel(nil, nil, Options{Keymap: "vi", NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
+
+	updated, _ := m.startMultiline(screenMain)
+	m = updated.(model)
+	assert.False(t, m.viInsertMode)
+	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "[INSERT]"))
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	assert.True(t, m.viInsertMode)
+	assert.Contains(t, m.renderTextAreaScreen(), "Value [INSERT]:")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.False(t, m.viInsertMode)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "[INSERT]"))
+
+	m.editField = editFieldSSMPath
+	m.editPathInput.Focus()
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	assert.Contains(t, m.renderTextAreaScreen(), "SSM path [INSERT]:")
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+
+	m.editField = editFieldFilePath
+	m.editFileInput.Focus()
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	assert.Contains(t, m.renderTextAreaScreen(), "File path [INSERT]:")
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, screenMain, m.screen)
+}
+
+func TestViEditorInsertModeTypesAndNormalModeCommandsDoNotType(t *testing.T) {
+	m := newModel(nil, nil, Options{Keymap: "vi"})
+	m.screen = screenTextArea
+	m.returnScreen = screenMain
+	m.editField = editFieldValue
+	m.viInsertMode = false
+	m.textArea.Focus()
+	m.textArea.SetValue("")
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h', 'j', 'k', 'l', 'x', 'w', 'b', '?'}})
+	m = updated.(model)
+	assert.Equal(t, "hjklxwb?", m.textArea.Value())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	before := m.textArea.Value()
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	m = updated.(model)
+	assert.Equal(t, before, m.textArea.Value())
+}
+
+func TestViEditorNormalModeNavigatesAndDeletesValue(t *testing.T) {
+	m := newModel(nil, nil, Options{Keymap: "vi"})
+	m.screen = screenTextArea
+	m.returnScreen = screenMain
+	m.editField = editFieldValue
+	m.viInsertMode = false
+	m.textArea.Focus()
+	m.textArea.SetValue("abc def\nsecond")
+	(&m).setTextAreaCursorAbs(0)
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(model)
+	assert.Equal(t, 1, (&m).textAreaCursorAbs())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	m = updated.(model)
+	assert.Equal(t, 4, (&m).textAreaCursorAbs())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+	m = updated.(model)
+	assert.Equal(t, len([]rune(m.textArea.Value())), (&m).textAreaCursorAbs())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = updated.(model)
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	m = updated.(model)
+	assert.Equal(t, 0, (&m).textAreaCursorAbs())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	m = updated.(model)
+	assert.Equal(t, "bc def\nsecond", m.textArea.Value())
+
+	m.textArea.SetValue("abc def")
+	(&m).setTextAreaCursorAbs(0)
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(model)
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}})
+	m = updated.(model)
+	assert.Equal(t, "def", m.textArea.Value())
+}
+
+func TestEmacsValueNavigationDoesNotMutateText(t *testing.T) {
+	m := newModel(nil, nil, Options{Keymap: "emacs"})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("abc")
+	(&m).setTextAreaCursorAbs(1)
+
+	for _, key := range []tea.KeyMsg{
+		{Type: tea.KeyCtrlF},
+		{Type: tea.KeyCtrlB},
+		{Type: tea.KeyRight},
+		{Type: tea.KeyLeft},
+	} {
+		before := m.textArea.Value()
+		updated, _ := m.updateTextArea(key)
+		m = updated.(model)
+		assert.Equal(t, before, m.textArea.Value())
+	}
+}
+
+func TestQuestionMarkCanBeTypedAndCtrlSlashOpensShortcuts(t *testing.T) {
+	m := newModel(nil, nil, Options{Keymap: "emacs"})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m = updated.(model)
+	assert.Equal(t, "?", m.textArea.Value())
+	assert.Equal(t, screenTextArea, m.screen)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
+	m = updated.(model)
+	assert.Equal(t, screenHelp, m.screen)
+}
+
+func TestTextAreaLineNumbersAreAlignedByTotalLineCount(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 140
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = "x"
+	}
+	m.textArea.SetValue(strings.Join(lines, "\n"))
+
+	valueRows := strings.Join(m.renderTextAreaValueLines(100), "\n")
+	assert.Contains(t, valueRows, "  1 │ x")
+	assert.Contains(t, valueRows, "100 │ x")
+	assert.False(t, strings.Contains(valueRows, "> x"))
 }

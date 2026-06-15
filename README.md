@@ -213,10 +213,10 @@ aws-ssm-params --profile dev --region eu-north-1 paths.txt
 
 Inside the TUI:
 
-- Press `?` to open the context-sensitive `Shortcuts` page.
+- Press `ctrl+/` to open the context-sensitive `Shortcuts` page.
 - Press `d` on the main screen to show/hide full details for the selected parameter.
 - Press `Enter` on the main screen to edit a value.
-- Press `r` inside the editor to generate a random value into `Value`; review it, then press `ctrl+s` to save.
+- Press `ctrl+r` inside the editor to generate a random value into `Value`; review it, then press `ctrl+s` to save.
 - Press `/` on the main screen to search.
 - Press `esc` to go back from inner screens; on the main screen, `esc` quits.
 
@@ -279,7 +279,7 @@ Notes:
 - If `--region` is omitted, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
 - Direct `get`, `set`, and `import` operate on one concrete region.
 - `interactive` and `export` support repeated `--region` and `--all-regions`.
-- `--keymap emacs` uses Emacs-style navigation shortcuts in the TUI. `--keymap vi` uses vi-style navigation shortcuts on list and selector screens.
+- `--keymap emacs` uses Emacs-style navigation shortcuts in the TUI. `--keymap vi` uses vi-style navigation on list/selector screens and a modal `NORMAL`/`INSERT` editor for text fields.
 
 ## Parameter types
 
@@ -318,31 +318,43 @@ List of N Parameters
 
 ### Footer shortcuts
 
-The footer only shows action shortcuts. Navigation shortcuts are available on the context-sensitive `Shortcuts` page opened with `?`. The `? help` shortcut is always shown first so it remains visible in narrow terminals.
+The footer only shows action shortcuts. Navigation shortcuts are available on the context-sensitive `Shortcuts` page opened with `ctrl+/`. The `ctrl+/ help` shortcut is always shown first so it remains visible in narrow terminals.
 
 Main footer when details are hidden:
 
 ```text
-? help • enter edit • d show details • / search • c columns • x delete • X delete visible • esc quit
+ctrl+/ help • enter edit • d show details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
 Main footer when details are shown:
 
 ```text
-? help • enter edit • d hide details • / search • c columns • x delete • X delete visible • esc quit
+ctrl+/ help • enter edit • d hide details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
-Editor footer:
+Editor footer in Emacs keymap:
 
 ```text
-? help • ctrl+s save • r random • ctrl+r read file • ctrl+w write file • ctrl+k clear • esc back
+ctrl+/ help • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file • ctrl+k clear • esc back
 ```
 
-`r random` is intentionally available in the editor, not on the main screen. It inserts the generated value into `Value`; the value is saved to AWS only after you press `ctrl+s`.
+Editor footer in Vi keymap, normal mode:
+
+```text
+ctrl+/ help • i insert • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file • ctrl+k clear • esc back
+```
+
+Editor footer in Vi keymap, insert mode:
+
+```text
+ctrl+/ help • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file • ctrl+k clear • esc normal
+```
+
+`ctrl+r random` is intentionally available in the editor, not on the main screen. It inserts the generated value into `Value`; the value is saved to AWS only after you press `ctrl+s`. `ctrl+o read file` reads the configured file path into `Value`.
 
 ### Shortcuts page
 
-Press `?` to open `Shortcuts`. It shows actions and navigation for the page you opened it from. The navigation section follows the selected keymap.
+Press `ctrl+/` to open `Shortcuts`. It shows actions and navigation for the page you opened it from. The navigation section follows the selected keymap.
 
 Emacs-style main/list navigation:
 
@@ -366,7 +378,19 @@ Home / gg                  first row/option
 End / G                    last row/option
 ```
 
-On text input fields, typing remains insert-mode friendly. The `vi` keymap changes list and selector navigation; text fields still use normal terminal text editing keys so characters such as `h`, `j`, `k`, `l`, and `x` can be typed safely.
+Editor navigation in `--keymap vi` is modal. The editor opens in `NORMAL` mode, `i` enters `INSERT` mode, `esc` leaves `INSERT` mode, and a second `esc` goes back. While inserting, the active editable field label shows `[INSERT]`, for example `SSM path [INSERT]:`, `File path [INSERT]:`, or `Value [INSERT]:`.
+
+Vi editor shortcuts include:
+
+```text
+h / l                      backward/forward character
+j / k                      next/previous line in Value
+w / b                      forward/backward word
+0 / $                      start/end of line
+gg / G                     start/end of text
+x                          delete current character
+dw / db                    delete next/previous word
+```
 
 Hidden duplicate back/quit shortcuts such as `q` and `ctrl+g` remain available and are documented on `Shortcuts`, but the footer shows `esc` as the primary back/quit key.
 

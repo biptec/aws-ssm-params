@@ -121,6 +121,7 @@ type model struct {
 	generatedValue    string
 	editField         editField
 	editDirection     editDirection
+	viInsertMode      bool
 	editRegionOptions []string
 	pendingFileWrite  fileWriteConfirmation
 	pendingQuit       bool
@@ -252,6 +253,7 @@ func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
 	area := textarea.New()
 	area.Prompt = ""
 	area.CharLimit = 0
+	area.MaxHeight = 0
 	area.ShowLineNumbers = false
 
 	return model{
@@ -434,7 +436,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.screen {
 	case screenLoading:
-		return m.renderPage("? help • esc quit", func(content model) string { return content.renderLoading() })
+		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
 		footer := mainFooterText(m.selectedExpanded)
 		if m.searchMode {
@@ -446,17 +448,17 @@ func (m model) View() string {
 	case screenTextArea:
 		return m.renderPage(m.textAreaFooterText(), func(content model) string { return content.renderTextAreaScreen() })
 	case screenColumns:
-		return m.renderPage("? help • space/enter toggle • a show all • x hide all • esc back", func(content model) string { return content.renderColumnsScreen() })
+		return m.renderPage("ctrl+/ help • space/enter toggle • a show all • x hide all • esc back", func(content model) string { return content.renderColumnsScreen() })
 	case screenRandom:
-		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderRandomScreen() })
+		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderRandomScreen() })
 	case screenRandomPreview:
-		return m.renderPage("? help • enter insert • r regenerate • esc back", func(content model) string { return content.renderRandomPreviewScreen() })
+		return m.renderPage("ctrl+/ help • enter insert • ctrl+r regenerate • esc back", func(content model) string { return content.renderRandomPreviewScreen() })
 	case screenConfirm:
-		return m.renderPage("? help • enter confirm • esc back", func(content model) string { return content.renderConfirmScreen() })
+		return m.renderPage("ctrl+/ help • enter confirm • esc back", func(content model) string { return content.renderConfirmScreen() })
 	case screenRegionSelect:
-		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderRegionSelectScreen() })
+		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderRegionSelectScreen() })
 	case screenTypeSelect:
-		return m.renderPage("? help • enter choose • esc back", func(content model) string { return content.renderTypeSelectScreen() })
+		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderTypeSelectScreen() })
 	case screenHelp:
 		return m.renderPage("esc back", func(content model) string { return content.renderHelpScreen() })
 	default:
@@ -480,7 +482,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if m.searchMode {
 		switch key {
-		case "?":
+		case "ctrl+_", "ctrl+/":
 			m.openShortcuts(screenMain)
 			return m, nil
 		case "esc", "ctrl+g":
@@ -551,7 +553,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(items) > 0 {
 			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?\n\nType DELETE ALL to confirm:", len(items)), "DELETE ALL", items, screenMain)
 		}
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenMain)
 	}
 	m.ensureSelection()
@@ -586,7 +588,7 @@ func (m *model) openShortcuts(from screen) {
 // updateInput handles single-line input screens used for custom random lengths and confirmation prompts.
 func (m model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenInput)
 		return m, nil
 	case "q", "esc", "ctrl+g":
@@ -616,8 +618,74 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.warningMessage = ""
 	}
 
-	switch msg.String() {
-	case "?":
+	key := msg.String()
+	if m.keymapStyle() == keymapVi && isEditableTextField(m.editField) {
+		if isHelpKey(key) {
+			m.openShortcuts(screenTextArea)
+			return m, nil
+		}
+		if m.viInsertMode {
+			if key == "esc" {
+				m.viInsertMode = false
+				m.pendingKeySequence = ""
+				return m, nil
+			}
+		} else {
+			switch key {
+			case "q", "esc", "ctrl+g":
+				m.blurEditFields()
+				m.pendingFileWrite = fileWriteConfirmationNone
+				m.warningMessage = ""
+				m.screen = m.returnScreen
+				return m, nil
+			case "tab":
+				resetFileConfirmation()
+				return m.focusNextEditField()
+			case "shift+tab":
+				resetFileConfirmation()
+				return m.focusPreviousEditField()
+			case "enter", "ctrl+j":
+				resetFileConfirmation()
+				if m.editField == editFieldRegion {
+					return m.openRegionSelect()
+				}
+				if m.editField == editFieldType {
+					return m.startTypeSelect(screenTextArea)
+				}
+			case "ctrl+s":
+				resetFileConfirmation()
+				return m.saveValue(m.textArea.Value())
+			case "ctrl+r":
+				resetFileConfirmation()
+				m.returnScreen = screenTextArea
+				m.randomCursor = 0
+				m.screen = screenRandom
+				return m, nil
+			case "ctrl+o":
+				resetFileConfirmation()
+				return m.loadValueFromFile()
+			case "ctrl+w":
+				return m.writeValueToFile(false, false)
+			case "ctrl+k":
+				resetFileConfirmation()
+				if m.editField == editFieldSSMPath {
+					m.editPathInput.SetValue("")
+				} else if m.editField == editFieldFilePath {
+					m.editFileInput.SetValue("")
+				} else {
+					m.textArea.SetValue("")
+				}
+				return m, nil
+			}
+			if updated, handled := m.updateViTextFieldNormal(key); handled {
+				return updated, nil
+			}
+			return m, nil
+		}
+	}
+
+	switch key {
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenTextArea)
 		return m, nil
 	case "q", "esc", "ctrl+g":
@@ -655,13 +723,13 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.message = ""
 		m.errMessage = ""
 		return m, nil
-	case "r":
+	case "ctrl+r":
 		resetFileConfirmation()
 		m.returnScreen = screenTextArea
 		m.randomCursor = 0
 		m.screen = screenRandom
 		return m, nil
-	case "ctrl+r":
+	case "ctrl+o":
 		resetFileConfirmation()
 		return m.loadValueFromFile()
 	case "ctrl+w":
@@ -700,6 +768,10 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.saveValue(m.textArea.Value())
 	}
 
+	if updated, handled := m.updateEmacsTextFieldKey(key); handled {
+		return updated, nil
+	}
+
 	var cmd tea.Cmd
 	switch m.editField {
 	case editFieldSSMPath:
@@ -735,7 +807,7 @@ func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenColumns)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.returnScreen
@@ -795,7 +867,7 @@ func (m model) updateRandom(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenRandom)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.returnScreen
@@ -812,11 +884,11 @@ func (m model) updateRandom(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateRandomPreview lets users save the generated value, regenerate it, or return to the generator menu.
 func (m model) updateRandomPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenRandomPreview)
 	case "q", "esc", "ctrl+g":
 		m.screen = screenRandom
-	case "r":
+	case "ctrl+r":
 		return m.generateRandom(m.inputMode)
 	case "enter", "ctrl+s":
 		return m.insertGeneratedValue()
@@ -827,7 +899,7 @@ func (m model) updateRandomPreview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateConfirm verifies a typed confirmation phrase before running destructive delete operations.
 func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenConfirm)
 		return m, nil
 	case "q", "esc", "ctrl+g":
@@ -872,7 +944,7 @@ func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenRegionSelect)
 	case "q", "esc", "ctrl+g":
 		m.screen = screenTextArea
@@ -909,7 +981,7 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch key {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenTypeSelect)
 	case "q", "esc", "ctrl+g":
 		m.screen = m.typeReturnScreen
@@ -939,7 +1011,7 @@ func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // The footer advertises q quit on the loading screen, while ctrl+c is handled globally with confirmation.
 func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "?":
+	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenLoading)
 		return m, nil
 	case "q", "esc":
@@ -979,6 +1051,7 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editFileInput.Blur()
 	m.editField = editFieldValue
 	m.editDirection = editDirectionNext
+	m.viInsertMode = m.keymapStyle() != keymapVi
 	m.textArea.Focus()
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
@@ -1332,7 +1405,7 @@ func (m model) renderTextAreaScreen() string {
 		m.editFieldLine(editFieldType, "Type", m.editOptionValue(editFieldType, m.normalizedEditType().String()), labelWidth),
 		m.editFieldLine(editFieldFilePath, "File path", m.editFileInput.View(), labelWidth),
 		"",
-		m.label("Value:"),
+		m.label(m.editFieldLabel(editFieldValue, "Value") + ":"),
 	}
 
 	preferredHeight := m.textAreaBodyHeight()
@@ -1340,7 +1413,7 @@ func (m model) renderTextAreaScreen() string {
 	maxValueRows := max(1, innerHeight-len(lines))
 
 	for _, line := range m.renderTextAreaValueLines(maxValueRows) {
-		lines = append(lines, "> "+line)
+		lines = append(lines, line)
 	}
 
 	return m.renderBox(title, lines, preferredHeight)
@@ -1348,14 +1421,8 @@ func (m model) renderTextAreaScreen() string {
 
 func (m model) renderTextAreaValueLines(maxRows int) []string {
 	maxRows = max(1, maxRows)
-	lineCount := max(1, m.textArea.LineCount())
 	valueLines := strings.Split(m.textArea.Value(), "\n")
-	for len(valueLines) < lineCount {
-		valueLines = append(valueLines, "")
-	}
-	if len(valueLines) > lineCount {
-		valueLines = valueLines[:lineCount]
-	}
+	lineCount := max(1, len(valueLines))
 
 	cursorLine := min(max(0, m.textArea.Line()), lineCount-1)
 	start := 0
@@ -1370,7 +1437,8 @@ func (m model) renderTextAreaValueLines(maxRows int) []string {
 		if m.editField == editFieldValue && m.textArea.Focused() && i == cursorLine {
 			line = withCursorMarker(line, m.textArea.LineInfo().CharOffset)
 		}
-		visible = append(visible, line)
+		lineNumberWidth := len(strconv.Itoa(lineCount))
+		visible = append(visible, fmt.Sprintf("%*d │ %s", lineNumberWidth, i+1, line))
 	}
 	return visible
 }
@@ -1389,7 +1457,18 @@ func (m model) textAreaBodyHeight() int {
 }
 
 func (m model) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
-	return m.fieldLine(name, renderedValue, labelWidth)
+	return m.fieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth)
+}
+
+func (m model) editFieldLabel(field editField, name string) string {
+	if m.keymapStyle() == keymapVi && m.viInsertMode && m.editField == field && isEditableTextField(field) {
+		return name + " [INSERT]"
+	}
+	return name
+}
+
+func isEditableTextField(field editField) bool {
+	return field == editFieldSSMPath || field == editFieldFilePath || field == editFieldValue
 }
 
 func (m model) editOptionValue(field editField, value string) string {
@@ -1844,7 +1923,7 @@ func (m model) renderFieldPairs(fields [][2]string, labelWidth int) []string {
 }
 
 func (m model) fieldLine(name, renderedValue string, labelWidth int) string {
-	label := m.label(pad(name+":", labelWidth+1))
+	label := m.label(padMin(name+":", labelWidth+1))
 	return label + " " + renderedValue
 }
 
@@ -1917,9 +1996,9 @@ func (m model) boxLine(content string, innerWidth int) string {
 
 func (m model) inputFooterText() string {
 	if m.inputMode == "random-custom" {
-		return "? help • enter generate • ctrl+k clear • esc back"
+		return "ctrl+/ help • enter generate • ctrl+k clear • esc back"
 	}
-	return "? help • ctrl+s save • ctrl+k clear • esc back"
+	return "ctrl+/ help • ctrl+s save • ctrl+k clear • esc back"
 }
 
 // renderFooter formats the fixed bottom hotkey/status line.
@@ -2468,13 +2547,19 @@ func (m model) regionOptions() []string {
 
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (m model) textAreaFooterText() string {
-	common := "? help • ctrl+s save • r random • ctrl+r read file • ctrl+w write file"
+	common := "ctrl+/ help • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file"
+	if m.usesViEditMode() {
+		if m.viInsertMode {
+			return common + " • ctrl+k clear • esc normal"
+		}
+		return "ctrl+/ help • i insert • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file • ctrl+k clear • esc back"
+	}
 	suffix := " • esc back"
 	switch m.editField {
 	case editFieldRegion:
-		return "? help • enter choose region • ctrl+s save • r random • ctrl+r read file • ctrl+w write file" + suffix
+		return "ctrl+/ help • enter choose region • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file" + suffix
 	case editFieldType:
-		return "? help • enter choose type • ctrl+s save • r random • ctrl+r read file • ctrl+w write file" + suffix
+		return "ctrl+/ help • enter choose type • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w write file" + suffix
 	case editFieldSSMPath, editFieldFilePath, editFieldValue:
 		return common + " • ctrl+k clear" + suffix
 	default:
@@ -2497,11 +2582,11 @@ func mainFooterText(detailsShown bool) string {
 	if detailsShown {
 		detailsAction = "d hide details"
 	}
-	return "? help • enter edit • " + detailsAction + " • / search • c columns • x delete • X delete visible • esc quit"
+	return "ctrl+/ help • enter edit • " + detailsAction + " • / search • c columns • x delete • X delete visible • esc quit"
 }
 
 func searchFooterText() string {
-	return "? help • enter apply • esc cancel"
+	return "ctrl+/ help • enter apply • esc cancel"
 }
 
 // shortcutsText returns the context-sensitive shortcut reference shown by the Shortcuts screen.
@@ -2550,10 +2635,31 @@ func (m model) actionsShortcuts(forScreen screen) string {
   ctrl+k       clear input
   esc / q      back`)
 	case screenTextArea:
+		if m.keymapStyle() == keymapVi {
+			if m.viInsertMode {
+				return strings.TrimSpace(`Actions
+  esc          normal mode
+  ctrl+s       save
+  ctrl+r       generate random value into Value
+  ctrl+o       read File path content into Value
+  ctrl+w       write Value to File path
+  ctrl+k       clear active text field
+  y            confirm pending file write warning`)
+			}
+			return strings.TrimSpace(`Actions
+  i            insert mode
+  ctrl+s       save
+  ctrl+r       generate random value into Value
+  ctrl+o       read File path content into Value
+  ctrl+w       write Value to File path
+  ctrl+k       clear active text field
+  y            confirm pending file write warning
+  esc / q / ctrl+g  back`)
+		}
 		return strings.TrimSpace(`Actions
   ctrl+s       save
-  r            generate random value into Value
-  ctrl+r       read File path content into Value
+  ctrl+r       generate random value into Value
+  ctrl+o       read File path content into Value
   ctrl+w       write Value to File path
   ctrl+k       clear active text field
   enter        newline in Value / choose Region or Type / next field in text inputs
@@ -2572,7 +2678,7 @@ func (m model) actionsShortcuts(forScreen screen) string {
 	case screenRandomPreview:
 		return strings.TrimSpace(`Actions
   enter        insert generated value into Value
-  r            regenerate
+  ctrl+r       regenerate generated value
   esc / q / ctrl+g  back`)
 	case screenConfirm:
 		return strings.TrimSpace(`Actions
@@ -2612,15 +2718,24 @@ func (m model) navigationShortcuts(forScreen screen) string {
 	}
 	if forScreen == screenTextArea || forScreen == screenInput {
 		if m.keymapStyle() == keymapVi {
-			return strings.TrimSpace(`Navigation
+			return strings.TrimSpace(`Mode
+  i                          enter insert mode
+  esc                        leave insert mode / back from normal mode
+
+Navigation
+  h / l                      backward/forward character
+  j / k                      next/previous line in Value
+  w / b                      forward/backward word
+  0 / $                      start/end of line
+  gg / G                     start/end of text
   tab                        next field
   shift+tab                  previous field
-  arrows                     move cursor / rows
-  Home / End                 start/end of line
   PgUp / PgDn                page in Value
 
-Vi note
-  Text fields keep insert-mode typing so h/j/k/l/w/b/x are not captured while editing text.`)
+Editing
+  x                          delete current character
+  dw                         delete next word
+  db                         delete previous word`)
 		}
 		return strings.TrimSpace(`Navigation
   tab                        next field
@@ -2639,7 +2754,7 @@ Vi note
 
 func globalShortcuts(forScreen screen) string {
 	return strings.TrimSpace(`Global
-  ?            open shortcuts
+  ctrl+/       open shortcuts
   ctrl-c       press twice to quit
   ctrl-q       press twice to quit`)
 }
@@ -2691,6 +2806,13 @@ func indentBlock(s string, spaces int) string {
 		lines[i] = prefix + line
 	}
 	return strings.Join(lines, "\n")
+}
+
+func padMin(v string, width int) string {
+	if len(v) >= width {
+		return v
+	}
+	return v + strings.Repeat(" ", width-len(v))
 }
 
 func pad(v string, width int) string {
