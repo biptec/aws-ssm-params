@@ -21,13 +21,15 @@ import (
 // Region stores the primary/default AWS region, while Regions stores every explicitly requested region;
 // AllRegions tells the rest of the app to discover enabled AWS regions and mark inventory items as regional wildcards.
 type Config struct {
-	PathsFile  string
-	Region     string
-	Regions    []string
-	Profile    string
-	AllRegions bool
-	NoColor    bool
-	Keymap     string
+	PathsFile            string
+	Region               string
+	Regions              []string
+	Profile              string
+	AllRegions           bool
+	NoColor              bool
+	Keymap               string
+	Columns              []string
+	AllowPathsFileUpdate bool
 }
 
 const allRegionsSeedRegion = "us-east-1"
@@ -36,11 +38,15 @@ const allRegionsSeedRegion = "us-east-1"
 // It enforces mutually exclusive region modes, falls back to AWS_PROFILE/AWS_REGION/AWS_DEFAULT_REGION,
 // deduplicates repeated --region values, and decides whether a paths-file argument should be read for the command.
 func ConfigFromCLI(ctx *cli.Context) (Config, error) {
+	allRegions := boolFlagValue(ctx, "all-regions", "AWS_SSM_PARAMS_ALL_REGIONS", false)
 	regionArgs := compactStrings(ctx.StringSlice("region"))
-	if ctx.Bool("all-regions") && len(regionArgs) > 0 {
+	if len(regionArgs) == 0 {
+		regionArgs = compactStrings([]string{os.Getenv("AWS_SSM_PARAMS_REGION")})
+	}
+	if allRegions && len(regionArgs) > 0 {
 		return Config{}, errors.New("--region and --all-regions cannot be used together")
 	}
-	profile := ctx.String("profile")
+	profile := stringFlagValue(ctx, "profile", "AWS_SSM_PARAMS_PROFILE", "")
 	if profile == "" {
 		profile = os.Getenv("AWS_PROFILE")
 	}
@@ -48,7 +54,7 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 	region := ""
 	if len(regions) > 0 {
 		region = regions[0]
-	} else if !ctx.Bool("all-regions") {
+	} else if !allRegions {
 		region = os.Getenv("AWS_REGION")
 		if region == "" {
 			region = os.Getenv("AWS_DEFAULT_REGION")
@@ -57,7 +63,7 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 			regions = []string{region}
 		}
 	}
-	keymap := strings.ToLower(strings.TrimSpace(ctx.String("keymap")))
+	keymap := strings.ToLower(strings.TrimSpace(stringFlagValue(ctx, "keymap", "AWS_SSM_PARAMS_KEYMAP", "emacs")))
 	if keymap == "" {
 		keymap = "emacs"
 	}
@@ -65,21 +71,25 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported --keymap %q; expected emacs or vi", keymap)
 	}
 
-	pathsFile := ""
-	switch ctx.Command.Name {
-	case "get", "set":
-		pathsFile = ""
-	default:
-		pathsFile = ctx.Args().First()
+	pathsFile := strings.TrimSpace(stringFlagValue(ctx, "paths-file", "AWS_SSM_PARAMS_PATHS_FILE", ""))
+	columns, err := ui.ParseColumnOption(stringFlagValue(ctx, "columns", "AWS_SSM_PARAMS_COLUMNS", ""))
+	if err != nil {
+		return Config{}, err
+	}
+	allowPathsFileUpdate := boolFlagValue(ctx, "allow-paths-file-update", "AWS_SSM_PARAMS_ALLOW_PATHS_FILE_UPDATE", false)
+	if allowPathsFileUpdate && pathsFile == "" {
+		return Config{}, errors.New("--allow-paths-file-update requires --paths-file")
 	}
 	return Config{
-		PathsFile:  pathsFile,
-		Region:     region,
-		Regions:    regions,
-		Profile:    profile,
-		AllRegions: ctx.Bool("all-regions"),
-		NoColor:    ctx.Bool("no-color") || os.Getenv("NO_COLOR") != "",
-		Keymap:     keymap,
+		PathsFile:            pathsFile,
+		Region:               region,
+		Regions:              regions,
+		Profile:              profile,
+		AllRegions:           allRegions,
+		NoColor:              boolFlagValue(ctx, "no-color", "AWS_SSM_PARAMS_NO_COLOR", false) || os.Getenv("NO_COLOR") != "",
+		Keymap:               keymap,
+		Columns:              columns,
+		AllowPathsFileUpdate: allowPathsFileUpdate,
 	}, nil
 }
 
@@ -89,11 +99,11 @@ func NewClient(cfg Config) ssm.Client {
 	return ssm.NewAWSCLI(cfg.Profile, cfg.Region)
 }
 
-// LoadItems reads the paths file and performs command-level validation around it.
-// Commands that operate on an inventory need at least one SSM path; an empty or missing file is treated as a user error.
+// LoadItems reads an optional paths file and validates it when present.
+// An omitted file means the caller wants to discover parameters directly from AWS SSM.
 func LoadItems(cfg Config) ([]inventory.Item, error) {
 	if cfg.PathsFile == "" {
-		return nil, errors.New("paths file argument is required; usage: aws-ssm-params [global options] <paths-file>")
+		return nil, nil
 	}
 	items, err := inventory.LoadPathsFile(cfg.PathsFile)
 	if err != nil {
@@ -105,20 +115,21 @@ func LoadItems(cfg Config) ([]inventory.Item, error) {
 	return items, nil
 }
 
-// PrepareItems loads inventory entries and attaches the correct region information to each item.
-// Single-region mode resolves one concrete region, while multi-region/all-regions mode marks items with "*"
-// so later status loading expands them into real regional rows only where parameters exist.
+// PrepareItems loads optional inventory entries and attaches the correct region information to each item.
+// Without a paths file, the returned inventory is nil and downstream loaders discover parameters from AWS SSM.
 func PrepareItems(cfg *Config) ([]inventory.Item, error) {
-	items, err := LoadItems(*cfg)
-	if err != nil {
-		return nil, err
-	}
 	if cfg.AllRegions {
 		ensureAllRegionsSeedRegion(cfg)
 	} else if err := ensureRegions(cfg); err != nil {
 		return nil, err
 	}
-	applyItemRegions(items, *cfg)
+	items, err := LoadItems(*cfg)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > 0 {
+		applyItemRegions(items, *cfg)
+	}
 	return items, nil
 }
 
@@ -161,13 +172,48 @@ func applyItemRegions(items []inventory.Item, cfg Config) {
 	}
 }
 
+func stringFlagValue(ctx *cli.Context, name, envName, fallback string) string {
+	if ctx.IsSet(name) {
+		return ctx.String(name)
+	}
+	if envName != "" {
+		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+			return value
+		}
+	}
+	return fallback
+}
+
+func boolFlagValue(ctx *cli.Context, name, envName string, fallback bool) bool {
+	if ctx.IsSet(name) {
+		return ctx.Bool(name)
+	}
+	if envName != "" {
+		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+			return parseBoolEnv(value)
+		}
+	}
+	return fallback
+}
+
+func parseBoolEnv(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "t", "true", "y", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
 // compactStrings trims whitespace and removes empty flag values while preserving the original order.
 func compactStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
 		}
 	}
 	return out
@@ -214,11 +260,14 @@ func Interactive(ctx *cli.Context) error {
 		regionLabel = strings.Join(regions, ", ")
 	}
 	return ui.RunInteractive(client, items, ui.Options{
-		Region:  regionLabel,
-		Regions: regions,
-		Profile: cfg.Profile,
-		NoColor: cfg.NoColor,
-		Keymap:  cfg.Keymap,
+		Region:               regionLabel,
+		Regions:              regions,
+		Profile:              cfg.Profile,
+		PathsFile:            cfg.PathsFile,
+		NoColor:              cfg.NoColor,
+		Keymap:               cfg.Keymap,
+		Columns:              cfg.Columns,
+		AllowPathsFileUpdate: cfg.AllowPathsFileUpdate,
 	})
 }
 
@@ -382,6 +431,9 @@ func resolveImportType(defaultType, existingType, recordType string) (ssm.Parame
 func PrepareImportItems(cfg *Config, format string) ([]inventory.Item, error) {
 	switch format {
 	case "dotenv":
+		if cfg.PathsFile == "" {
+			return nil, errors.New("--paths-file is required for dotenv import")
+		}
 		return PrepareItems(cfg)
 	case "json":
 		if cfg.PathsFile == "" {
@@ -478,11 +530,21 @@ func Export(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	client := NewClient(cfg)
+	regions := append([]string(nil), cfg.Regions...)
+	if cfg.AllRegions {
+		var err error
+		regions, err = client.ListRegions()
+		if err != nil {
+			return fmt.Errorf("list AWS regions: %w", err)
+		}
+	}
+
 	var statuses []ui.Status
 	if ctx.String("file") == "" {
-		statuses = ui.LoadStatusesForRegions(NewClient(cfg), items, true, cfg.Regions)
+		statuses = ui.LoadStatusesForRegions(client, items, true, regions)
 	} else {
-		statuses = ui.LoadStatusesWithProgressForRegions(NewClient(cfg), items, true, cfg.Regions)
+		statuses = ui.LoadStatusesWithProgressForRegions(client, items, true, regions)
 	}
 
 	var records []secretfmt.Record

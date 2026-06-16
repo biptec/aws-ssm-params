@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -79,6 +81,9 @@ func LoadStatusesBatch(client ssm.Client, items []inventory.Item, includeValues 
 // Concrete-region items are loaded directly by their item region; wildcard items are expanded across either an explicit
 // region list or every enabled AWS region discovered from the client.
 func LoadStatusesBatchForRegions(client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
+	if len(items) == 0 {
+		return loadAllStatusesForRegions(client, includeValues, regions, progress)
+	}
 	if containsAllRegionItems(items) {
 		if len(regions) > 0 {
 			return loadStatusesRegions(client, items, includeValues, regions, progress)
@@ -144,6 +149,101 @@ func loadStatusesByItemRegion(client ssm.Client, items []inventory.Item, include
 
 	for _, item := range items {
 		status := statusFromMaps(item, item.Region, metas, values, errs, includeValues)
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+// loadAllStatusesForRegions discovers every SSM parameter in the selected regions.
+// It is used when no paths file was provided, so the TUI can be opened as a full SSM parameter browser/manager.
+func loadAllStatusesForRegions(client ssm.Client, includeValues bool, regions []string, progress LoadProgress) []Status {
+	if len(regions) == 0 {
+		if region := client.DefaultRegion(); region != "" {
+			regions = []string{region}
+		} else {
+			regions = []string{""}
+		}
+	}
+	statuses := []Status{}
+	for _, region := range regions {
+		statuses = append(statuses, loadAllStatusesRegion(client.ForRegion(region), region, includeValues, progress)...)
+	}
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Item.Region != statuses[j].Item.Region {
+			return statuses[i].Item.Region < statuses[j].Item.Region
+		}
+		return statuses[i].Item.Path < statuses[j].Item.Path
+	})
+	return statuses
+}
+
+func loadAllStatusesRegion(client ssm.Client, region string, includeValues bool, progress LoadProgress) []Status {
+	if progress != nil {
+		progress(0, 0, region, nil)
+	}
+	metas, err := client.ListParameterMetadata()
+	if err != nil {
+		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
+	}
+	items := make([]inventory.Item, 0, len(metas))
+	metaByKey := map[string]ssm.Metadata{}
+	for _, meta := range metas {
+		if meta.Name == "" {
+			continue
+		}
+		if meta.Region == "" {
+			meta.Region = region
+		}
+		item := inventory.Item{Path: meta.Name, Region: meta.Region, Kind: "ssm", Source: "aws:ssm", SecretName: pathBase(meta.Name)}
+		items = append(items, item)
+		metaByKey[itemKey(item.Region, item.Path)] = meta
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+
+	values := map[string]ssm.Parameter{}
+	errs := map[string]error{}
+	if includeValues {
+		for start := 0; start < len(items); start += 10 {
+			end := start + 10
+			if end > len(items) {
+				end = len(items)
+			}
+			chunkItems := items[start:end]
+			if progress != nil {
+				progress(start, len(items), region, chunkItems)
+			}
+			paths := make([]string, 0, len(chunkItems))
+			for _, item := range chunkItems {
+				paths = append(paths, item.Path)
+			}
+			chunkValues, chunkErrs := client.GetMany(paths)
+			for path, value := range chunkValues {
+				if value.Region == "" {
+					value.Region = region
+				}
+				values[itemKey(region, path)] = value
+			}
+			for path, err := range chunkErrs {
+				errs[itemKey(region, path)] = err
+			}
+		}
+	}
+	if progress != nil {
+		progress(len(items), len(items), region, nil)
+	}
+
+	statuses := make([]Status, 0, len(items))
+	for _, item := range items {
+		status := statusFromMaps(item, item.Region, metaByKey, values, errs, includeValues)
+		if !status.Exists && status.Error == "" {
+			meta := metaByKey[itemKey(item.Region, item.Path)]
+			status.Exists = true
+			status.Type = valueOrDefault(meta.Type, ssm.DefaultParameterType.String())
+			status.Tier = meta.Tier
+			status.Description = meta.Description
+			status.User = meta.User
+			status.Modified = meta.Modified
+		}
 		statuses = append(statuses, status)
 	}
 	return statuses
@@ -358,6 +458,22 @@ func colorStatus(status string, noColor bool) string {
 	default:
 		return status
 	}
+}
+
+func pathBase(path string) string {
+	path = strings.TrimRight(path, "/")
+	idx := strings.LastIndex(path, "/")
+	if idx >= 0 && idx < len(path)-1 {
+		return path[idx+1:]
+	}
+	return path
+}
+
+func valueOrDefault(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 // valueOrDash returns a dash placeholder for empty table fields.

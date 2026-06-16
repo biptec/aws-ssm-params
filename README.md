@@ -4,7 +4,7 @@ A fast, terminal-first CLI/TUI for managing **AWS Systems Manager Parameter Stor
 
 `aws-ssm-params` helps developers, DevOps engineers, and platform teams inspect, edit, import, export, and audit `String`, `StringList`, and `SecureString` parameters without building one-off scripts or clicking through the AWS Console.
 
-It is designed for the workflow many teams already have: keep a small list of expected SSM paths in version control, then use that list to check what exists in AWS, fill missing values, rotate secrets, export a backup, or compare parameters across regions.
+It can work as a full SSM parameter browser by discovering parameters directly from AWS, or it can use an optional paths file as a focused filter for a known set of expected parameters.
 
 ## Why use it?
 
@@ -23,12 +23,12 @@ AWS SSM Parameter Store is simple and reliable, but day-to-day secret maintenanc
 
 - Interactive Bubble Tea TUI for browsing and editing SSM parameters.
 - Works with all standard SSM parameter types: `SecureString`, `String`, and `StringList`.
-- Reads a simple paths file: one SSM path per line.
+- Can discover SSM parameters directly from AWS, or read an optional paths file with one SSM path per line.
 - Single-region, selected multi-region, and all-enabled-regions scanning.
 - Keeps secret values hidden by default in the TUI.
-- Optional value reveal, SHA-256 prefix, version, tier, user, description, date, source, and metadata columns.
+- Optional value reveal, SHA-256 prefix, version, tier, user, description, and date columns populated from AWS SSM metadata/runtime state.
 - Search/filter mode for large parameter lists.
-- Edit values inline or load a value from a file, while preserving or choosing the SSM parameter type.
+- Edit existing values or create new parameters inline, while preserving or choosing the SSM parameter type.
 - Generate random secrets: base64, hex, or UUID.
 - Import/export as dotenv or JSON, including optional parameter type metadata.
 - Refuses to overwrite existing non-empty values unless `--override` is used.
@@ -41,7 +41,7 @@ AWS SSM Parameter Store is simple and reliable, but day-to-day secret maintenanc
 Keep a `paths.txt` file beside your application or infrastructure code and run the TUI before deploying:
 
 ```bash
-aws-ssm-params --region eu-north-1 paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt
 ```
 
 You immediately see which required parameters are present, missing, empty, or failing due to AWS permission/API errors.
@@ -75,13 +75,13 @@ custom base64 byte length
 Scan a known set of parameters across selected regions:
 
 ```bash
-aws-ssm-params --region eu-north-1 --region eu-central-1 paths.txt
+aws-ssm-params --region eu-north-1 --region eu-central-1 --paths-file paths.txt
 ```
 
 Or scan all AWS regions enabled for the account:
 
 ```bash
-aws-ssm-params --all-regions paths.txt
+aws-ssm-params --all-regions --paths-file paths.txt
 ```
 
 This is useful when you need to verify whether replicated apps, disaster-recovery regions, or regional workloads have the same required secret set.
@@ -91,13 +91,13 @@ This is useful when you need to verify whether replicated apps, disaster-recover
 Export a known set of parameters:
 
 ```bash
-aws-ssm-params --region eu-north-1 export --file values.env paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt export --file values.env
 ```
 
 Import them into another account/profile/region:
 
 ```bash
-AWS_PROFILE=target aws-ssm-params --region eu-central-1 import --file values.env paths.txt
+AWS_PROFILE=target aws-ssm-params --region eu-central-1 --paths-file paths.txt import --file values.env
 ```
 
 > Exported files contain plaintext secrets. Store them carefully, encrypt them at rest, and delete them when they are no longer needed.
@@ -208,14 +208,14 @@ EOF_PATHS
 Open the interactive TUI:
 
 ```bash
-aws-ssm-params --profile dev --region eu-north-1 paths.txt
+aws-ssm-params --profile dev --region eu-north-1 --paths-file paths.txt
 ```
 
 Inside the TUI:
 
 - Press `ctrl+/` to open the context-sensitive `Shortcuts` page.
 - Press `d` on the main screen to show/hide full details for the selected parameter.
-- Press `Enter` on the main screen to edit a value.
+- Press `Enter` on the main screen to edit a value, or `n` to create a new parameter.
 - Press `ctrl+r` inside the editor to generate a random value into `Value`; review it, then press `ctrl+s` to save.
 - Press `/` on the main screen to search.
 - Press `esc` to go back from inner screens; on the main screen, `esc` quits.
@@ -248,37 +248,64 @@ This makes it easy to keep parameter requirements in Git without storing any sec
 ## Command overview
 
 ```text
-aws-ssm-params [global options] <paths-file>
+aws-ssm-params [global options] <command> [command options]
 aws-ssm-params [global options] get <path> [--file path]
 aws-ssm-params [global options] set <path> <value> [--type string|string-list|secure-string] [--override]
 aws-ssm-params [global options] set <path> --file path [--type string|string-list|secure-string] [--override]
-aws-ssm-params [global options] import [--format dotenv] [--file path] [--type string|string-list|secure-string] [--override] <paths-file>
-aws-ssm-params [global options] import --format json [--file path] [--type string|string-list|secure-string] [--override] [paths-file]
-aws-ssm-params [global options] export [--format dotenv|json] [--file path] [--include-missing] <paths-file>
+aws-ssm-params [global options] import [--format dotenv] [--file path] [--type string|string-list|secure-string] [--override]
+aws-ssm-params [global options] export [--format dotenv|json] [--file path] [--include-missing]
 ```
 
-Opening the TUI is the default behavior:
+Opening the TUI is the default behavior. Without `--paths-file`, the TUI discovers parameters directly from AWS for the selected region(s):
 
 ```bash
-aws-ssm-params --region eu-north-1 paths.txt
+aws-ssm-params --region eu-north-1
 ```
+
+Use `--paths-file` when you want to filter the TUI to a known set of paths:
+
+```bash
+aws-ssm-params --region eu-north-1 --paths-file paths.txt
+```
+
+By default, `--paths-file` is treated as a read-only filter/list. New parameters created in the TUI appear immediately in the current UI, but the file is not changed. Add `--allow-paths-file-update` when you want the TUI to append newly created paths and remove deleted paths from that file.
 
 ## Global options
 
 ```text
---region REGION      AWS region. Repeat to scan selected regions.
+--region REGION      AWS region. Repeat or comma-separate to scan selected regions.
 --all-regions        Search parameters across all enabled AWS regions.
 --profile PROFILE    AWS profile name.
 --no-color           Disable colored output.
 --keymap KEYMAP      Keyboard navigation style: emacs or vi (default: emacs).
+--paths-file FILE    Optional file with SSM parameter paths to load/filter.
+--columns LIST       Comma-separated optional TUI columns to show on startup.
+--allow-paths-file-update
+                     Allow the TUI to update --paths-file on create/delete.
+```
+
+All global options can also be configured through environment variables:
+
+```text
+AWS_SSM_PARAMS_REGION
+AWS_SSM_PARAMS_ALL_REGIONS
+AWS_SSM_PARAMS_PROFILE
+AWS_SSM_PARAMS_PATHS_FILE
+AWS_SSM_PARAMS_NO_COLOR
+AWS_SSM_PARAMS_KEYMAP
+AWS_SSM_PARAMS_COLUMNS
+AWS_SSM_PARAMS_ALLOW_PATHS_FILE_UPDATE
 ```
 
 Notes:
 
 - `--region` and `--all-regions` cannot be used together.
-- If `--region` is omitted, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
+- If `--region` is omitted, the tool falls back to `AWS_SSM_PARAMS_REGION`, `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
+- `AWS_SSM_PARAMS_REGION` accepts one region or multiple comma-separated regions.
 - Direct `get`, `set`, and `import` operate on one concrete region.
-- `interactive` and `export` support repeated `--region` and `--all-regions`.
+- `interactive` and `export` support repeated/comma-separated `--region` and `--all-regions`.
+- `--allow-paths-file-update` requires `--paths-file`.
+- CLI flags override `AWS_SSM_PARAMS_*` environment variables.
 - `--keymap emacs` uses Emacs-style navigation shortcuts in the TUI. `--keymap vi` uses vi-style navigation on list/selector screens and a modal `NORMAL`/`INSERT` editor for text fields.
 
 ## Parameter types
@@ -305,31 +332,54 @@ Supported CLI aliases are `secure-string`, `string`, and `string-list`.
 
 The TUI is built for fast keyboard-driven maintenance.
 
-The main screen has two sections:
+The main screen starts as a single full-height list:
 
 ```text
-Selected Parameter
 List of N Parameters
 ```
 
-`Selected Parameter` shows the currently focused path and a compact summary. Press `d` to toggle all available metadata on or off. When details are shown, they stay visible while you move through the parameter list until you press `d` again.
+Press `d` to show `Selected Parameter` above the list. It opens directly in full-detail mode and stays visible while you move through the parameter list until you press `d` again.
 
-`List of N Parameters` shows all loaded paths with optional metadata columns.
+`List of N Parameters` shows all discovered or filtered paths with optional metadata columns. Press `n` to create a new parameter; the editor opens with focus on `SSM path`. With `--paths-file`, newly created paths are shown immediately in the UI. The file itself is updated only when `--allow-paths-file-update` is enabled.
+
+### Managed paths file updates
+
+When `--paths-file` is used without additional flags, it is read-only:
+
+```text
+create -> parameter appears in the current UI, paths-file unchanged
+delete -> parameter is deleted in AWS and remains as a missing row, paths-file unchanged
+```
+
+Use `--allow-paths-file-update` to let the TUI keep the paths file in sync with create/delete operations:
+
+```bash
+aws-ssm-params --paths-file paths.txt --allow-paths-file-update
+```
+
+Then:
+
+```text
+create -> append path to paths-file if missing
+delete -> remove path from paths-file and remove the row from the UI
+```
+
+Without `--paths-file`, deleted rows disappear from the UI because the list is discovered directly from AWS.
 
 ### Footer shortcuts
 
-The footer only shows action shortcuts. Navigation shortcuts are available on the context-sensitive `Shortcuts` page opened with `ctrl+/`. The `ctrl+/ help` shortcut is always shown first so it remains visible in narrow terminals.
+The footer only shows action shortcuts. Navigation shortcuts are available in the context-sensitive `Shortcuts` popup opened with `ctrl+/`. The `ctrl+/ help` shortcut is always shown first so it remains visible in narrow terminals. When a popup is open, the footer switches to the top popup actions.
 
 Main footer when details are hidden:
 
 ```text
-ctrl+/ help • enter edit • d show details • / search • c columns • x delete • X delete visible • esc quit
+ctrl+/ help • enter edit • n new • d show details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
 Main footer when details are shown:
 
 ```text
-ctrl+/ help • enter edit • d hide details • / search • c columns • x delete • X delete visible • esc quit
+ctrl+/ help • enter edit • n new • d hide details • / search • c columns • x delete • X delete visible • esc quit
 ```
 
 Editor footer in Emacs keymap:
@@ -352,9 +402,9 @@ ctrl+/ help • ctrl+s save • ctrl+r random • ctrl+o read file • ctrl+w wr
 
 `ctrl+r random` is intentionally available in the editor, not on the main screen. It inserts the generated value into `Value`; the value is saved to AWS only after you press `ctrl+s`. `ctrl+o read file` reads the configured file path into `Value`.
 
-### Shortcuts page
+### Shortcuts popup
 
-Press `ctrl+/` to open `Shortcuts`. It shows actions and navigation for the page you opened it from. The navigation section follows the selected keymap.
+Press `ctrl+/` to open the `Shortcuts` popup. It shows actions and navigation for the page or popup you opened it from. The navigation section follows the selected keymap. If `Shortcuts` is opened while another popup is active, it is stacked above that popup; closing `Shortcuts` returns to the previous popup.
 
 Emacs-style main/list navigation:
 
@@ -392,11 +442,11 @@ x                          delete current character
 dw / db                    delete next/previous word
 ```
 
-Hidden duplicate back/quit shortcuts such as `q` and `ctrl+g` remain available and are documented on `Shortcuts`, but the footer shows `esc` as the primary back/quit key.
+Hidden duplicate back/quit shortcuts such as `q` and `ctrl+g` remain available and are documented in `Shortcuts`, but the footer shows `esc` as the primary back/quit key.
 
 ### Columns
 
-Press `c` to choose optional columns:
+The `#` and `PATH` columns are always visible. Use `--columns` to choose startup columns, or press `c` in the TUI to open the Columns popup over the current main screen. The popup lets you choose optional columns populated from AWS SSM metadata/runtime state:
 
 ```text
 REGION
@@ -409,11 +459,13 @@ SHA256
 VALUE
 USER
 DESCRIPTION
-KIND
-APP
-COMPONENT
-SECRET
-SOURCE
+```
+
+Examples:
+
+```bash
+aws-ssm-params --columns region,type,value
+AWS_SSM_PARAMS_COLUMNS=region,type,value aws-ssm-params
 ```
 
 Column widths are calculated dynamically from the current result set and terminal width.
@@ -432,7 +484,7 @@ The default format is `dotenv`.
 ### Dotenv export
 
 ```bash
-aws-ssm-params --region eu-north-1 export --file values.env paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt export --file values.env
 ```
 
 Example output:
@@ -454,7 +506,7 @@ During import, the `# ssm:` comment takes priority. If the comment is missing, t
 ### JSON export
 
 ```bash
-aws-ssm-params --region eu-north-1 export --format json --file values.json paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt export --format json --file values.json
 ```
 
 Example output:
@@ -479,7 +531,7 @@ JSON uses SSM paths as keys, so it can be imported without alias resolution. The
 Dotenv import requires `paths.txt` because dotenv keys are aliases and the tool needs the paths file to resolve them back to full SSM paths:
 
 ```bash
-aws-ssm-params --region eu-north-1 import --file values.env paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt import --file values.env
 ```
 
 JSON import does not require `paths.txt`, because JSON uses full SSM paths as keys:
@@ -488,16 +540,16 @@ JSON import does not require `paths.txt`, because JSON uses full SSM paths as ke
 aws-ssm-params --region eu-north-1 import --format json --file values.json
 ```
 
-You may still pass `paths.txt` with JSON if you want the command shape to stay consistent across scripts, but it is optional for that format:
+You may still pass `--paths-file paths.txt` with JSON if you want to keep imports scoped to a known path set, but it is optional for that format:
 
 ```bash
-aws-ssm-params --region eu-north-1 import --format json --file values.json paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt import --format json --file values.json
 ```
 
 By default, import will not overwrite existing non-empty values. Imported records with type metadata keep that type. Records without metadata preserve the existing AWS type, or use `SecureString` for new parameters. You can set a different default type:
 
 ```bash
-aws-ssm-params --region eu-north-1 import --file app.env --type string paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt import --file app.env --type string
 ```
 
 For JSON without `paths.txt`:
@@ -509,7 +561,7 @@ aws-ssm-params --region eu-north-1 import --format json --file values.json --typ
 To overwrite existing non-empty values intentionally:
 
 ```bash
-aws-ssm-params --region eu-north-1 import --file values.env --override paths.txt
+aws-ssm-params --region eu-north-1 --paths-file paths.txt import --file values.env --override
 aws-ssm-params --region eu-north-1 import --format json --file values.json --override
 ```
 
@@ -570,26 +622,26 @@ Overwrite: true after protection checks pass
 ### Single region
 
 ```bash
-aws-ssm-params --region eu-north-1 paths.txt
+aws-ssm-params --region eu-north-1
 ```
 
-Every path is checked in `eu-north-1`.
+All visible SSM parameters are discovered in `eu-north-1`. Add `--paths-file paths.txt` to check only the paths listed in that file.
 
 ### Selected regions
 
 ```bash
-aws-ssm-params --region eu-north-1 --region eu-central-1 paths.txt
+aws-ssm-params --region eu-north-1 --region eu-central-1
 ```
 
-Each path is searched in the selected regions. Existing parameters are shown as regional rows. Paths missing from every scanned region are shown as wildcard missing rows.
+Parameters are discovered in each selected region. With `--paths-file paths.txt`, each listed path is searched in the selected regions; existing parameters are shown as regional rows and paths missing from every scanned region are shown as wildcard missing rows.
 
 ### All enabled regions
 
 ```bash
-aws-ssm-params --all-regions paths.txt
+aws-ssm-params --all-regions
 ```
 
-The tool calls `ec2:DescribeRegions`, filters out not-opted-in regions, and scans the remaining enabled regions.
+The tool calls `ec2:DescribeRegions`, filters out not-opted-in regions, and scans the remaining enabled regions. Add `--paths-file paths.txt` to filter the scan to a known set of paths.
 
 ## Security notes
 

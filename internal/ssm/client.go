@@ -21,6 +21,7 @@ type Client interface {
 	Get(path string) (Parameter, error)
 	GetMany(paths []string) (map[string]Parameter, map[string]error)
 	DescribeMany(paths []string) map[string]Metadata
+	ListParameterMetadata() ([]Metadata, error)
 	PutParameter(path, value string, parameterType ParameterType) error
 	DeleteMany(paths []string) error
 }
@@ -244,6 +245,57 @@ func (c *AWSCLI) GetMany(paths []string) (map[string]Parameter, map[string]error
 	}
 
 	return values, errs
+}
+
+// ListParameterMetadata returns metadata for every parameter visible in the client's region.
+// Values are intentionally not included; callers can batch GetMany for the returned names when needed.
+func (c *AWSCLI) ListParameterMetadata() ([]Metadata, error) {
+	var result []Metadata
+	nextToken := ""
+	for {
+		args := c.args("ssm", "describe-parameters")
+		args = append(args, "--max-results", "50", "--output", "json")
+		if nextToken != "" {
+			args = append(args, "--next-token", nextToken)
+		}
+		out, err := runAWS(args...)
+		if err != nil {
+			return nil, err
+		}
+		var response struct {
+			Parameters []struct {
+				Name             string `json:"Name"`
+				Type             string `json:"Type"`
+				Tier             string `json:"Tier"`
+				Description      string `json:"Description"`
+				LastModifiedUser string `json:"LastModifiedUser"`
+				LastModifiedDate any    `json:"LastModifiedDate"`
+			} `json:"Parameters"`
+			NextToken string `json:"NextToken"`
+		}
+		if err := json.Unmarshal(out, &response); err != nil {
+			return nil, err
+		}
+		for _, param := range response.Parameters {
+			if param.Name == "" {
+				continue
+			}
+			result = append(result, Metadata{
+				Name:        param.Name,
+				Region:      c.Region,
+				Type:        param.Type,
+				Tier:        param.Tier,
+				Description: param.Description,
+				User:        param.LastModifiedUser,
+				Modified:    formatModifiedDate(param.LastModifiedDate),
+			})
+		}
+		if response.NextToken == "" {
+			break
+		}
+		nextToken = response.NextToken
+	}
+	return result, nil
 }
 
 // DescribeMany loads non-secret metadata for parameter paths in batches.

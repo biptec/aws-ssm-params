@@ -81,6 +81,30 @@ func (f fakeSSMClient) DescribeMany(paths []string) map[string]ssm.Metadata {
 	return result
 }
 
+func (f fakeSSMClient) ListParameterMetadata() ([]ssm.Metadata, error) {
+	var result []ssm.Metadata
+	for key, meta := range f.metas {
+		region, _ := splitItemKey(key)
+		if region != f.region {
+			continue
+		}
+		if meta.Region == "" {
+			meta.Region = f.region
+		}
+		result = append(result, meta)
+	}
+	return result, nil
+}
+
+func splitItemKey(key string) (string, string) {
+	for i := range key {
+		if key[i] == '\x00' {
+			return key[:i], key[i+1:]
+		}
+	}
+	return "", key
+}
+
 func (f fakeSSMClient) PutParameter(path, value string, parameterType ssm.ParameterType) error {
 	if f.params != nil {
 		f.params[itemKey(f.region, path)] = ssm.Parameter{Name: path, Region: f.region, Type: parameterType.String(), Value: value}
@@ -160,4 +184,47 @@ func TestStatusHelpers(t *testing.T) {
 	assert.Equal(t, "MISS", statusLabel(Status{}))
 	assert.Equal(t, "ERR", statusLabel(Status{Error: "boom"}))
 	assert.Equal(t, "EMPTY", statusLabel(Status{Exists: true, Empty: true}))
+}
+
+func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing.T) {
+	client := fakeSSMClient{
+		params: map[string]ssm.Parameter{
+			itemKey("eu-north-1", "/app/a"): {Name: "/app/a", Region: "eu-north-1", Type: "String", Value: "one", Version: 1},
+			itemKey("us-east-1", "/app/b"):  {Name: "/app/b", Region: "us-east-1", Type: "SecureString", Value: "two", Version: 2},
+		},
+		metas: map[string]ssm.Metadata{
+			itemKey("eu-north-1", "/app/a"): {Name: "/app/a", Region: "eu-north-1", Type: "String", Tier: "Standard"},
+			itemKey("us-east-1", "/app/b"):  {Name: "/app/b", Region: "us-east-1", Type: "SecureString", Tier: "Standard"},
+		},
+	}
+
+	statuses := LoadStatusesForRegions(client, nil, true, []string{"eu-north-1", "us-east-1"})
+
+	require.Len(t, statuses, 2)
+	assert.Equal(t, "eu-north-1", statuses[0].Item.Region)
+	assert.Equal(t, "/app/a", statuses[0].Item.Path)
+	assert.Equal(t, "one", statuses[0].Value)
+	assert.Equal(t, "us-east-1", statuses[1].Item.Region)
+	assert.Equal(t, "/app/b", statuses[1].Item.Path)
+	assert.Equal(t, "two", statuses[1].Value)
+}
+
+func TestLoadStatusesWithoutItemsKeepsMetadataWhenValuesAreNotIncluded(t *testing.T) {
+	client := fakeSSMClient{
+		region: "eu-north-1",
+		metas: map[string]ssm.Metadata{
+			itemKey("eu-north-1", "/app/meta-only"): {Name: "/app/meta-only", Type: "String", Tier: "Standard", Description: "desc"},
+		},
+	}
+
+	statuses := LoadStatusesForRegions(client, nil, false, nil)
+
+	require.Len(t, statuses, 1)
+	assert.True(t, statuses[0].Exists)
+	assert.Equal(t, "/app/meta-only", statuses[0].Item.Path)
+	assert.Equal(t, "eu-north-1", statuses[0].Item.Region)
+	assert.Equal(t, "String", statuses[0].Type)
+	assert.Equal(t, "Standard", statuses[0].Tier)
+	assert.Equal(t, "desc", statuses[0].Description)
+	assert.Empty(t, statuses[0].Value)
 }

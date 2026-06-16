@@ -56,16 +56,19 @@ OPTIONS:{{template "visibleFlagTemplate" .}}{{end}}
 func main() {
 	cliApp := &cli.App{
 		Name:                  "aws-ssm-params",
-		Usage:                 "Manage AWS SSM parameters from a paths file",
-		UsageText:             "aws-ssm-params [global options] <paths-file>\n   aws-ssm-params [global options] <command> [command options]",
+		Usage:                 "Manage AWS SSM parameters",
+		UsageText:             "aws-ssm-params [global options] <command> [command options]",
 		EnableBashCompletion:  true,
 		CustomAppHelpTemplate: alignedAppHelpTemplate,
 		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: "region", Usage: "AWS region; repeat to scan multiple regions; when omitted, AWS CLI resolves it from env/profile config"},
-			&cli.BoolFlag{Name: "all-regions", Usage: "search parameters across all enabled AWS regions"},
-			&cli.StringFlag{Name: "profile", Usage: "AWS profile"},
-			&cli.BoolFlag{Name: "no-color", Usage: "disable colored output"},
-			&cli.StringFlag{Name: "keymap", Value: "emacs", Usage: "keyboard navigation style: emacs or vi"},
+			&cli.StringSliceFlag{Name: "region", EnvVars: []string{"AWS_SSM_PARAMS_REGION"}, Usage: "AWS region; repeat or comma-separate to scan multiple regions; when omitted, AWS CLI resolves it from env/profile config"},
+			&cli.BoolFlag{Name: "all-regions", EnvVars: []string{"AWS_SSM_PARAMS_ALL_REGIONS"}, Usage: "search parameters across all enabled AWS regions"},
+			&cli.StringFlag{Name: "profile", EnvVars: []string{"AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"}, Usage: "AWS profile"},
+			&cli.BoolFlag{Name: "no-color", EnvVars: []string{"AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR"}, Usage: "disable colored output"},
+			&cli.StringFlag{Name: "keymap", Value: "emacs", EnvVars: []string{"AWS_SSM_PARAMS_KEYMAP"}, Usage: "keyboard navigation style: emacs or vi"},
+			&cli.StringFlag{Name: "paths-file", EnvVars: []string{"AWS_SSM_PARAMS_PATHS_FILE"}, Usage: "optional file with SSM parameter paths to load/filter"},
+			&cli.StringFlag{Name: "columns", EnvVars: []string{"AWS_SSM_PARAMS_COLUMNS"}, Usage: "comma-separated optional columns to show in the TUI"},
+			&cli.BoolFlag{Name: "allow-paths-file-update", EnvVars: []string{"AWS_SSM_PARAMS_ALLOW_PATHS_FILE_UPDATE"}, Usage: "allow the TUI to update --paths-file when creating or deleting parameters"},
 		},
 		Action: app.Interactive,
 		Commands: []*cli.Command{
@@ -94,7 +97,7 @@ func main() {
 			{
 				Name:               "import",
 				Usage:              "Import parameter values from stdin or file",
-				UsageText:          "aws-ssm-params [global options] import [--format dotenv] [--file path] [--type string|string-list|secure-string] [--override] <paths-file>\n   aws-ssm-params [global options] import --format json [--file path] [--type string|string-list|secure-string] [--override] [paths-file]",
+				UsageText:          "aws-ssm-params [global options] import [--format dotenv] [--file path] [--paths-file paths.txt] [--type string|string-list|secure-string] [--override]",
 				CustomHelpTemplate: alignedCommandHelpTemplate,
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "file", Usage: "read import data from file; stdin is used when omitted"},
@@ -107,7 +110,7 @@ func main() {
 			{
 				Name:               "export",
 				Usage:              "Export parameter values to stdout or file",
-				UsageText:          "aws-ssm-params [global options] export [--format dotenv|json] [--file path] [--include-missing] <paths-file>",
+				UsageText:          "aws-ssm-params [global options] export [--format dotenv|json] [--file path] [--include-missing] [--paths-file paths.txt]",
 				CustomHelpTemplate: alignedCommandHelpTemplate,
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "file", Usage: "write export data to file; stdout is used when omitted"},

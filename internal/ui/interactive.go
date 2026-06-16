@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,12 +20,15 @@ import (
 // Options contains runtime settings passed from the CLI layer into the interactive TUI.
 // It deliberately excludes CLI parsing details so the Bubble Tea model can be tested independently.
 type Options struct {
-	Environment string
-	Region      string
-	Regions     []string
-	Profile     string
-	NoColor     bool
-	Keymap      string
+	Environment          string
+	Region               string
+	Regions              []string
+	Profile              string
+	PathsFile            string
+	NoColor              bool
+	Keymap               string
+	Columns              []string
+	AllowPathsFileUpdate bool
 }
 
 // screen identifies the currently active TUI view.
@@ -43,6 +47,17 @@ const (
 	screenRegionSelect
 	screenTypeSelect
 	screenHelp
+)
+
+type popupKind int
+
+const (
+	popupNone popupKind = iota
+	popupColumns
+	popupShortcuts
+	popupConfirm
+	popupRegionSelect
+	popupTypeSelect
 )
 
 type editField int
@@ -95,6 +110,8 @@ type model struct {
 
 	screen       screen
 	returnScreen screen
+	activePopup  popupKind
+	popupStack   []popupKind
 
 	selected         int
 	selectedExpanded bool
@@ -161,13 +178,16 @@ type statusUpdatedMsg struct {
 	oldPath string
 	status  Status
 	message string
+	warning string
 	err     error
 }
 
 // deleteDoneMsg reports the result of deleting one or more visible/selected parameters.
 type deleteDoneMsg struct {
-	items []inventory.Item
-	err   error
+	items      []inventory.Item
+	removeRows bool
+	warning    string
+	err        error
 }
 
 const (
@@ -182,11 +202,6 @@ const (
 	columnValue       columnName = "value"
 	columnUser        columnName = "user"
 	columnDescription columnName = "description"
-	columnKind        columnName = "kind"
-	columnApp         columnName = "app"
-	columnComponent   columnName = "component"
-	columnSecretName  columnName = "secret"
-	columnSource      columnName = "source"
 	columnPath        columnName = "path"
 )
 
@@ -221,6 +236,7 @@ var (
 	footerStyle      = lipgloss.NewStyle().Foreground(statusLineFg)
 	warningStyle     = lipgloss.NewStyle().Foreground(warningFg)
 	hotkeyStyle      = lipgloss.NewStyle().Bold(true).Foreground(hotkeyFg)
+	cursorStyle      = lipgloss.NewStyle().Reverse(true)
 )
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
@@ -250,6 +266,10 @@ func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
 	editFileInput.CharLimit = 0
 	editFileInput.Width = 80
 
+	configureTextInputStyles(&input, opts)
+	configureTextInputStyles(&editPathInput, opts)
+	configureTextInputStyles(&editFileInput, opts)
+
 	area := textarea.New()
 	area.Prompt = ""
 	area.CharLimit = 0
@@ -267,25 +287,17 @@ func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
 		textArea:      area,
 		editPathInput: editPathInput,
 		editFileInput: editFileInput,
-		columns: map[columnName]bool{
-			columnIndex:       true,
-			columnRegion:      false,
-			columnDate:        false,
-			columnType:        false,
-			columnTier:        false,
-			columnVersion:     false,
-			columnLength:      false,
-			columnHash:        false,
-			columnValue:       false,
-			columnUser:        false,
-			columnDescription: false,
-			columnKind:        false,
-			columnApp:         false,
-			columnComponent:   false,
-			columnSecretName:  false,
-			columnSource:      false,
-		},
+		columns:       defaultColumnVisibility(opts.Columns),
 	}
+}
+
+func configureTextInputStyles(input *textinput.Model, opts Options) {
+	if opts.NoColor {
+		return
+	}
+	input.TextStyle = valueStyle
+	input.Cursor.TextStyle = valueStyle
+	input.Cursor.Style = valueStyle
 }
 
 // Init starts the initial background status load and registers a command that waits for loader messages.
@@ -354,7 +366,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			matchPath = msg.path
 		}
 		m.replaceStatus(matchPath, msg.status)
+		m.ensureSelection()
 		m.message = msg.message
+		m.warningMessage = msg.warning
 		m.errMessage = ""
 		m.screen = m.returnScreen
 		return m, nil
@@ -365,10 +379,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = m.returnScreen
 			return m, nil
 		}
-		for _, item := range msg.items {
-			m.markMissingItem(item)
+		if msg.removeRows {
+			m.removeItemRows(msg.items)
+		} else {
+			for _, item := range msg.items {
+				m.markMissingItem(item)
+			}
 		}
 		m.message = fmt.Sprintf("Deleted %d parameter(s)", len(msg.items))
+		m.warningMessage = msg.warning
 		m.errMessage = ""
 		m.screen = m.returnScreen
 		m.ensureSelection()
@@ -390,6 +409,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !(m.pendingFileWrite != fileWriteConfirmationNone && key == "y") {
 			m.clearTransientStatus()
+		}
+		if m.activePopup != popupNone {
+			switch m.activePopup {
+			case popupColumns:
+				return m.updateColumnsPopup(msg)
+			case popupShortcuts:
+				return m.updateShortcutsPopup(msg)
+			case popupConfirm:
+				return m.updateConfirmPopup(msg)
+			case popupRegionSelect:
+				return m.updateRegionSelectPopup(msg)
+			case popupTypeSelect:
+				return m.updateTypeSelectPopup(msg)
+			}
 		}
 
 		switch m.screen {
@@ -438,7 +471,7 @@ func (m model) View() string {
 	case screenLoading:
 		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
-		footer := mainFooterText(m.selectedExpanded)
+		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "")
 		if m.searchMode {
 			footer = searchFooterText()
 		}
@@ -467,12 +500,17 @@ func (m model) View() string {
 }
 
 func (m model) renderPage(footerText string, renderBody func(model) string) string {
+	if m.activePopup != popupNone {
+		footerText = m.popupFooterText(m.activePopup)
+	}
 	bottom := m.renderFooterWithStatus(footerText)
 	content := m
 	if m.height > 0 {
 		content.height = max(1, m.height-countLines(bottom))
 	}
-	return m.renderFullscreen(renderBody(content), bottom)
+	body := renderBody(content)
+	body = content.renderPopupStack(body)
+	return m.renderFullscreen(body, bottom)
 }
 
 // updateMain handles navigation and actions on the main parameter table.
@@ -533,7 +571,12 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc":
 		return m, tea.Quit
 	case "enter", "ctrl+j":
+		if len(m.visible()) == 0 {
+			return m, nil
+		}
 		return m.startMultiline(screenMain)
+	case "n":
+		return m.startNewParameter(screenMain)
 	case "/":
 		m.searchMode = true
 		m.query = m.effectiveQuery
@@ -544,10 +587,11 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.selectedExpanded = !m.selectedExpanded
 	case "c":
 		m.columnCursor = 0
-		m.returnScreen = screenMain
-		m.screen = screenColumns
+		m.pushPopup(popupColumns)
 	case "x":
-		m.startConfirm("Delete selected parameter?\n\nType DELETE to confirm:", "DELETE", []inventory.Item{m.currentItem()}, screenMain)
+		if len(m.visible()) > 0 {
+			m.startConfirm("Delete selected parameter?", "", []inventory.Item{m.currentItem()}, screenMain)
+		}
 	case "X":
 		items := m.visibleItems()
 		if len(items) > 0 {
@@ -582,7 +626,35 @@ func (m *model) applyMainNavigation(action navigationAction) {
 
 func (m *model) openShortcuts(from screen) {
 	m.shortcutsFor = from
-	m.screen = screenHelp
+	m.pushPopup(popupShortcuts)
+}
+
+func (m *model) pushPopup(kind popupKind) {
+	if m.activePopup != popupNone {
+		m.popupStack = append(m.popupStack, m.activePopup)
+	}
+	m.activePopup = kind
+	m.pendingKeySequence = ""
+}
+
+func (m *model) popPopup() {
+	if len(m.popupStack) == 0 {
+		m.activePopup = popupNone
+		m.pendingKeySequence = ""
+		return
+	}
+	last := len(m.popupStack) - 1
+	m.activePopup = m.popupStack[last]
+	m.popupStack = m.popupStack[:last]
+	m.pendingKeySequence = ""
+}
+
+func (m model) popupLayers() []popupKind {
+	layers := append([]popupKind(nil), m.popupStack...)
+	if m.activePopup != popupNone {
+		layers = append(layers, m.activePopup)
+	}
+	return layers
 }
 
 // updateInput handles single-line input screens used for custom random lengths and confirmation prompts.
@@ -689,6 +761,9 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.openShortcuts(screenTextArea)
 		return m, nil
 	case "q", "esc", "ctrl+g":
+		if key == "q" && m.shouldTypePrintableQInEditField() {
+			break
+		}
 		m.blurEditFields()
 		m.pendingFileWrite = fileWriteConfirmationNone
 		m.warningMessage = ""
@@ -826,6 +901,45 @@ func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	cols := columnItems()
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openShortcuts(screenColumns)
+	case "q", "esc", "ctrl+g":
+		m.popPopup()
+	case " ", "enter":
+		if len(cols) > 0 {
+			key := cols[m.columnCursor]
+			m.columns[key] = !m.columns[key]
+		}
+	case "a":
+		for _, c := range cols {
+			m.columns[c] = true
+		}
+	case "x":
+		for _, c := range cols {
+			m.columns[c] = false
+		}
+	}
+	return m, nil
+}
+
 func cursorFromNavigation(cursor, length int, action navigationAction) int {
 	if length <= 0 {
 		return 0
@@ -914,7 +1028,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loadingTitle = "Deleting parameters..."
 		m.loadingLines = itemPaths(items)
 		m.screen = screenLoading
-		return m, deleteCmd(m.client, items)
+		return m, deleteCmd(m.client, items, m.opts.PathsFile, m.opts.AllowPathsFileUpdate)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -998,11 +1112,124 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateHelp closes the help screen and returns to the main table.
+// updateHelp closes the legacy shortcuts screen and returns to the screen it documents.
 func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
 		m.screen = m.shortcutsFor
+	}
+	return m, nil
+}
+
+func (m model) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "esc", "ctrl+g", "?":
+		m.popPopup()
+	}
+	return m, nil
+}
+
+func (m model) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openShortcuts(screenConfirm)
+		return m, nil
+	case "q", "esc", "ctrl+g":
+		m.popPopup()
+		return m, nil
+	case "enter":
+		if m.confirmExpected != "" && m.input.Value() != m.confirmExpected {
+			m.errMessage = "confirmation phrase does not match"
+			return m, nil
+		}
+		items := append([]inventory.Item(nil), m.confirmItems...)
+		m.loadingTitle = "Deleting parameters..."
+		m.loadingLines = itemPaths(items)
+		m.activePopup = popupNone
+		m.popupStack = nil
+		m.screen = screenLoading
+		return m, deleteCmd(m.client, items, m.opts.PathsFile, m.opts.AllowPathsFileUpdate)
+	}
+	if m.confirmExpected == "" {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m model) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	regions := m.regionSelectOptions()
+	if len(regions) == 0 {
+		m.popPopup()
+		m = m.focusEditField(editFieldRegion)
+		return m, nil
+	}
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openShortcuts(screenRegionSelect)
+	case "q", "esc", "ctrl+g":
+		m.popPopup()
+		m = m.focusEditField(editFieldRegion)
+	case "enter", "ctrl+j":
+		m.editRegion = regions[m.regionCursor]
+		m.popPopup()
+		m = m.focusEditField(editFieldRegion)
+	}
+	return m, nil
+}
+
+func (m model) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := parameterTypeItems()
+	if len(items) == 0 {
+		m.popPopup()
+		return m, nil
+	}
+	key := msg.String()
+	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
+		}
+		return m, nil
+	}
+	if action, ok := m.navigationAction(key); ok {
+		m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
+		return m, nil
+	}
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return m, nil
+	}
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openShortcuts(screenTypeSelect)
+	case "q", "esc", "ctrl+g":
+		m.popPopup()
+		if m.typeReturnScreen == screenTextArea {
+			m = m.focusEditField(editFieldType)
+		}
+	case "enter", "ctrl+j":
+		m.editType = items[m.typeCursor].value
+		m.popPopup()
+		if m.typeReturnScreen == screenTextArea {
+			m = m.focusEditField(editFieldType)
+		}
 	}
 	return m, nil
 }
@@ -1030,7 +1257,6 @@ func (m model) startEdit(mode string, ret screen) (tea.Model, tea.Cmd) {
 	m.input.Placeholder = ""
 	if mode == "random-custom" {
 		m.input.SetValue("32")
-		m.input.Placeholder = "Bytes length"
 	}
 	m.input.Focus()
 	m.screen = screenInput
@@ -1058,6 +1284,28 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.message = ""
 	m.errMessage = ""
 	m.screen = screenTextArea
+	return m, nil
+}
+
+// startNewParameter opens the editor with empty fields so users can create a parameter without a paths file.
+func (m model) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
+	m.returnScreen = ret
+	m.editRegion = m.initialEditRegion()
+	m.editType = ssm.DefaultParameterType
+	m.textArea.SetValue("")
+	m.editPathInput.SetValue("")
+	m.editPathInput.Placeholder = ""
+	m.editFileInput.SetValue("")
+	m.editFileInput.Placeholder = ""
+	m.editField = editFieldSSMPath
+	m.editDirection = editDirectionNext
+	m.viInsertMode = m.keymapStyle() != keymapVi
+	m.pendingFileWrite = fileWriteConfirmationNone
+	m.warningMessage = ""
+	m.message = ""
+	m.errMessage = ""
+	m.screen = screenTextArea
+	m = m.focusEditField(editFieldSSMPath)
 	return m, nil
 }
 
@@ -1139,7 +1387,7 @@ func (m model) openRegionSelect() (tea.Model, tea.Cmd) {
 		return m.focusEditField(editFieldValue), nil
 	}
 	m.regionCursor = indexOf(regions, m.editRegion)
-	m.screen = screenRegionSelect
+	m.pushPopup(popupRegionSelect)
 	return m, nil
 }
 
@@ -1160,10 +1408,14 @@ func (m model) ensureRegionSelectOptions() model {
 }
 
 func (m model) regionSelectOptions() []string {
+	var regions []string
 	if len(m.editRegionOptions) > 0 {
-		return append([]string(nil), m.editRegionOptions...)
+		regions = append([]string(nil), m.editRegionOptions...)
+	} else {
+		regions = m.regionOptions()
 	}
-	return m.regionOptions()
+	sort.Strings(regions)
+	return regions
 }
 
 // loadValueFromFile reads the path from the edit screen and replaces the multiline value with that file content.
@@ -1254,7 +1506,7 @@ func (m model) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.M
 func (m model) startTypeSelect(ret screen) (tea.Model, tea.Cmd) {
 	m.typeReturnScreen = ret
 	m.typeCursor = indexOfParameterType(parameterTypeItems(), m.normalizedEditType())
-	m.screen = screenTypeSelect
+	m.pushPopup(popupTypeSelect)
 	return m, nil
 }
 
@@ -1265,10 +1517,10 @@ func (m *model) startConfirm(prompt, expected string, items []inventory.Item, re
 	m.confirmItems = items
 	m.returnScreen = ret
 	m.input.SetValue("")
-	m.input.Placeholder = expected
+	m.input.Placeholder = ""
 	m.input.Focus()
 	m.errMessage = ""
-	m.screen = screenConfirm
+	m.pushPopup(popupConfirm)
 }
 
 // generateRandom creates a new random value according to the selected generator type and opens the preview screen.
@@ -1318,7 +1570,7 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	if m.screen == screenTextArea {
 		newPath := strings.TrimSpace(m.editPathInput.Value())
 		if newPath == "" {
-			m.errMessage = "SSM path is required"
+			m.errMessage = "SSM path is required."
 			m.message = ""
 			return m, nil
 		}
@@ -1330,18 +1582,28 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 		m.warningMessage = ""
 		return m, nil
 	}
-	if m.editRegion != "" {
-		item.Region = m.editRegion
+	if strings.TrimSpace(m.editRegion) == "" {
+		m.errMessage = "Region is required."
+		m.message = ""
+		m.warningMessage = ""
+		return m, nil
 	}
+	if !m.normalizedEditType().IsValid() {
+		m.errMessage = "Type is required."
+		m.message = ""
+		m.warningMessage = ""
+		return m, nil
+	}
+	item.Region = m.editRegion
 	m.loadingTitle = "Saving parameter..."
 	m.loadingLines = []string{item.Path}
 	m.screen = screenLoading
-	return m, saveValueCmd(m.client, item, oldPath, value, m.normalizedEditType())
+	return m, saveValueCmd(m.client, item, oldPath, value, m.normalizedEditType(), m.opts.PathsFile, m.opts.AllowPathsFileUpdate)
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
 // Wildcard items must be converted to a concrete region before saving, otherwise the command returns an inline error.
-func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType) tea.Cmd {
+func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, pathsFile string, allowPathsFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		if item.Region == "*" {
 			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
@@ -1350,14 +1612,31 @@ func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string,
 		if err := regionalClient.PutParameter(item.Path, value, parameterType); err != nil {
 			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: err}
 		}
+		appendedToPathsFile := false
+		if pathsFile != "" && allowPathsFileUpdate {
+			appended, err := inventory.AppendPathIfMissing(pathsFile, item.Path)
+			if err != nil {
+				st := LoadStatuses(regionalClient, []inventory.Item{item}, true)[0]
+				return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", item.Path, pathsFile, err)}
+			}
+			if appended {
+				appendedToPathsFile = true
+				item.Kind = "path-file"
+				item.Source = pathsFile
+			}
+		}
 		st := LoadStatuses(regionalClient, []inventory.Item{item}, true)[0]
-		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path}
+		message := "Updated " + item.Path
+		if appendedToPathsFile {
+			message += " and added it to " + pathsFile
+		}
+		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: message}
 	}
 }
 
 // deleteCmd groups selected items by concrete region and deletes them from SSM.
 // Wildcard missing rows are skipped because they do not represent a real parameter in one AWS region.
-func deleteCmd(client ssm.Client, items []inventory.Item) tea.Cmd {
+func deleteCmd(client ssm.Client, items []inventory.Item, pathsFile string, allowPathsFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		byRegion := map[string][]string{}
 		for _, item := range items {
@@ -1371,17 +1650,24 @@ func deleteCmd(client ssm.Client, items []inventory.Item) tea.Cmd {
 				return deleteDoneMsg{items: items, err: err}
 			}
 		}
-		return deleteDoneMsg{items: items}
+
+		removeRows := pathsFile == ""
+		if pathsFile != "" && allowPathsFileUpdate {
+			if _, err := inventory.RemovePathsIfPresent(pathsFile, itemPaths(items)); err != nil {
+				return deleteDoneMsg{items: items, warning: fmt.Sprintf("Could not update %s after delete: %v", pathsFile, err)}
+			}
+			removeRows = true
+		}
+		return deleteDoneMsg{items: items, removeRows: removeRows}
 	}
 }
 
 // renderMainScreen composes the selected-parameter summary and the scrollable table of visible statuses.
 func (m model) renderMainScreen() string {
-	blocks := []string{
-		m.renderSelectedParameterBlock(m.selectedExpanded),
-		m.renderListBlock(),
+	if !m.selectedExpanded || m.currentStatus().Item.Path == "" {
+		return m.renderListBlock()
 	}
-	return strings.Join(blocks, "\n")
+	return strings.Join([]string{m.renderSelectedParameterBlock(true), m.renderListBlock()}, "\n")
 }
 
 // renderInputScreen renders the single-line form used for direct values, file paths, and custom random byte counts.
@@ -1400,10 +1686,10 @@ func (m model) renderTextAreaScreen() string {
 	title := "Edit Value"
 	labelWidth := 9
 	lines := []string{
-		m.editFieldLine(editFieldSSMPath, "SSM path", m.editPathInput.View(), labelWidth),
+		m.editTextInputFieldLine(editFieldSSMPath, "SSM path", m.editPathInput, labelWidth),
 		m.editFieldLine(editFieldRegion, "Region", m.editOptionValue(editFieldRegion, valueOrDash(m.editRegion)), labelWidth),
 		m.editFieldLine(editFieldType, "Type", m.editOptionValue(editFieldType, m.normalizedEditType().String()), labelWidth),
-		m.editFieldLine(editFieldFilePath, "File path", m.editFileInput.View(), labelWidth),
+		m.editTextInputFieldLine(editFieldFilePath, "File path", m.editFileInput, labelWidth),
 		"",
 		m.label(m.editFieldLabel(editFieldValue, "Value") + ":"),
 	}
@@ -1435,7 +1721,7 @@ func (m model) renderTextAreaValueLines(maxRows int) []string {
 	for i := start; i < end; i++ {
 		line := valueLines[i]
 		if m.editField == editFieldValue && m.textArea.Focused() && i == cursorLine {
-			line = withCursorMarker(line, m.textArea.LineInfo().CharOffset)
+			line = m.withCursorMarker(line, m.textArea.LineInfo().CharOffset)
 		}
 		lineNumberWidth := len(strconv.Itoa(lineCount))
 		visible = append(visible, fmt.Sprintf("%*d │ %s", lineNumberWidth, i+1, line))
@@ -1443,10 +1729,16 @@ func (m model) renderTextAreaValueLines(maxRows int) []string {
 	return visible
 }
 
-func withCursorMarker(line string, offset int) string {
+func (m model) withCursorMarker(line string, offset int) string {
 	runes := []rune(line)
 	offset = min(max(0, offset), len(runes))
-	return string(runes[:offset]) + "█" + string(runes[offset:])
+	if offset == len(runes) {
+		return string(runes) + "█"
+	}
+	if m.opts.NoColor {
+		return line
+	}
+	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
 }
 func (m model) textAreaBodyHeight() int {
 	if m.height <= 0 {
@@ -1460,6 +1752,17 @@ func (m model) editFieldLine(field editField, name, renderedValue string, labelW
 	return m.fieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth)
 }
 
+func (m model) editTextInputFieldLine(field editField, name string, input textinput.Model, labelWidth int) string {
+	label := m.editFieldLabel(field, name)
+	labelText := padMin(label+":", labelWidth+1)
+	// Bubbles textinput renders the focused cursor as one visible cell in addition to
+	// its configured width. Reserve that extra cell so the final styled line does not
+	// overflow the box and lose ANSI styling during truncation.
+	available := m.boxInnerWidth() - lipgloss.Width(labelText) - 2
+	input.Width = max(1, available)
+	return m.fieldLine(label, input.View(), labelWidth)
+}
+
 func (m model) editFieldLabel(field editField, name string) string {
 	if m.keymapStyle() == keymapVi && m.viInsertMode && m.editField == field && isEditableTextField(field) {
 		return name + " [INSERT]"
@@ -1471,6 +1774,13 @@ func isEditableTextField(field editField) bool {
 	return field == editFieldSSMPath || field == editFieldFilePath || field == editFieldValue
 }
 
+func (m model) shouldTypePrintableQInEditField() bool {
+	if !isEditableTextField(m.editField) {
+		return false
+	}
+	return m.keymapStyle() == keymapEmacs || m.viInsertMode
+}
+
 func (m model) editOptionValue(field editField, value string) string {
 	if m.editField == field {
 		value += " ⌵"
@@ -1478,11 +1788,21 @@ func (m model) editOptionValue(field editField, value string) string {
 	return m.value(value)
 }
 
-// renderColumnsScreen renders the table-column chooser with checked/unchecked state.
+// renderColumnsScreen renders the legacy full-screen table-column chooser.
+// The main UI now opens the same content as a popup, but keeping this renderer
+// makes the shortcuts context and focused tests straightforward.
 func (m model) renderColumnsScreen() string {
+	return m.renderBox("Columns", m.columnOptionLines(), m.height)
+}
+
+func (m model) renderColumnsPopup() string {
+	return m.renderPopupBox("Columns", m.columnOptionLines())
+}
+
+func (m model) columnOptionLines() []string {
 	cols := columnItems()
 	lines := []string{
-		"  " + m.muted("PATH is always visible."),
+		"  " + m.muted("# and PATH are always visible."),
 		"",
 	}
 	for i, c := range cols {
@@ -1498,7 +1818,7 @@ func (m model) renderColumnsScreen() string {
 		}
 		lines = append(lines, "  "+row)
 	}
-	return m.renderBox("Columns", lines, m.height)
+	return lines
 }
 
 // renderRandomScreen renders the random-value generator menu.
@@ -1539,6 +1859,23 @@ func (m model) renderConfirmScreen() string {
 	return m.renderBox("Confirm", lines, m.height)
 }
 
+func (m model) renderConfirmPopup() string {
+	lines := []string{}
+	for _, line := range strings.Split(m.confirmPrompt, "\n") {
+		if strings.TrimSpace(line) == "" {
+			lines = append(lines, "")
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if m.confirmExpected == "" {
+		lines = append(lines, "", m.hotkey("Enter")+" confirm  "+m.hotkey("Esc")+" cancel")
+	} else {
+		lines = append(lines, "", "Type "+m.value(m.confirmExpected)+" to confirm:", "> "+m.input.View())
+	}
+	return m.renderPopupBox("Confirm", lines)
+}
+
 // renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.
 func (m model) renderRegionSelectScreen() string {
 	regions := m.regionSelectOptions()
@@ -1556,6 +1893,28 @@ func (m model) renderRegionSelectScreen() string {
 		lines = append(lines, "  "+row)
 	}
 	return m.renderBox("Region", lines, m.height)
+}
+
+func (m model) renderRegionSelectPopup() string {
+	return m.renderPopupBox("Region", m.regionSelectLines())
+}
+
+func (m model) regionSelectLines() []string {
+	regions := m.regionSelectOptions()
+	lines := []string{
+		m.muted("Choose region for saving this value:"),
+		"",
+	}
+	for i, region := range regions {
+		row := region
+		if i == m.regionCursor {
+			row = m.selectedMarker() + m.selectedRow(row)
+		} else {
+			row = "  " + row
+		}
+		lines = append(lines, row)
+	}
+	return lines
 }
 
 // renderTypeSelectScreen renders the AWS SSM parameter type picker used by value editors.
@@ -1576,6 +1935,27 @@ func (m model) renderTypeSelectScreen() string {
 	return m.renderBox("Parameter Type", lines, m.height)
 }
 
+func (m model) renderTypeSelectPopup() string {
+	return m.renderPopupBox("Parameter Type", m.typeSelectLines())
+}
+
+func (m model) typeSelectLines() []string {
+	lines := []string{
+		m.muted("Choose how this value should be stored in AWS SSM Parameter Store:"),
+		"",
+	}
+	for i, it := range parameterTypeItems() {
+		row := fmt.Sprintf("%s — %s", it.label, it.description)
+		if i == m.typeCursor {
+			row = m.selectedMarker() + m.selectedRow(row)
+		} else {
+			row = "  " + row
+		}
+		lines = append(lines, row)
+	}
+	return lines
+}
+
 // renderHelpScreen renders the full shortcut reference.
 func (m model) renderHelpScreen() string {
 	lines := []string{}
@@ -1587,6 +1967,14 @@ func (m model) renderHelpScreen() string {
 		lines = append(lines, "  "+line)
 	}
 	return m.renderBox("Shortcuts", lines, m.height)
+}
+
+func (m model) renderShortcutsPopup() string {
+	lines := []string{}
+	for _, line := range strings.Split(m.shortcutsText(), "\n") {
+		lines = append(lines, line)
+	}
+	return m.renderPopupBox("Shortcuts", lines)
 }
 
 // renderLoading renders current background-operation progress, including the region and paths currently being scanned.
@@ -1731,7 +2119,7 @@ type tableColumn struct {
 // tableColumns calculates visible table columns and their widths from the current data.
 // It shrinks wide columns until the table fits inside the box without moving headers away from row values.
 func (m model) tableColumns(vis []int) []tableColumn {
-	keys := []columnName{}
+	keys := []columnName{columnIndex}
 	for _, key := range columnItems() {
 		if m.columns[key] {
 			keys = append(keys, key)
@@ -1801,7 +2189,7 @@ func columnMinWidth(key columnName, header string) int {
 		return max(lipgloss.Width(header), 20)
 	case columnDate:
 		return max(lipgloss.Width(header), 20)
-	case columnValue, columnUser, columnDescription, columnSource:
+	case columnValue, columnUser, columnDescription:
 		return max(lipgloss.Width(header), 12)
 	default:
 		return lipgloss.Width(header)
@@ -1891,16 +2279,6 @@ func (m model) tableCellValue(key columnName, index int, st Status) string {
 		return valueOrDash(st.User)
 	case columnDescription:
 		return valueOrDash(st.Description)
-	case columnKind:
-		return valueOrDash(st.Item.Kind)
-	case columnApp:
-		return valueOrDash(st.Item.App)
-	case columnComponent:
-		return valueOrDash(st.Item.Component)
-	case columnSecretName:
-		return valueOrDash(st.Item.SecretName)
-	case columnSource:
-		return valueOrDash(st.Item.Source)
 	case columnPath:
 		return st.Item.Path
 	default:
@@ -1933,7 +2311,10 @@ func (m model) formField(name, value string) string {
 
 // renderBox draws a bordered box, truncating or padding content so screens keep stable heights.
 func (m model) renderBox(title string, lines []string, preferredHeight int) string {
-	innerWidth := m.boxInnerWidth()
+	return m.renderBoxWithInnerWidth(title, lines, m.boxInnerWidth(), preferredHeight)
+}
+
+func (m model) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
 	top := m.boxTop(title, innerWidth)
 	bottom := m.boxBottom(innerWidth)
 
@@ -1953,6 +2334,159 @@ func (m model) renderBox(title string, lines []string, preferredHeight int) stri
 	}
 	out = append(out, bottom)
 	return strings.Join(out, "\n")
+}
+
+func (m model) renderPopupBox(title string, lines []string) string {
+	lines = popupPaddedLines(lines)
+	maxLineWidth := 0
+	for _, line := range lines {
+		maxLineWidth = max(maxLineWidth, lipgloss.Width(line))
+	}
+	availableInner := m.boxInnerWidth() - 8
+	if availableInner <= 0 {
+		availableInner = m.boxInnerWidth()
+	}
+	innerWidth := max(36, maxLineWidth)
+	innerWidth = min(innerWidth, 80)
+	innerWidth = min(innerWidth, max(10, availableInner))
+	out := []string{m.popupBoxTop(title, innerWidth)}
+	for _, line := range lines {
+		out = append(out, m.popupBoxLine(line, innerWidth))
+	}
+	out = append(out, m.popupBoxBottom(innerWidth))
+	return strings.Join(out, "\n")
+}
+
+func popupPaddedLines(lines []string) []string {
+	const horizontalPadding = 2
+	const verticalPadding = 1
+	out := make([]string, 0, len(lines)+verticalPadding*2)
+	for i := 0; i < verticalPadding; i++ {
+		out = append(out, "")
+	}
+	pad := strings.Repeat(" ", horizontalPadding)
+	for _, line := range lines {
+		out = append(out, pad+line+pad)
+	}
+	for i := 0; i < verticalPadding; i++ {
+		out = append(out, "")
+	}
+	return out
+}
+
+func (m model) popupBoxTop(title string, innerWidth int) string {
+	if innerWidth < 10 {
+		innerWidth = 10
+	}
+	titleText := " " + title + " "
+	titleLen := lipgloss.Width(titleText)
+	if titleLen+2 > innerWidth {
+		titleText = " " + truncateInline(title, max(1, innerWidth-6)) + " "
+		titleLen = lipgloss.Width(titleText)
+	}
+	left := max(1, (innerWidth-titleLen)/2)
+	rightLen := innerWidth - left - titleLen
+	if rightLen < 1 {
+		rightLen = 1
+	}
+	titleRendered := titleText
+	if !m.opts.NoColor {
+		titleRendered = titleStyle.Render(titleText)
+	}
+	return m.popupFrame("╭") + m.popupFrame(strings.Repeat("─", left)) + titleRendered + m.popupFrame(strings.Repeat("─", rightLen)) + m.popupFrame("╮")
+}
+
+func (m model) popupBoxBottom(innerWidth int) string {
+	return m.popupFrame("╰") + m.popupFrame(strings.Repeat("─", innerWidth)) + m.popupFrame("╯")
+}
+
+func (m model) popupBoxLine(content string, innerWidth int) string {
+	visible := lipgloss.Width(content)
+	if visible > innerWidth {
+		content = truncateStyled(content, innerWidth)
+		visible = lipgloss.Width(content)
+	}
+	padWidth := innerWidth - visible
+	if padWidth < 0 {
+		padWidth = 0
+	}
+	return m.popupFrame("│") + content + strings.Repeat(" ", padWidth) + m.popupFrame("│")
+}
+
+func (m model) popupFrame(s string) string {
+	if m.opts.NoColor {
+		return s
+	}
+	return titleStyle.Render(s)
+}
+
+func (m model) renderPopupStack(body string) string {
+	for _, kind := range m.popupLayers() {
+		body = m.overlayPopupOnBody(body, m.renderPopup(kind))
+	}
+	return body
+}
+
+func (m model) renderPopup(kind popupKind) string {
+	switch kind {
+	case popupColumns:
+		return m.renderColumnsPopup()
+	case popupShortcuts:
+		return m.renderShortcutsPopup()
+	case popupConfirm:
+		return m.renderConfirmPopup()
+	case popupRegionSelect:
+		return m.renderRegionSelectPopup()
+	case popupTypeSelect:
+		return m.renderTypeSelectPopup()
+	default:
+		return ""
+	}
+}
+
+func (m model) overlayPopupOnBody(body, popup string) string {
+	if popup == "" {
+		return body
+	}
+	bodyLines := renderLines(body)
+	popupLines := renderLines(popup)
+	if len(popupLines) == 0 {
+		return body
+	}
+	contentHeight := m.height
+	if contentHeight <= 0 {
+		contentHeight = max(len(bodyLines), len(popupLines))
+	}
+	for len(bodyLines) < contentHeight {
+		bodyLines = append(bodyLines, "")
+	}
+	if len(bodyLines) > contentHeight {
+		bodyLines = bodyLines[:contentHeight]
+	}
+	popupHeight := len(popupLines)
+	if popupHeight > contentHeight {
+		popupLines = popupLines[:contentHeight]
+		popupHeight = len(popupLines)
+	}
+	popupWidth := 0
+	for _, line := range popupLines {
+		popupWidth = max(popupWidth, lipgloss.Width(line))
+	}
+	viewWidth := m.width
+	if viewWidth <= 0 {
+		viewWidth = max(popupWidth, m.boxInnerWidth()+2)
+	}
+	top := max(0, (contentHeight-popupHeight)/2)
+	left := max(0, (viewWidth-popupWidth)/2)
+	for i, line := range popupLines {
+		row := strings.Repeat(" ", left) + line
+		right := viewWidth - lipgloss.Width(row)
+		if right > 0 {
+			row += strings.Repeat(" ", right)
+		}
+		bodyLines[top+i] = row
+	}
+	return strings.Join(bodyLines, "\n")
 }
 
 func (m model) boxTop(title string, innerWidth int) string {
@@ -2065,6 +2599,13 @@ func (m model) value(s string) string {
 		return s
 	}
 	return valueStyle.Render(s)
+}
+
+func (m model) hotkey(s string) string {
+	if m.opts.NoColor {
+		return s
+	}
+	return hotkeyStyle.Render(s)
 }
 
 func (m model) muted(s string) string {
@@ -2337,16 +2878,19 @@ func (m model) boxInnerWidth() int {
 }
 
 func (m model) listBlockHeight() int {
-	// Main page content layout: selected parameter block + dynamic list block.
+	// Main page content layout: optional selected parameter block + dynamic list block.
 	return max(8, m.height-m.selectedParameterBlockHeight())
 }
 
 func (m model) selectedParameterBlockHeight() int {
+	if !m.selectedExpanded {
+		return 0
+	}
 	st := m.currentStatus()
 	if st.Item.Path == "" {
-		return 8
+		return 0
 	}
-	return len(m.renderFieldPairs(m.selectedParameterFields(st, m.selectedExpanded), 11)) + 2
+	return len(m.renderFieldPairs(m.selectedParameterFields(st, true), 11)) + 2
 }
 
 func (m model) listBodyHeight() int {
@@ -2381,7 +2925,25 @@ func (m *model) replaceStatus(path string, st Status) {
 	}
 	if fallback >= 0 {
 		m.statuses[fallback] = st
+		return
 	}
+	m.statuses = append(m.statuses, st)
+	m.selected = len(m.statuses) - 1
+}
+
+func (m *model) removeItemRows(items []inventory.Item) {
+	targets := map[string]bool{}
+	for _, item := range items {
+		targets[itemKey(item.Region, item.Path)] = true
+	}
+	kept := m.statuses[:0]
+	for _, st := range m.statuses {
+		if targets[itemKey(st.Item.Region, st.Item.Path)] {
+			continue
+		}
+		kept = append(kept, st)
+	}
+	m.statuses = kept
 }
 
 // markMissingItem updates the UI after deletion by replacing matching concrete rows with a missing status.
@@ -2402,7 +2964,6 @@ func sameItem(a, b inventory.Item) bool {
 // columnItems returns optional table columns in the order presented to the user.
 func columnItems() []columnName {
 	return []columnName{
-		columnIndex,
 		columnRegion,
 		columnDate,
 		columnType,
@@ -2413,11 +2974,6 @@ func columnItems() []columnName {
 		columnValue,
 		columnUser,
 		columnDescription,
-		columnKind,
-		columnApp,
-		columnComponent,
-		columnSecretName,
-		columnSource,
 	}
 }
 
@@ -2452,19 +3008,76 @@ func columnLabel(c columnName) string {
 		return "User"
 	case columnDescription:
 		return "Description"
-	case columnKind:
-		return "Kind"
-	case columnApp:
-		return "App"
-	case columnComponent:
-		return "Component"
-	case columnSecretName:
-		return "Secret"
-	case columnSource:
-		return "Source"
 	default:
 		return string(c)
 	}
+}
+
+func defaultColumnVisibility(selected []string) map[columnName]bool {
+	columns := map[columnName]bool{}
+	for _, column := range columnItems() {
+		columns[column] = false
+	}
+	for _, name := range selected {
+		if column, ok := optionalColumnByName(name); ok {
+			columns[column] = true
+		}
+	}
+	return columns
+}
+
+// ParseColumnOption validates a comma-separated list of optional TUI columns.
+// The # and PATH columns are always visible and therefore are intentionally not accepted here.
+func ParseColumnOption(value string) ([]string, error) {
+	names := compactColumnNames(value)
+	if len(names) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(names))
+	seen := map[string]bool{}
+	for _, name := range names {
+		column, ok := optionalColumnByName(name)
+		if !ok {
+			return nil, fmt.Errorf("unsupported --columns value %q; supported columns: %s", name, strings.Join(ValidColumnNames(), ","))
+		}
+		canonical := string(column)
+		if !seen[canonical] {
+			seen[canonical] = true
+			out = append(out, canonical)
+		}
+	}
+	return out, nil
+}
+
+func ValidColumnNames() []string {
+	columns := columnItems()
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		out = append(out, string(column))
+	}
+	return out
+}
+
+func compactColumnNames(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func optionalColumnByName(name string) (columnName, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, column := range columnItems() {
+		if name == string(column) {
+			return column, true
+		}
+	}
+	return "", false
 }
 
 // randomItems returns supported random value generator choices.
@@ -2582,11 +3195,26 @@ func mainFooterText(detailsShown bool) string {
 	if detailsShown {
 		detailsAction = "d hide details"
 	}
-	return "ctrl+/ help • enter edit • " + detailsAction + " • / search • c columns • x delete • X delete visible • esc quit"
+	return "ctrl+/ help • enter edit • n new • " + detailsAction + " • / search • c columns • x delete • X delete visible • esc quit"
 }
 
 func searchFooterText() string {
 	return "ctrl+/ help • enter apply • esc cancel"
+}
+
+func (m model) popupFooterText(kind popupKind) string {
+	switch kind {
+	case popupColumns:
+		return "ctrl+/ help • space/enter toggle • a show all • x hide all • esc close"
+	case popupShortcuts:
+		return "esc close"
+	case popupRegionSelect, popupTypeSelect:
+		return "ctrl+/ help • enter choose • esc close"
+	case popupConfirm:
+		return "ctrl+/ help • enter confirm • esc cancel"
+	default:
+		return ""
+	}
 }
 
 // shortcutsText returns the context-sensitive shortcut reference shown by the Shortcuts screen.
@@ -2615,6 +3243,7 @@ func (m model) actionsShortcuts(forScreen screen) string {
 	case screenMain:
 		return strings.TrimSpace(`Actions
   enter        edit value
+  n            new parameter
   d            show/hide details
   /            search
   c            columns

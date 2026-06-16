@@ -42,3 +42,50 @@ func TestLoadPathsFileRejectsRelativePaths(t *testing.T) {
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
+
+func writeTempFile(t *testing.T, content string) string {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "paths.txt")
+	require.NoError(t, os.WriteFile(file, []byte(content), 0o600))
+	return file
+}
+
+func TestAppendPathIfMissingAppendsToEndAndAvoidsDuplicates(t *testing.T) {
+	file := writeTempFile(t, "# Parameters\n/app/old # existing\n")
+
+	appended, err := AppendPathIfMissing(file, "/app/new")
+	require.NoError(t, err)
+	assert.True(t, appended)
+	assert.Equal(t, "# Parameters\n/app/old # existing\n/app/new\n", readTempFile(t, file))
+
+	appended, err = AppendPathIfMissing(file, "/app/old")
+	require.NoError(t, err)
+	assert.False(t, appended)
+	assert.Equal(t, "# Parameters\n/app/old # existing\n/app/new\n", readTempFile(t, file))
+}
+
+func TestAppendPathIfMissingAddsMissingNewlineBeforeAppending(t *testing.T) {
+	file := writeTempFile(t, "/app/old")
+
+	appended, err := AppendPathIfMissing(file, "/app/new")
+	require.NoError(t, err)
+	assert.True(t, appended)
+	assert.Equal(t, "/app/old\n/app/new\n", readTempFile(t, file))
+}
+
+func readTempFile(t *testing.T, file string) string {
+	t.Helper()
+	data, err := os.ReadFile(file)
+	require.NoError(t, err)
+	return string(data)
+}
+
+func TestRemovePathsIfPresentRemovesPathsAndPreservesOtherLines(t *testing.T) {
+	file := writeTempFile(t, "# tracked paths\n/app/old # remove me\n/app/keep\n/app/old\n")
+
+	removed, err := RemovePathsIfPresent(file, []string{"/app/old"})
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, removed)
+	assert.Equal(t, "# tracked paths\n/app/keep\n", readTempFile(t, file))
+}
