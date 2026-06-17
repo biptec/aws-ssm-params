@@ -3804,14 +3804,66 @@ func (m model) overlayPopupOnBody(body, popup string) string {
 	top := max(0, (contentHeight-popupHeight)/2)
 	left := max(0, (viewWidth-popupWidth)/2)
 	for i, line := range popupLines {
-		row := strings.Repeat(" ", left) + line
-		right := viewWidth - lipgloss.Width(row)
-		if right > 0 {
-			row += strings.Repeat(" ", right)
-		}
-		bodyLines[top+i] = row
+		bodyLines[top+i] = overlayPopupLine(bodyLines[top+i], line, left, popupWidth, viewWidth)
 	}
 	return strings.Join(bodyLines, "\n")
+}
+
+func overlayPopupLine(baseLine, popupLine string, left, popupWidth, viewWidth int) string {
+	base := stripANSI(baseLine)
+	if viewWidth <= 0 {
+		viewWidth = max(lipgloss.Width(base), left+popupWidth)
+	}
+	base = padVisible(base, viewWidth)
+	prefix := takeVisibleColumns(base, left)
+	popup := popupLine
+	if pad := popupWidth - lipgloss.Width(popup); pad > 0 {
+		popup += strings.Repeat(" ", pad)
+	}
+	suffix := dropVisibleColumns(base, left+popupWidth)
+	row := prefix + popup + suffix
+	if pad := viewWidth - lipgloss.Width(row); pad > 0 {
+		row += strings.Repeat(" ", pad)
+	}
+	return row
+}
+
+func takeVisibleColumns(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	out := strings.Builder{}
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > width {
+			break
+		}
+		out.WriteRune(r)
+		used += rw
+	}
+	if used < width {
+		out.WriteString(strings.Repeat(" ", width-used))
+	}
+	return out.String()
+}
+
+func dropVisibleColumns(s string, start int) string {
+	if start <= 0 {
+		return s
+	}
+	used := 0
+	for idx, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > start {
+			return s[idx:]
+		}
+		used += rw
+		if used >= start {
+			return s[idx+len(string(r)):]
+		}
+	}
+	return ""
 }
 
 func (m model) boxTop(title string, innerWidth int) string {

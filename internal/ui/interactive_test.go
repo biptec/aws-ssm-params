@@ -2718,3 +2718,33 @@ func TestFieldsOptionLimitsColumnsDetailsAndEditor(t *testing.T) {
 	assert.False(t, strings.Contains(editor, "Region:"))
 	assert.Equal(t, []editField{editFieldSSMPath, editFieldType}, m.editFieldOrder())
 }
+
+func TestOverlayPopupLinePreservesTextOutsidePopupBounds(t *testing.T) {
+	row := overlayPopupLine("0123456789abcdefghij", "POP", 8, 3, 20)
+
+	assert.Equal(t, "01234567POPbcdefghij", row)
+}
+
+func TestOverlayPopupOnBodyOnlyReplacesPopupRectangle(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 20
+	m.height = 5
+	body := strings.Join([]string{
+		"00000000000000000000",
+		"11111111111111111111",
+		"22222222222222222222",
+		"33333333333333333333",
+		"44444444444444444444",
+	}, "\n")
+	popup := strings.Join([]string{"ABC", "DEF", "GHI"}, "\n")
+
+	view := m.overlayPopupOnBody(body, popup)
+	lines := strings.Split(view, "\n")
+
+	require.Len(t, lines, 5)
+	assert.Equal(t, "00000000000000000000", lines[0])
+	assert.Equal(t, "11111111ABC111111111", lines[1])
+	assert.Equal(t, "22222222DEF222222222", lines[2])
+	assert.Equal(t, "33333333GHI333333333", lines[3])
+	assert.Equal(t, "44444444444444444444", lines[4])
+}
