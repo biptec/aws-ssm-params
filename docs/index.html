@@ -14,6 +14,7 @@
         <div class="nav-links">
           <a href="#tui">TUI</a>
           <a href="#commands">CLI</a>
+          <a href="#install">Install</a>
           <a href="#workflows">Workflows</a>
           <a href="#security">Security</a>
           <a href="https://github.com/biptec/aws-ssm-params#readme">README</a>
@@ -30,11 +31,11 @@
             application-specific name set with `--names` or `--names-file`.
           </p>
           <div class="cta-row">
-            <a class="button primary" href="#quick-start">Quick start</a>
+            <a class="button primary" href="#install">Install with Homebrew</a>
             <a class="button" href="#screens">View screenshots</a>
           </div>
-          <div class="terminal-command" role="img" aria-label="Example command">
-            <span>$</span> aws-ssm-params --regions eu-north-1 tui
+          <div class="terminal-command" role="img" aria-label="Install command">
+            <span>$</span> brew install biptec/tools/aws-ssm-params
           </div>
         </div>
         <div class="hero-shot terminal-card">
@@ -44,6 +45,25 @@
     </header>
 
     <main>
+      <section class="section split" id="install">
+        <div>
+          <p class="eyebrow">Installation</p>
+          <h2>Install with Homebrew.</h2>
+          <p>
+            The fastest way to install <code>aws-ssm-params</code> on macOS and Linux is through the Biptec Homebrew tap.
+            The formula installs prebuilt release binaries, so there is no local Go build step.
+          </p>
+        </div>
+        <div class="code-block">
+<pre><code># Install directly from the tap
+brew install biptec/tools/aws-ssm-params
+
+# Verify the command
+aws-ssm-params --help
+aws-ssm-params tui --help</code></pre>
+        </div>
+      </section>
+
       <section class="section" id="workflows">
         <div class="section-heading">
           <p class="eyebrow">Why people use it</p>
@@ -83,7 +103,10 @@
           </p>
         </div>
         <div class="code-block">
-<pre><code># Browse everything visible in one region
+<pre><code># Install with Homebrew
+brew install biptec/tools/aws-ssm-params
+
+# Browse everything visible in one region
 aws-ssm-params --regions eu-north-1 tui
 
 # Focus on a known service-specific set

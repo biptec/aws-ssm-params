@@ -11,6 +11,7 @@ Use it when you want a quick answer to questions like: _what parameters exist in
 - [Why use it?](#why-use-it)
 - [Features](#features)
 - [Typical workflows](#typical-workflows)
+- [Installation](#installation)
 - [Quick start](#quick-start)
 - [Names file format](#names-file-format)
 - [Command map](#command-map)
@@ -191,6 +192,28 @@ Tighten `Resource` ARNs to your own SSM name prefix when using this in productio
 
 ## Installation
 
+### Install with Homebrew
+
+The recommended installation method on macOS and Linux is Homebrew:
+
+```bash
+brew install biptec/tools/aws-ssm-params
+```
+
+Then verify the installation:
+
+```bash
+aws-ssm-params --help
+aws-ssm-params tui --help
+```
+
+If you prefer to tap the repository first:
+
+```bash
+brew tap biptec/tools
+brew install aws-ssm-params
+```
+
 ### Install with Go
 
 ```bash
@@ -218,6 +241,12 @@ Then run:
 ```
 
 ## Quick start
+
+Install the CLI/TUI with Homebrew:
+
+```bash
+brew install biptec/tools/aws-ssm-params
+```
 
 Create a names file:
 
