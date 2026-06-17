@@ -13,7 +13,7 @@ import (
 )
 
 // Record is the import/export representation of one SSM parameter.
-// Path is the canonical SSM path, Alias is the human-friendly dotenv variable name, Value is the parameter value,
+// Path is the canonical SSM name, Alias is the human-friendly dotenv variable name, Value is the parameter value,
 // and Type optionally carries the AWS SSM parameter type when an import/export format preserves it.
 type Record struct {
 	Path  string
@@ -47,7 +47,7 @@ func ExportDotenv(w io.Writer, records []Record) error {
 	return nil
 }
 
-// ExportJSON writes a stable JSON object keyed by SSM path.
+// ExportJSON writes a stable JSON object keyed by SSM name.
 // Records without type metadata keep the compact legacy shape {"/path":"value"}; records with type metadata use
 // {"/path":{"type":"SecureString","value":"..."}} so JSON backups can preserve parameter types.
 func ExportJSON(w io.Writer, records []Record) error {
@@ -82,7 +82,7 @@ func hasTypedRecords(records []Record) bool {
 	return false
 }
 
-// ImportDotenv parses dotenv input and resolves each variable back to an SSM path.
+// ImportDotenv parses dotenv input and resolves each variable back to an SSM name.
 // A preceding '# ssm: /path' comment wins; otherwise the variable name is matched against aliases derived from inventory.
 // A preceding '# type: String|StringList|SecureString' comment is preserved on the returned record.
 // Ambiguous aliases are rejected so the tool never writes a value to the wrong parameter silently.
@@ -128,7 +128,7 @@ func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
 		if path == "" {
 			matches := aliases[alias]
 			if len(matches) == 0 {
-				return nil, fmt.Errorf("cannot resolve dotenv key %s to an SSM path", alias)
+				return nil, fmt.Errorf("cannot resolve dotenv key %s to an SSM name", alias)
 			}
 			if len(matches) > 1 {
 				return nil, fmt.Errorf("dotenv key %s is ambiguous: %s", alias, strings.Join(matches, ", "))
@@ -182,7 +182,7 @@ func AliasForItem(item inventory.Item) string {
 	return AliasForPath(item.Path, item)
 }
 
-// AliasForPath converts an SSM path into a readable environment variable name.
+// AliasForPath converts an SSM name into a readable environment variable name.
 // Special cases keep common secret types predictable: app secrets use the final segment, GHCR/Flux tokens use fixed names,
 // and TLS material includes the domain plus CRT/KEY suffix so certificate pairs stay easy to identify.
 func AliasForPath(path string, item inventory.Item) string {
@@ -239,7 +239,7 @@ func parseDotenvValue(value string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
-// lastSegment returns the final slash-separated segment of an SSM path.
+// lastSegment returns the final slash-separated segment of an SSM name.
 func lastSegment(path string) string {
 	trimmed := strings.Trim(path, "/")
 	parts := strings.Split(trimmed, "/")

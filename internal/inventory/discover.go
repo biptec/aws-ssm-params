@@ -88,7 +88,7 @@ func discoverEnabledApps(envDir string) (map[string]bool, error) {
 	return result, nil
 }
 
-// scanKustomizationForSecrets finds cluster-level SSM paths embedded directly in kustomization.yaml.
+// scanKustomizationForSecrets finds cluster-level SSM names embedded directly in kustomization.yaml.
 // Currently it extracts GHCR token references because those are shared infrastructure secrets, not app-local values.
 func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
 	path := filepath.Join(envDir, "kustomization.yaml")
@@ -108,7 +108,7 @@ func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
 	return items, nil
 }
 
-// scanTerraformFluxToken resolves the Flux GitHub token SSM path from terraform.tfvars.
+// scanTerraformFluxToken resolves the Flux GitHub token SSM name from terraform.tfvars.
 // If the Terraform variable is absent, it returns the conventional default path so the inventory still includes the token.
 func scanTerraformFluxToken(repoRoot, env string) ([]Item, error) {
 	path := filepath.Join(repoRoot, "terraform", "environments", env, "terraform.tfvars")
@@ -123,7 +123,7 @@ func scanTerraformFluxToken(repoRoot, env string) ([]Item, error) {
 	return []Item{{Path: value, Kind: "flux-token", Source: filepath.ToSlash(path)}}, nil
 }
 
-// dedupe merges multiple discoveries of the same SSM path into one inventory item.
+// dedupe merges multiple discoveries of the same SSM name into one inventory item.
 // Metadata fields are concatenated instead of discarded so users can still see every source/kind that referenced the path.
 func dedupe(items []Item) []Item {
 	byPath := map[string]Item{}

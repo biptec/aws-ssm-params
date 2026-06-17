@@ -13,7 +13,7 @@ type yamlLine struct {
 	text   string
 }
 
-// valuesData contains only the values.yaml fields that can reference SSM paths.
+// valuesData contains only the values.yaml fields that can reference SSM names.
 // Keeping this structure narrow makes discovery independent from unrelated Helm values.
 type valuesData struct {
 	AppName            string
@@ -28,7 +28,7 @@ type valuesData struct {
 	Components         map[string]componentData
 }
 
-// componentData contains per-component ingress/TLS backup settings that can generate SSM paths.
+// componentData contains per-component ingress/TLS backup settings that can generate SSM names.
 type componentData struct {
 	Enabled           bool
 	IngressEnabled    bool
@@ -290,7 +290,7 @@ func parseBool(value string) bool {
 	return strings.EqualFold(value, "true") || strings.EqualFold(value, "yes") || value == "1"
 }
 
-// joinSSM joins path fragments into a normalized absolute SSM path.
+// joinSSM joins path fragments into a normalized absolute SSM name.
 // Empty fragments are skipped and duplicate slashes around fragments are removed.
 func joinSSM(parts ...string) string {
 	clean := make([]string, 0, len(parts))

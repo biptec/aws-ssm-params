@@ -22,6 +22,8 @@ type Status struct {
 	Empty        bool
 	Type         string
 	Tier         string
+	DataType     string
+	Policies     string
 	Version      int64
 	Length       int
 	SHA256Prefix string
@@ -240,6 +242,8 @@ func loadAllStatusesRegion(client ssm.Client, region string, includeValues bool,
 			status.Exists = true
 			status.Type = valueOrDefault(meta.Type, ssm.DefaultParameterType.String())
 			status.Tier = meta.Tier
+			status.DataType = meta.DataType
+			status.Policies = meta.Policies
 			status.Description = meta.Description
 			status.User = meta.User
 			status.Modified = meta.Modified
@@ -336,6 +340,8 @@ func statusFromMaps(item inventory.Item, region string, metas map[string]ssm.Met
 			status.Type = meta.Type
 		}
 		status.Tier = meta.Tier
+		status.DataType = meta.DataType
+		status.Policies = meta.Policies
 		status.Description = meta.Description
 		status.User = meta.User
 		status.Modified = meta.Modified
@@ -367,7 +373,7 @@ func statusFromValue(item inventory.Item, param ssm.Parameter, meta ssm.Metadata
 	if parameterType == "" {
 		parameterType = ssm.DefaultParameterType.String()
 	}
-	status := Status{Item: item, Exists: true, Type: parameterType, Tier: meta.Tier, Description: meta.Description, User: meta.User, Modified: meta.Modified, Version: param.Version, Value: param.Value, Length: len(param.Value), Empty: param.Value == "", SHA256Prefix: hashPrefix(param.Value)}
+	status := Status{Item: item, Exists: true, Type: parameterType, Tier: meta.Tier, DataType: meta.DataType, Policies: meta.Policies, Description: meta.Description, User: meta.User, Modified: meta.Modified, Version: param.Version, Value: param.Value, Length: len(param.Value), Empty: param.Value == "", SHA256Prefix: hashPrefix(param.Value)}
 	if status.Modified == "" {
 		status.Modified = param.Modified
 	}
@@ -391,14 +397,14 @@ func chunkRegion(items []inventory.Item) string {
 	return region
 }
 
-// itemKey builds a collision-safe map key for values that are scoped by both AWS region and SSM path.
+// itemKey builds a collision-safe map key for values that are scoped by both AWS region and SSM name.
 func itemKey(region, path string) string {
 	return region + "\x00" + path
 }
 
 // PrintStatusTable renders a compact non-interactive status table to stdout.
 func PrintStatusTable(statuses []Status, noColor bool) {
-	fmt.Printf("%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "PATH")
+	fmt.Printf("%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "NAME")
 	for i, status := range statuses {
 		fmt.Printf("%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
 			i+1,

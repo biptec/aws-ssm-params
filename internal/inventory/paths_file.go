@@ -10,7 +10,7 @@ import (
 )
 
 // LoadPathsFile reads a simple newline-based SSM inventory file.
-// Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM paths,
+// Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
 // duplicates are removed, and the final list is sorted to make downstream output deterministic.
 func LoadPathsFile(filePath string) ([]Item, error) {
 	file, err := os.Open(filePath)
@@ -36,7 +36,7 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 			continue
 		}
 		if !strings.HasPrefix(raw, "/") {
-			return nil, fmt.Errorf("invalid SSM path in %s:%d: %s", filePath, lineNo, raw)
+			return nil, fmt.Errorf("invalid SSM name in %s:%d: %s", filePath, lineNo, raw)
 		}
 		if seen[raw] {
 			continue
@@ -51,15 +51,15 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 	return items, nil
 }
 
-// AppendPathIfMissing appends one absolute SSM path to a paths file unless that path is already listed.
+// AppendPathIfMissing appends one absolute SSM name to a paths file unless that path is already listed.
 // It preserves the existing file order and adds the new path at the end so the file can be grown from the TUI.
 func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 	parameterPath = strings.TrimSpace(parameterPath)
 	if parameterPath == "" {
-		return false, fmt.Errorf("SSM path is required")
+		return false, fmt.Errorf("SSM name is required")
 	}
 	if !strings.HasPrefix(parameterPath, "/") {
-		return false, fmt.Errorf("invalid SSM path: %s", parameterPath)
+		return false, fmt.Errorf("invalid SSM name: %s", parameterPath)
 	}
 
 	data, err := os.ReadFile(filePath)
@@ -102,7 +102,7 @@ func pathFileContainsPath(content, parameterPath string) bool {
 	return false
 }
 
-// RemovePathsIfPresent removes listed SSM paths from a paths file, preserving comments and unrelated entries.
+// RemovePathsIfPresent removes listed SSM names from a paths file, preserving comments and unrelated entries.
 // Lines that contain a matching path followed by an inline comment are removed as a whole.
 func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error) {
 	targets := map[string]bool{}

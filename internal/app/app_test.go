@@ -97,7 +97,7 @@ func TestResolveImportTypeUsesRecordExistingFlagThenDefault(t *testing.T) {
 	assert.Equal(t, "String", parameterType.String())
 }
 
-func TestLoadItemsAllowsMissingPathsFileAndRejectsEmptyPathsFile(t *testing.T) {
+func TestLoadItemsAllowsMissingNamesFileAndRejectsEmptyNamesFile(t *testing.T) {
 	items, err := LoadItems(Config{})
 	require.NoError(t, err)
 	assert.Nil(t, items)
@@ -105,13 +105,13 @@ func TestLoadItemsAllowsMissingPathsFileAndRejectsEmptyPathsFile(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(file, []byte("# only comments\n"), 0o600))
 
-	items, err = LoadItems(Config{PathsFile: file})
+	items, err = LoadItems(Config{NamesFile: file})
 	require.Error(t, err)
 	assert.Nil(t, items)
 	assert.ErrorContains(t, err, "empty")
 }
 
-func TestPrepareImportItemsAllowsJSONWithoutPathsFile(t *testing.T) {
+func TestPrepareImportItemsAllowsJSONWithoutNamesFile(t *testing.T) {
 	cfg := Config{Region: "eu-north-1"}
 
 	items, err := PrepareImportItems(&cfg, "json")
@@ -121,20 +121,20 @@ func TestPrepareImportItemsAllowsJSONWithoutPathsFile(t *testing.T) {
 	assert.Equal(t, []string{"eu-north-1"}, cfg.Regions)
 }
 
-func TestPrepareImportItemsRequiresPathsFileForDotenv(t *testing.T) {
+func TestPrepareImportItemsRequiresNamesFileForDotenv(t *testing.T) {
 	cfg := Config{Region: "eu-north-1"}
 
 	items, err := PrepareImportItems(&cfg, "dotenv")
 
 	require.Error(t, err)
 	assert.Nil(t, items)
-	assert.ErrorContains(t, err, "--paths-file")
+	assert.ErrorContains(t, err, "--names-file")
 }
 
-func TestPrepareImportItemsLoadsPathsFileForDotenv(t *testing.T) {
+func TestPrepareImportItemsLoadsNamesFileForDotenv(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(file, []byte("/app/dev/api/JWT_SECRET\n"), 0o600))
-	cfg := Config{PathsFile: file, Region: "eu-north-1"}
+	cfg := Config{NamesFile: file, Region: "eu-north-1"}
 
 	items, err := PrepareImportItems(&cfg, "dotenv")
 
@@ -144,13 +144,13 @@ func TestPrepareImportItemsLoadsPathsFileForDotenv(t *testing.T) {
 }
 
 func TestConfigFromCLIReadsGlobalEnvironmentVariables(t *testing.T) {
-	t.Setenv("AWS_SSM_PARAMS_REGION", "eu-north-1,eu-central-1")
+	t.Setenv("AWS_SSM_PARAMS_REGIONS", "eu-north-1,eu-central-1")
 	t.Setenv("AWS_SSM_PARAMS_PROFILE", "dev-profile")
-	t.Setenv("AWS_SSM_PARAMS_PATHS_FILE", "paths.txt")
+	t.Setenv("AWS_SSM_PARAMS_NAMES_FILE", "paths.txt")
 	t.Setenv("AWS_SSM_PARAMS_KEYMAP", "vi")
-	t.Setenv("AWS_SSM_PARAMS_COLUMNS", "region,type,value")
+	t.Setenv("AWS_SSM_PARAMS_SHOW_COLUMNS", "region,type,value")
 	t.Setenv("AWS_SSM_PARAMS_NO_COLOR", "true")
-	t.Setenv("AWS_SSM_PARAMS_ALLOW_PATHS_FILE_UPDATE", "true")
+	t.Setenv("AWS_SSM_PARAMS_ALLOW_NAMES_FILE_UPDATE", "true")
 
 	cfg, err := ConfigFromCLI(testCLIContext(t, nil))
 
@@ -158,26 +158,26 @@ func TestConfigFromCLIReadsGlobalEnvironmentVariables(t *testing.T) {
 	assert.Equal(t, "eu-north-1", cfg.Region)
 	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
 	assert.Equal(t, "dev-profile", cfg.Profile)
-	assert.Equal(t, "paths.txt", cfg.PathsFile)
+	assert.Equal(t, "paths.txt", cfg.NamesFile)
 	assert.Equal(t, "vi", cfg.Keymap)
-	assert.Equal(t, []string{"region", "type", "value"}, cfg.Columns)
+	assert.Equal(t, []string{"region", "type", "value"}, cfg.ShowColumns)
 	assert.True(t, cfg.NoColor)
-	assert.True(t, cfg.AllowPathsFileUpdate)
+	assert.True(t, cfg.AllowNamesFileUpdate)
 }
 
 func TestConfigFromCLIFlagsOverrideEnvironmentVariables(t *testing.T) {
-	t.Setenv("AWS_SSM_PARAMS_REGION", "eu-north-1")
+	t.Setenv("AWS_SSM_PARAMS_REGIONS", "eu-north-1")
 	t.Setenv("AWS_SSM_PARAMS_PROFILE", "env-profile")
-	t.Setenv("AWS_SSM_PARAMS_PATHS_FILE", "env-paths.txt")
+	t.Setenv("AWS_SSM_PARAMS_NAMES_FILE", "env-paths.txt")
 	t.Setenv("AWS_SSM_PARAMS_KEYMAP", "vi")
-	t.Setenv("AWS_SSM_PARAMS_COLUMNS", "region,type")
+	t.Setenv("AWS_SSM_PARAMS_SHOW_COLUMNS", "region,type")
 
 	ctx := testCLIContext(t, []string{
-		"--region", "eu-central-1",
+		"--regions", "eu-central-1",
 		"--profile", "cli-profile",
-		"--paths-file", "cli-paths.txt",
+		"--names-file", "cli-paths.txt",
 		"--keymap", "emacs",
-		"--columns", "date,value",
+		"--show-columns", "date,value",
 	})
 	cfg, err := ConfigFromCLI(ctx)
 
@@ -185,43 +185,75 @@ func TestConfigFromCLIFlagsOverrideEnvironmentVariables(t *testing.T) {
 	assert.Equal(t, "eu-central-1", cfg.Region)
 	assert.Equal(t, []string{"eu-central-1"}, cfg.Regions)
 	assert.Equal(t, "cli-profile", cfg.Profile)
-	assert.Equal(t, "cli-paths.txt", cfg.PathsFile)
+	assert.Equal(t, "cli-paths.txt", cfg.NamesFile)
 	assert.Equal(t, "emacs", cfg.Keymap)
-	assert.Equal(t, []string{"date", "value"}, cfg.Columns)
+	assert.Equal(t, []string{"date", "value"}, cfg.ShowColumns)
 }
 
 func TestConfigFromCLIRejectsUnsupportedColumns(t *testing.T) {
-	ctx := testCLIContext(t, []string{"--columns", "region,source"})
+	ctx := testCLIContext(t, []string{"--show-columns", "region,source"})
 
 	cfg, err := ConfigFromCLI(ctx)
 
 	assert.Empty(t, cfg)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported --columns value")
+	assert.ErrorContains(t, err, "unsupported --show-columns value")
 }
 
 func testCLIContext(t *testing.T, args []string) *cli.Context {
 	t.Helper()
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
 	regions := cli.NewStringSlice()
-	set.Var(regions, "region", "")
+	set.Var(regions, "regions", "")
 	set.Bool("all-regions", false, "")
 	set.String("profile", "", "")
 	set.Bool("no-color", false, "")
 	set.String("keymap", "", "")
-	set.String("paths-file", "", "")
-	set.String("columns", "", "")
-	set.Bool("allow-paths-file-update", false, "")
+	set.String("names-file", "", "")
+	names := cli.NewStringSlice()
+	set.Var(names, "names", "")
+	fields := cli.NewStringSlice()
+	set.Var(fields, "fields", "")
+	set.Bool("without-decryption", false, "")
+	set.String("sort", "", "")
+	set.Bool("show-secure-values", false, "")
+	set.Bool("no-confirm-overwrite-file", false, "")
+	set.Bool("no-confirm-write-securestring", false, "")
+	set.Bool("no-confirm-delete-one", false, "")
+	set.Bool("no-confirm-delete-all", false, "")
+	set.String("show-columns", "", "")
+	set.Bool("allow-names-file-update", false, "")
 	require.NoError(t, set.Parse(args))
 	return cli.NewContext(cli.NewApp(), set, nil)
 }
 
-func TestConfigFromCLIRejectsPathsFileUpdateWithoutPathsFile(t *testing.T) {
-	ctx := testCLIContext(t, []string{"--allow-paths-file-update"})
+func TestConfigFromCLIRejectsNamesFileUpdateWithoutNamesFile(t *testing.T) {
+	ctx := testCLIContext(t, []string{"--allow-names-file-update"})
 
 	cfg, err := ConfigFromCLI(ctx)
 
 	assert.Empty(t, cfg)
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "--allow-paths-file-update requires --paths-file")
+	assert.ErrorContains(t, err, "--allow-names-file-update requires --names-file")
+}
+
+func TestConfigFromCLIParsesGlobalNamesAndFields(t *testing.T) {
+	ctx := testCLIContext(t, []string{"--names", "/app/a,/app/b", "--fields", "type,value"})
+
+	cfg, err := ConfigFromCLI(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/app/a", "/app/b"}, cfg.Names)
+	assert.Equal(t, []string{"name", "type", "value"}, cfg.Fields)
+}
+
+func TestLoadItemsUnionsNamesFileAndNames(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "names.txt")
+	require.NoError(t, os.WriteFile(file, []byte("/app/a\n/app/b\n"), 0o600))
+
+	items, err := LoadItems(Config{NamesFile: file, Names: []string{"/app/b", "/app/c"}})
+
+	require.NoError(t, err)
+	require.Len(t, items, 3)
+	assert.Equal(t, []string{"/app/a", "/app/b", "/app/c"}, []string{items[0].Path, items[1].Path, items[2].Path})
 }

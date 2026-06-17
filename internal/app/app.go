@@ -21,30 +21,109 @@ import (
 // Region stores the primary/default AWS region, while Regions stores every explicitly requested region;
 // AllRegions tells the rest of the app to discover enabled AWS regions and mark inventory items as regional wildcards.
 type Config struct {
-	PathsFile            string
-	Region               string
-	Regions              []string
-	Profile              string
-	AllRegions           bool
-	NoColor              bool
-	Keymap               string
-	Columns              []string
-	AllowPathsFileUpdate bool
+	NamesFile                 string
+	Names                     []string
+	Fields                    []string
+	Region                    string
+	Regions                   []string
+	Profile                   string
+	AllRegions                bool
+	NoColor                   bool
+	WithoutDecryption         bool
+	Keymap                    string
+	ShowColumns               []string
+	Sort                      string
+	AllowNamesFileUpdate      bool
+	ShowSecureValues          bool
+	NoConfirmOverwriteFile    bool
+	NoConfirmWriteSecureValue bool
+	NoConfirmDeleteOne        bool
+	NoConfirmDeleteAll        bool
 }
 
 const allRegionsSeedRegion = "us-east-1"
 
+var supportedFields = map[string]string{
+	"name":               "name",
+	"region":             "region",
+	"type":               "type",
+	"tier":               "tier",
+	"data-type":          "data-type",
+	"datatype":           "data-type",
+	"data_type":          "data-type",
+	"policies":           "policies",
+	"description":        "description",
+	"value":              "value",
+	"date":               "date",
+	"modified":           "date",
+	"last-modified-date": "date",
+	"version":            "version",
+	"len":                "len",
+	"length":             "len",
+	"sha256":             "sha256",
+	"hash":               "sha256",
+	"user":               "user",
+}
+
+func parseFieldList(values []string) ([]string, error) {
+	parts := compactStrings(values)
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	fields := make([]string, 0, len(parts)+1)
+	for _, part := range parts {
+		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(part))]
+		if !ok {
+			return nil, fmt.Errorf("unsupported --fields value %q", part)
+		}
+		if !seen[canonical] {
+			seen[canonical] = true
+			fields = append(fields, canonical)
+		}
+	}
+	if !seen["name"] {
+		fields = append([]string{"name"}, fields...)
+	}
+	return fields, nil
+}
+
+func fieldAllowed(fields []string, field string) bool {
+	if len(fields) == 0 || field == "name" {
+		return true
+	}
+	for _, candidate := range fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+func includeValuesForFields(fields []string) bool {
+	if len(fields) == 0 {
+		return true
+	}
+	for _, field := range fields {
+		switch field {
+		case "value", "len", "sha256", "version":
+			return true
+		}
+	}
+	return false
+}
+
 // ConfigFromCLI converts raw urfave/cli state into a Config that the rest of the application can use.
 // It enforces mutually exclusive region modes, falls back to AWS_PROFILE/AWS_REGION/AWS_DEFAULT_REGION,
-// deduplicates repeated --region values, and decides whether a paths-file argument should be read for the command.
+// deduplicates repeated --regions values, and decides whether a names-file argument should be read for the command.
 func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 	allRegions := boolFlagValue(ctx, "all-regions", "AWS_SSM_PARAMS_ALL_REGIONS", false)
-	regionArgs := compactStrings(ctx.StringSlice("region"))
+	regionArgs := compactStrings(ctx.StringSlice("regions"))
 	if len(regionArgs) == 0 {
-		regionArgs = compactStrings([]string{os.Getenv("AWS_SSM_PARAMS_REGION")})
+		regionArgs = compactStrings([]string{os.Getenv("AWS_SSM_PARAMS_REGIONS")})
 	}
 	if allRegions && len(regionArgs) > 0 {
-		return Config{}, errors.New("--region and --all-regions cannot be used together")
+		return Config{}, errors.New("--regions and --all-regions cannot be used together")
 	}
 	profile := stringFlagValue(ctx, "profile", "AWS_SSM_PARAMS_PROFILE", "")
 	if profile == "" {
@@ -71,46 +150,77 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported --keymap %q; expected emacs or vi", keymap)
 	}
 
-	pathsFile := strings.TrimSpace(stringFlagValue(ctx, "paths-file", "AWS_SSM_PARAMS_PATHS_FILE", ""))
-	columns, err := ui.ParseColumnOption(stringFlagValue(ctx, "columns", "AWS_SSM_PARAMS_COLUMNS", ""))
+	namesFile := strings.TrimSpace(stringFlagValue(ctx, "names-file", "AWS_SSM_PARAMS_NAMES_FILE", ""))
+	names := dedupeStrings(compactStrings(ctx.StringSlice("names")))
+	if len(names) == 0 {
+		names = dedupeStrings(compactStrings([]string{os.Getenv("AWS_SSM_PARAMS_NAMES")}))
+	}
+	fieldArgs := ctx.StringSlice("fields")
+	if len(compactStrings(fieldArgs)) == 0 {
+		fieldArgs = []string{os.Getenv("AWS_SSM_PARAMS_FIELDS")}
+	}
+	fields, err := parseFieldList(fieldArgs)
 	if err != nil {
 		return Config{}, err
 	}
-	allowPathsFileUpdate := boolFlagValue(ctx, "allow-paths-file-update", "AWS_SSM_PARAMS_ALLOW_PATHS_FILE_UPDATE", false)
-	if allowPathsFileUpdate && pathsFile == "" {
-		return Config{}, errors.New("--allow-paths-file-update requires --paths-file")
+	showColumns, err := ui.ParseColumnOption(stringFlagValue(ctx, "show-columns", "AWS_SSM_PARAMS_SHOW_COLUMNS", ""))
+	if err != nil {
+		return Config{}, err
+	}
+	allowNamesFileUpdate := boolFlagValue(ctx, "allow-names-file-update", "AWS_SSM_PARAMS_ALLOW_NAMES_FILE_UPDATE", false)
+	if allowNamesFileUpdate && namesFile == "" {
+		return Config{}, errors.New("--allow-names-file-update requires --names-file")
 	}
 	return Config{
-		PathsFile:            pathsFile,
-		Region:               region,
-		Regions:              regions,
-		Profile:              profile,
-		AllRegions:           allRegions,
-		NoColor:              boolFlagValue(ctx, "no-color", "AWS_SSM_PARAMS_NO_COLOR", false) || os.Getenv("NO_COLOR") != "",
-		Keymap:               keymap,
-		Columns:              columns,
-		AllowPathsFileUpdate: allowPathsFileUpdate,
+		NamesFile:                 namesFile,
+		Names:                     names,
+		Fields:                    fields,
+		Region:                    region,
+		Regions:                   regions,
+		Profile:                   profile,
+		AllRegions:                allRegions,
+		NoColor:                   boolFlagValue(ctx, "no-color", "AWS_SSM_PARAMS_NO_COLOR", false) || os.Getenv("NO_COLOR") != "",
+		WithoutDecryption:         boolFlagValue(ctx, "without-decryption", "AWS_SSM_PARAMS_WITHOUT_DECRYPTION", false),
+		Keymap:                    keymap,
+		ShowColumns:               showColumns,
+		Sort:                      stringFlagValue(ctx, "sort", "AWS_SSM_PARAMS_SORT", ""),
+		AllowNamesFileUpdate:      allowNamesFileUpdate,
+		ShowSecureValues:          boolFlagValue(ctx, "show-secure-values", "AWS_SSM_PARAMS_SHOW_SECURE_VALUES", false),
+		NoConfirmOverwriteFile:    boolFlagValue(ctx, "no-confirm-overwrite-file", "AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE", false),
+		NoConfirmWriteSecureValue: boolFlagValue(ctx, "no-confirm-write-securestring", "AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING", false),
+		NoConfirmDeleteOne:        boolFlagValue(ctx, "no-confirm-delete-one", "AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE", false),
+		NoConfirmDeleteAll:        boolFlagValue(ctx, "no-confirm-delete-all", "AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL", false),
 	}, nil
 }
 
 // NewClient creates the concrete AWS SSM client for the selected profile and primary region.
 // Keeping this in one function makes command handlers independent from the AWSCLI implementation details.
 func NewClient(cfg Config) ssm.Client {
-	return ssm.NewAWSCLI(cfg.Profile, cfg.Region)
+	client := ssm.NewAWSCLI(cfg.Profile, cfg.Region)
+	client.WithDecryption = !cfg.WithoutDecryption
+	return client
 }
 
 // LoadItems reads an optional paths file and validates it when present.
 // An omitted file means the caller wants to discover parameters directly from AWS SSM.
 func LoadItems(cfg Config) ([]inventory.Item, error) {
-	if cfg.PathsFile == "" {
-		return nil, nil
+	var items []inventory.Item
+	if cfg.NamesFile != "" {
+		fileItems, err := inventory.LoadPathsFile(cfg.NamesFile)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, fileItems...)
 	}
-	items, err := inventory.LoadPathsFile(cfg.PathsFile)
-	if err != nil {
-		return nil, err
+	for _, name := range cfg.Names {
+		items = append(items, inventory.Item{Path: name})
+	}
+	items = dedupeItemsByPath(items)
+	if cfg.NamesFile != "" && len(items) == 0 {
+		return nil, fmt.Errorf("names file is empty: %s", cfg.NamesFile)
 	}
 	if len(items) == 0 {
-		return nil, fmt.Errorf("paths file is empty: %s", cfg.PathsFile)
+		return nil, nil
 	}
 	return items, nil
 }
@@ -133,6 +243,135 @@ func PrepareItems(cfg *Config) ([]inventory.Item, error) {
 	return items, nil
 }
 
+func dedupeItemsByPath(items []inventory.Item) []inventory.Item {
+	seen := map[string]bool{}
+	out := make([]inventory.Item, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.Path) == "" || seen[item.Path] {
+			continue
+		}
+		seen[item.Path] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func filterRecordsByNames(records []secretfmt.Record, names []string) []secretfmt.Record {
+	if len(names) == 0 {
+		return records
+	}
+	allowed := map[string]bool{}
+	for _, name := range names {
+		allowed[name] = true
+	}
+	out := make([]secretfmt.Record, 0, len(records))
+	for _, record := range records {
+		if allowed[record.Path] {
+			out = append(out, record)
+		}
+	}
+	return out
+}
+
+func namesFromItems(items []inventory.Item) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.Path != "" {
+			out = append(out, item.Path)
+		}
+	}
+	return dedupeStrings(out)
+}
+
+func combinedFilterNames(cfg Config, items []inventory.Item) []string {
+	return dedupeStrings(append(append([]string{}, cfg.Names...), namesFromItems(items)...))
+}
+
+func nameInScope(name string, cfg Config) bool {
+	items, err := LoadItems(cfg)
+	if err != nil || len(items) == 0 {
+		return true
+	}
+	for _, item := range items {
+		if item.Path == name {
+			return true
+		}
+	}
+	return false
+}
+
+func requireNameInScope(name string, cfg Config, command string) error {
+	if nameInScope(name, cfg) {
+		return nil
+	}
+	return fmt.Errorf("%s name %q is outside --names/--names-file scope", command, name)
+}
+
+func requireFieldForCommand(cfg Config, field, command string) error {
+	if !fieldAllowed(cfg.Fields, field) {
+		return fmt.Errorf("%s requires field %q; remove --fields or include %s", command, field, field)
+	}
+	return nil
+}
+
+func rejectDisallowedFlag(ctx *cli.Context, cfg Config, flagName, field string) error {
+	if ctx.IsSet(flagName) && !fieldAllowed(cfg.Fields, field) {
+		return fmt.Errorf("--%s requires field %q; remove --fields or include %s", flagName, field, field)
+	}
+	return nil
+}
+
+func importDefaultOptions(ctx *cli.Context, cfg Config) (ssm.PutParameterOptions, error) {
+	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	dataType, err := ssm.ParseParameterDataType(ctx.String("default-data-type"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	opts := ssm.PutParameterOptions{Overwrite: ctx.Bool("default-override"), Tier: tier, DataType: dataType}
+	if fieldAllowed(cfg.Fields, "description") {
+		opts.Description = ctx.String("default-description")
+	}
+	return opts, nil
+}
+
+func setOptions(ctx *cli.Context, cfg Config, overwrite bool) (ssm.PutParameterOptions, error) {
+	if err := rejectDisallowedFlag(ctx, cfg, "tier", "tier"); err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	if err := rejectDisallowedFlag(ctx, cfg, "data-type", "data-type"); err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	if err := rejectDisallowedFlag(ctx, cfg, "description", "description"); err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	if err := rejectDisallowedFlag(ctx, cfg, "policies", "policies"); err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	if err := rejectDisallowedFlag(ctx, cfg, "policies-file", "policies"); err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	tier, err := ssm.ParseParameterTier(ctx.String("tier"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	dataType, err := ssm.ParseParameterDataType(ctx.String("data-type"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, err
+	}
+	policies := ctx.String("policies")
+	if file := strings.TrimSpace(ctx.String("policies-file")); file != "" {
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return ssm.PutParameterOptions{}, err
+		}
+		policies = string(data)
+	}
+	return ssm.PutParameterOptions{Overwrite: overwrite, Tier: tier, DataType: dataType, Description: ctx.String("description"), Policies: policies}, nil
+}
+
 // ensureRegions guarantees that non-all-regions commands have one usable AWS region.
 // It first asks the AWS CLI profile configuration if CLI/env flags did not provide a region, then mirrors the
 // resolved primary region into cfg.Regions when the user did not pass an explicit list.
@@ -144,7 +383,7 @@ func ensureRegions(cfg *Config) error {
 		cfg.Region = ssm.ResolveConfiguredRegion(cfg.Profile)
 	}
 	if cfg.Region == "" {
-		return errors.New("AWS region is required; pass --region, set AWS_REGION/AWS_DEFAULT_REGION, or configure a default region in the AWS profile")
+		return errors.New("AWS region is required; pass --regions, set AWS_REGION/AWS_DEFAULT_REGION, or configure a default region in the AWS profile")
 	}
 	if len(cfg.Regions) == 0 {
 		cfg.Regions = []string{cfg.Region}
@@ -260,14 +499,22 @@ func Interactive(ctx *cli.Context) error {
 		regionLabel = strings.Join(regions, ", ")
 	}
 	return ui.RunInteractive(client, items, ui.Options{
-		Region:               regionLabel,
-		Regions:              regions,
-		Profile:              cfg.Profile,
-		PathsFile:            cfg.PathsFile,
-		NoColor:              cfg.NoColor,
-		Keymap:               cfg.Keymap,
-		Columns:              cfg.Columns,
-		AllowPathsFileUpdate: cfg.AllowPathsFileUpdate,
+		Region:                    regionLabel,
+		Regions:                   regions,
+		Profile:                   cfg.Profile,
+		NamesFile:                 cfg.NamesFile,
+		NoColor:                   cfg.NoColor,
+		Keymap:                    cfg.Keymap,
+		ShowColumns:               cfg.ShowColumns,
+		Sort:                      cfg.Sort,
+		Fields:                    cfg.Fields,
+		IncludeValues:             includeValuesForFields(cfg.Fields),
+		ShowSecureValues:          cfg.ShowSecureValues,
+		AllowNamesFileUpdate:      cfg.AllowNamesFileUpdate,
+		NoConfirmOverwriteFile:    cfg.NoConfirmOverwriteFile,
+		NoConfirmWriteSecureValue: cfg.NoConfirmWriteSecureValue,
+		NoConfirmDeleteOne:        cfg.NoConfirmDeleteOne,
+		NoConfirmDeleteAll:        cfg.NoConfirmDeleteAll,
 	})
 }
 
@@ -278,18 +525,24 @@ func Get(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := requireFieldForCommand(cfg, "value", "get"); err != nil {
+		return err
+	}
 	if cfg.AllRegions {
 		return errors.New("--all-regions is not supported for get; use interactive or export")
 	}
 	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
+		return errors.New("multiple --regions values are only supported for interactive and export")
 	}
 	args, flags, err := parseCommonArgFlags(ctx.Args().Slice(), ctx.String("file"), false, "")
 	if err != nil {
 		return err
 	}
 	if len(args) != 1 {
-		return errors.New("get requires parameter path")
+		return errors.New("get requires parameter name")
+	}
+	if err := requireNameInScope(args[0], cfg, "get"); err != nil {
+		return err
 	}
 	if err := ensureRegions(&cfg); err != nil {
 		return err
@@ -315,11 +568,14 @@ func Set(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := requireFieldForCommand(cfg, "value", "set"); err != nil {
+		return err
+	}
 	if cfg.AllRegions {
 		return errors.New("--all-regions is not supported for set; use interactive on an existing regional row")
 	}
 	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
+		return errors.New("multiple --regions values are only supported for interactive and export")
 	}
 	args, flags, err := parseCommonArgFlags(ctx.Args().Slice(), ctx.String("file"), ctx.Bool("override"), ctx.String("type"))
 	if err != nil {
@@ -329,6 +585,9 @@ func Set(ctx *cli.Context) error {
 		return errors.New("set requires parameter path and value, or parameter path with --file")
 	}
 	path := args[0]
+	if err := requireNameInScope(path, cfg, "set"); err != nil {
+		return err
+	}
 	if flags.file != "" && len(args) == 2 {
 		return errors.New("set accepts either value argument or --file, not both")
 	}
@@ -346,6 +605,10 @@ func Set(ctx *cli.Context) error {
 		value = args[1]
 	}
 
+	if commandRegion := strings.TrimSpace(ctx.String("region")); commandRegion != "" {
+		cfg.Region = commandRegion
+		cfg.Regions = []string{commandRegion}
+	}
 	if err := ensureRegions(&cfg); err != nil {
 		return err
 	}
@@ -357,11 +620,18 @@ func Set(ctx *cli.Context) error {
 	if !flags.override && existingErr == nil && existing.Value != "" {
 		return fmt.Errorf("parameter already has a non-empty value: %s; use --override", path)
 	}
+	if ctx.IsSet("type") && !fieldAllowed(cfg.Fields, "type") {
+		return errors.New("--type requires field \"type\"; remove --fields or include type")
+	}
 	parameterType, err := resolveSetType(flags.parameterType, existing.Type)
 	if err != nil {
 		return err
 	}
-	return client.PutParameter(path, value, parameterType)
+	opts, err := setOptions(ctx, cfg, flags.override)
+	if err != nil {
+		return err
+	}
+	return client.PutParameterWithOptions(path, value, parameterType, opts)
 }
 
 type commonArgFlags struct {
@@ -426,17 +696,17 @@ func resolveImportType(defaultType, existingType, recordType string) (ssm.Parame
 }
 
 // PrepareImportItems loads path inventory only when the selected import format needs it.
-// Dotenv imports need paths.txt to resolve aliases such as JWT_SECRET back to full SSM paths.
-// JSON imports already contain full SSM paths as keys, so paths.txt is optional for that format.
+// Dotenv imports need paths.txt to resolve aliases such as JWT_SECRET back to full SSM names.
+// JSON imports already contain full SSM names as keys, so paths.txt is optional for that format.
 func PrepareImportItems(cfg *Config, format string) ([]inventory.Item, error) {
 	switch format {
 	case "dotenv":
-		if cfg.PathsFile == "" {
-			return nil, errors.New("--paths-file is required for dotenv import")
+		if cfg.NamesFile == "" {
+			return nil, errors.New("--names-file is required for dotenv import")
 		}
 		return PrepareItems(cfg)
 	case "json":
-		if cfg.PathsFile == "" {
+		if cfg.NamesFile == "" {
 			return nil, ensureRegions(cfg)
 		}
 		return PrepareItems(cfg)
@@ -445,18 +715,22 @@ func PrepareImportItems(cfg *Config, format string) ([]inventory.Item, error) {
 	}
 }
 
-// Import reads dotenv or JSON data, resolves each record to an SSM path, and writes the values to Parameter Store.
+// Import reads dotenv or JSON data, resolves each record to an SSM name, and writes the values to Parameter Store.
 // It preloads existing values so it can skip protected non-empty parameters and report all skipped paths together.
 func Import(ctx *cli.Context) error {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
 		return err
 	}
+	if defaultRegion := strings.TrimSpace(ctx.String("default-region")); defaultRegion != "" && cfg.Region == "" {
+		cfg.Region = defaultRegion
+		cfg.Regions = []string{defaultRegion}
+	}
 	if cfg.AllRegions {
-		return errors.New("--all-regions is not supported for import; specify --region")
+		return errors.New("--all-regions is not supported for import; specify --regions")
 	}
 	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
+		return errors.New("multiple --regions values are only supported for interactive and export")
 	}
 	format := ctx.String("format")
 	items, err := PrepareImportItems(&cfg, format)
@@ -464,7 +738,7 @@ func Import(ctx *cli.Context) error {
 		return err
 	}
 
-	reader, closeFn, err := inputReader(ctx.String("file"))
+	reader, closeFn, err := inputReader(ctx.String("from-file"))
 	if err != nil {
 		return err
 	}
@@ -474,7 +748,16 @@ func Import(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	_, importFlags, err := parseCommonArgFlags(ctx.Args().Slice(), "", ctx.Bool("override"), ctx.String("type"))
+	records = filterRecordsByNames(records, combinedFilterNames(cfg, items))
+	if err := requireFieldForCommand(cfg, "value", "import"); err != nil {
+		return err
+	}
+	_, importFlags, err := parseCommonArgFlags(ctx.Args().Slice(), "", ctx.Bool("default-override"), ctx.String("default-type"))
+	if err != nil {
+		return err
+	}
+
+	defaultOpts, err := importDefaultOptions(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -505,11 +788,17 @@ func Import(ctx *cli.Context) error {
 		if existing, ok := values[record.Path]; ok {
 			existingType = existing.Type
 		}
-		parameterType, err := resolveImportType(importFlags.parameterType, existingType, record.Type)
+		recordType := record.Type
+		if !fieldAllowed(cfg.Fields, "type") {
+			recordType = ""
+		}
+		parameterType, err := resolveImportType(importFlags.parameterType, existingType, recordType)
 		if err != nil {
 			return fmt.Errorf("%s: %w", record.Path, err)
 		}
-		if err := client.PutParameter(record.Path, record.Value, parameterType); err != nil {
+		opts := defaultOpts
+		opts.Overwrite = importFlags.override
+		if err := client.PutParameterWithOptions(record.Path, record.Value, parameterType, opts); err != nil {
 			return err
 		}
 	}
@@ -541,10 +830,10 @@ func Export(ctx *cli.Context) error {
 	}
 
 	var statuses []ui.Status
-	if ctx.String("file") == "" {
-		statuses = ui.LoadStatusesForRegions(client, items, true, regions)
+	if ctx.String("to-file") == "" {
+		statuses = ui.LoadStatusesForRegions(client, items, includeValuesForFields(cfg.Fields), regions)
 	} else {
-		statuses = ui.LoadStatusesWithProgressForRegions(client, items, true, regions)
+		statuses = ui.LoadStatusesWithProgressForRegions(client, items, includeValuesForFields(cfg.Fields), regions)
 	}
 
 	var records []secretfmt.Record
@@ -553,13 +842,17 @@ func Export(ctx *cli.Context) error {
 			continue
 		}
 		value := status.Value
-		if !status.Exists {
+		if !status.Exists || !fieldAllowed(cfg.Fields, "value") {
 			value = ""
 		}
-		records = append(records, secretfmt.Record{Path: status.Item.Path, Alias: secretfmt.AliasForItem(status.Item), Value: value, Type: status.Type})
+		parameterType := status.Type
+		if !fieldAllowed(cfg.Fields, "type") {
+			parameterType = ""
+		}
+		records = append(records, secretfmt.Record{Path: status.Item.Path, Alias: secretfmt.AliasForItem(status.Item), Value: value, Type: parameterType})
 	}
 
-	writer, closeFn, err := outputWriter(ctx.String("file"))
+	writer, closeFn, err := outputWriter(ctx.String("to-file"))
 	if err != nil {
 		return err
 	}

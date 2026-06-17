@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -16,6 +17,7 @@ type fakeSSMClient struct {
 	listRegionsErr error
 	params         map[string]ssm.Parameter
 	metas          map[string]ssm.Metadata
+	putOpts        map[string]ssm.PutParameterOptions
 	errs           map[string]error
 }
 
@@ -106,8 +108,34 @@ func splitItemKey(key string) (string, string) {
 }
 
 func (f fakeSSMClient) PutParameter(path, value string, parameterType ssm.ParameterType) error {
+	return f.PutParameterWithOptions(path, value, parameterType, ssm.PutParameterOptions{Overwrite: true})
+}
+
+func (f fakeSSMClient) PutParameterWithOptions(path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+	if f.putOpts != nil {
+		f.putOpts[itemKey(f.region, path)] = opts
+	}
 	if f.params != nil {
 		f.params[itemKey(f.region, path)] = ssm.Parameter{Name: path, Region: f.region, Type: parameterType.String(), Value: value}
+	}
+	if f.metas != nil && (strings.TrimSpace(opts.Description) != "" || strings.TrimSpace(opts.Policies) != "" || opts.Tier.IsValid() || opts.DataType.IsValid()) {
+		meta := f.metas[itemKey(f.region, path)]
+		meta.Name = path
+		meta.Region = f.region
+		meta.Type = parameterType.String()
+		if strings.TrimSpace(opts.Description) != "" {
+			meta.Description = opts.Description
+		}
+		if opts.Tier.IsValid() {
+			meta.Tier = opts.Tier.String()
+		}
+		if opts.DataType.IsValid() {
+			meta.DataType = opts.DataType.String()
+		}
+		if strings.TrimSpace(opts.Policies) != "" {
+			meta.Policies = opts.Policies
+		}
+		f.metas[itemKey(f.region, path)] = meta
 	}
 	return nil
 }

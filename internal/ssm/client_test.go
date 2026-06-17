@@ -45,6 +45,28 @@ func TestParseParameterTypeNormalizesSupportedAliases(t *testing.T) {
 	}
 }
 
+func TestParseParameterTierNormalizesSupportedAliases(t *testing.T) {
+	cases := map[string]ParameterTier{
+		"":                    ParameterTierIntelligentTiering,
+		"intelligent-tiering": ParameterTierIntelligentTiering,
+		"IntelligentTiering":  ParameterTierIntelligentTiering,
+		"standard":            ParameterTierStandard,
+		"Advanced":            ParameterTierAdvanced,
+	}
+	for input, expected := range cases {
+		actual, err := ParseParameterTier(input)
+		assert.NoError(t, err)
+		assert.Equal(t, expected, actual)
+	}
+}
+
+func TestParseParameterTierRejectsUnsupportedValues(t *testing.T) {
+	actual, err := ParseParameterTier("basic")
+
+	assert.Error(t, err)
+	assert.Equal(t, ParameterTier(""), actual)
+}
+
 func TestParseParameterTypeRejectsUnsupportedValues(t *testing.T) {
 	actual, err := ParseParameterType("binary")
 

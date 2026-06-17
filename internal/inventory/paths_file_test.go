@@ -36,7 +36,7 @@ func TestLoadPathsFileRejectsRelativePaths(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, items)
-	assert.ErrorContains(t, err, "invalid SSM path")
+	assert.ErrorContains(t, err, "invalid SSM name")
 }
 
 func writeTestFile(path, content string) error {

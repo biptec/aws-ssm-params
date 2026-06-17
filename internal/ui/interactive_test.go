@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestSaveValueCmdWritesSelectedParameterType(t *testing.T) {
 	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
 	item := inventory.Item{Path: "/app/hosts", Region: "eu-north-1"}
 
-	msg := saveValueCmd(client, item, item.Path, "api.example.com,www.example.com", ssm.ParameterTypeStringList, "", false)()
+	msg := saveValueCmd(client, item, item.Path, "api.example.com,www.example.com", ssm.ParameterTypeStringList, ssm.PutParameterOptions{Tier: ssm.ParameterTierStandard, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
 
 	updated, ok := msg.(statusUpdatedMsg)
 	require.True(t, ok)
@@ -145,7 +146,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, editFieldRegion, m.editField)
 	assert.Empty(t, m.editRegionOptions)
-	assert.Contains(t, m.renderTextAreaScreen(), "eu-north-1 ⌵")
+	assert.Contains(t, m.renderTextAreaScreen(), "eu-north-1 <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -164,7 +165,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	m = updated.(model)
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, editFieldType, m.editField)
-	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditType().String()+" ⌵")
+	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditType().String()+" <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -180,7 +181,58 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
-	assert.Equal(t, editFieldFilePath, m.editField)
+	assert.Equal(t, editFieldTier, m.editField)
+	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditTier().String()+" <")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupTierSelect, m.activePopup)
+	assert.Equal(t, editFieldTier, m.editField)
+
+	updated, _ = m.updateTierSelectPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, editFieldTier, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, editFieldDataType, m.editField)
+	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditDataType().String()+" <")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupDataTypeSelect, m.activePopup)
+	assert.Equal(t, editFieldDataType, m.editField)
+
+	updated, _ = m.updateDataTypeSelectPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, editFieldDataType, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, editFieldOverwrite, m.editField)
+	assert.Contains(t, m.renderTextAreaScreen(), strconv.FormatBool(m.editOverwrite)+" <")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupOverwriteSelect, m.activePopup)
+	assert.Equal(t, editFieldOverwrite, m.editField)
+
+	updated, _ = m.updateOverwriteSelectPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, editFieldOverwrite, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, editFieldDescription, m.editField)
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
@@ -188,37 +240,35 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
-	assert.Equal(t, editFieldFilePath, m.editField)
+	assert.Equal(t, editFieldDescription, m.editField)
 }
 
-func TestUpdateTextAreaLoadsValueFromFile(t *testing.T) {
+func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0600))
 	m.screen = screenTextArea
-	m.editFileInput.SetValue(path)
+	m.editField = editFieldValue
 	m.textArea.SetValue("old")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
-	actual := updated.(model)
+	actual, cmd := submitFileActionPopup(t, m, "load", path)
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, "from-file\nsecond-line", actual.textArea.Value())
 	assert.Equal(t, "Loaded value from "+path, actual.message)
 	assert.Empty(t, actual.errMessage)
 	assert.Equal(t, editFieldValue, actual.editField)
+	assert.Equal(t, popupNone, actual.activePopup)
 }
 
-func TestUpdateTextAreaWritesNonSecureValueToFile(t *testing.T) {
+func TestFileActionPopupWritesNonSecureValueToFile(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
-	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("plain-value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	actual := updated.(model)
+	actual, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
 	data, err := os.ReadFile(path)
@@ -226,26 +276,27 @@ func TestUpdateTextAreaWritesNonSecureValueToFile(t *testing.T) {
 	assert.Equal(t, "plain-value", string(data))
 	assert.Equal(t, "Wrote value to "+path, actual.message)
 	assert.Empty(t, actual.errMessage)
+	assert.Equal(t, popupNone, actual.activePopup)
 }
 
-func TestUpdateTextAreaRequiresYForSecureStringFileWrite(t *testing.T) {
+func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	path := t.TempDir() + "/secret.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeSecureString
-	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("secret-value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = updated.(model)
+	m, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
+	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
+	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
 	assert.Equal(t, fileWriteConfirmationSecure, m.pendingFileWrite)
-	assert.Contains(t, m.warningMessage, `Press "y"`)
+	assert.Empty(t, m.warningMessage)
 	_, err := os.Stat(path)
 	assert.True(t, os.IsNotExist(err))
 
-	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
@@ -253,49 +304,51 @@ func TestUpdateTextAreaRequiresYForSecureStringFileWrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "secret-value", string(data))
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
+	assert.Equal(t, popupNone, m.activePopup)
 }
 
-func TestUpdateTextAreaReportsMissingFilePathForReadAndWrite(t *testing.T) {
+func TestFileActionPopupReportsMissingFilePathForReadAndWrite(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	m.screen = screenTextArea
-	m.editField = editFieldSSMPath
+	m.editField = editFieldValue
 	m.textArea.SetValue("value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlO})
-	m = updated.(model)
+	updated, cmd := submitFileActionPopup(t, m, "load", "")
+	m = updated
 	assert.Nil(t, cmd)
 	assert.Equal(t, "File path is required.", m.errMessage)
 
 	m.errMessage = ""
-	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = updated.(model)
+	updated, cmd = submitFileActionPopup(t, m, "write", "")
+	m = updated
 	assert.Nil(t, cmd)
 	assert.Equal(t, "File path is required.", m.errMessage)
 }
 
-func TestUpdateTextAreaRequiresYBeforeOverwritingExistingFile(t *testing.T) {
+func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("old"), 0600))
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
 	m.editField = editFieldValue
-	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("new")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = updated.(model)
+	m, cmd := submitFileActionPopup(t, m, "write", path)
 	assert.Nil(t, cmd)
+	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
+	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
 	assert.Equal(t, fileWriteConfirmationOverwrite, m.pendingFileWrite)
-	assert.Contains(t, m.warningMessage, `Press "y"`)
+	assert.Empty(t, m.warningMessage)
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "old", string(data))
 
-	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
 	assert.Nil(t, cmd)
+	assert.Equal(t, popupNone, m.activePopup)
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
 
 	data, err = os.ReadFile(path)
@@ -310,21 +363,27 @@ func TestPromptLineCountPreservesTrailingEmptyLines(t *testing.T) {
 	assert.Equal(t, 4, promptLineCount("\n\n\n"))
 }
 
-func TestRenderTextAreaScreenShowsAlignedSSMAndFilePath(t *testing.T) {
+func TestRenderTextAreaScreenShowsAlignedSSMAndDescription(t *testing.T) {
 	m := newModel(nil, nil, Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}}
 	updated, _ := m.startMultiline(screenMain)
 	m = updated.(model)
-	m.editFileInput.SetValue("/tmp/value.txt")
+	m.editDescriptionInput.SetValue("Example parameter")
 
 	view := m.renderTextAreaScreen()
 
-	assert.Contains(t, view, "SSM path:  /app/value")
-	assert.Contains(t, view, "Region:    eu-north-1")
-	assert.Contains(t, view, "Type:      SecureString")
-	assert.Contains(t, view, "File path: /tmp/value.txt")
+	assert.Contains(t, view, "Name:")
+	assert.Contains(t, view, "/app/value")
+	assert.Contains(t, view, "Region:")
+	assert.Contains(t, view, "eu-north-1")
+	assert.Contains(t, view, "Type:")
+	assert.Contains(t, view, "SecureString")
+	assert.Contains(t, view, "DataType:")
+	assert.Contains(t, view, "Overwrite:")
+	assert.Contains(t, view, "Description: Example parameter")
+	assert.False(t, strings.Contains(view, "Policies:"))
 	assert.Contains(t, view, "Value:")
 }
 
@@ -343,7 +402,7 @@ func TestRenderTextAreaScreenDoesNotIndentValueWhenFilePathFocused(t *testing.T)
 	view := m.renderTextAreaScreen()
 
 	assert.Contains(t, view, "Value:")
-	assert.Contains(t, view, "1 │ test-value")
+	assert.Contains(t, view, "Value:       test-value")
 	assert.False(t, strings.Contains(view, "\n   1 │ test-value"))
 }
 
@@ -409,11 +468,9 @@ func TestWriteValueCreatesNewFileInExistingDirectory(t *testing.T) {
 	path := dir + "/new-value.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
-	m.editFileInput.SetValue(path)
 	m.textArea.SetValue("created-value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = updated.(model)
+	m, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
 	data, err := os.ReadFile(path)
@@ -428,11 +485,9 @@ func TestWriteValueExpandsHomeDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
-	m.editFileInput.SetValue("~/new-value.txt")
 	m.textArea.SetValue("home-value")
 
-	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlW})
-	m = updated.(model)
+	m, cmd := submitFileActionPopup(t, m, "write", "~/new-value.txt")
 
 	assert.Nil(t, cmd)
 	data, err := os.ReadFile(home + "/new-value.txt")
@@ -445,6 +500,8 @@ func TestUpdateHandlesCtrlCQuitConfirmationEverywhere(t *testing.T) {
 	m := newModel(nil, nil, Options{})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
+	m.textArea.SetWidth(max(20, m.width-14))
+	m.textArea.SetHeight(max(8, m.height-10))
 	m.textArea.Focus()
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -453,9 +510,9 @@ func TestUpdateHandlesCtrlCQuitConfirmationEverywhere(t *testing.T) {
 	assert.Nil(t, cmd)
 	assert.True(t, m.pendingQuit)
 	assert.Equal(t, "ctrl+c", m.pendingQuitKey)
-	assert.Equal(t, "Press Ctrl-c again to quit.", m.warningMessage)
+	assert.Equal(t, `Are you sure you want to quit? Press "y" to confirm.`, m.warningMessage)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	_ = updated.(model)
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
@@ -471,9 +528,9 @@ func TestUpdateHandlesCtrlQQuitConfirmationEverywhere(t *testing.T) {
 	assert.Nil(t, cmd)
 	assert.True(t, m.pendingQuit)
 	assert.Equal(t, "ctrl+q", m.pendingQuitKey)
-	assert.Equal(t, "Press Ctrl-q again to quit.", m.warningMessage)
+	assert.Equal(t, `Are you sure you want to quit? Press "y" to confirm.`, m.warningMessage)
 
-	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	_ = updated.(model)
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
@@ -549,7 +606,7 @@ func TestEditScreenWithStatusDoesNotHideTopFields(t *testing.T) {
 
 	view := m.View()
 
-	assert.Contains(t, view, "SSM path:")
+	assert.Contains(t, view, "Name:")
 	assert.Contains(t, view, "Region:")
 	assert.True(t, countLines(view) <= m.height)
 }
@@ -677,7 +734,7 @@ func TestBackspaceRemovesEmptyTextareaRows(t *testing.T) {
 	m.textArea.SetValue("one")
 
 	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(model)
+	m = updated.(model) // first Enter expands the compact one-line field
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
 	require.Equal(t, 3, m.textArea.LineCount())
@@ -709,10 +766,9 @@ func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
 	m.textArea.SetValue(strings.Join(valueLines, "\n"))
 
 	before := m.View()
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
-	m = updated.(model)
+	m, _ = submitFileActionPopup(t, m, "load", "")
 	withError := m.View()
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 	afterClear := m.View()
 
@@ -766,7 +822,7 @@ func TestMainDetailsTogglePersistsAcrossNavigation(t *testing.T) {
 }
 
 func TestMainTabAndShiftTabMoveRows(t *testing.T) {
-	m := newModel(nil, nil, Options{NoColor: true})
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/app/one", Region: "eu-north-1"}, Exists: true},
@@ -782,6 +838,15 @@ func TestMainTabAndShiftTabMoveRows(t *testing.T) {
 	updated, _ = m.updateMain(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
 	assert.Equal(t, 0, m.selected)
+
+	m.selected = len(m.statuses) - 1
+	updated, _ = m.updateMain(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+	assert.Equal(t, 0, m.selected)
+
+	updated, _ = m.updateMain(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(model)
+	assert.Equal(t, len(m.statuses)-1, m.selected)
 }
 
 func TestMainUpperXDeletesVisibleParameters(t *testing.T) {
@@ -813,10 +878,10 @@ func TestMainColumnsHotkeyOpensPopupWithoutChangingScreen(t *testing.T) {
 	assert.Equal(t, screenMain, m.screen)
 	assert.Equal(t, popupColumns, m.activePopup)
 	assert.Contains(t, m.View(), "Columns")
-	assert.Contains(t, m.View(), "# and PATH are always visible.")
+	assert.Contains(t, m.View(), "# and NAME are always visible.")
 }
 
-func TestColumnsPopupTogglesColumnAndCloses(t *testing.T) {
+func TestColumnsPopupTogglesDraftAppliesAndCancels(t *testing.T) {
 	m := newModel(nil, nil, Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupColumns
@@ -824,11 +889,23 @@ func TestColumnsPopupTogglesColumnAndCloses(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
-	assert.True(t, m.columns[columnRegion])
+	assert.False(t, m.columns[columnValue])
+	assert.True(t, m.columnsDraft[columnValue])
 	assert.Equal(t, popupColumns, m.activePopup)
 
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.True(t, m.columns[columnValue])
+	assert.Equal(t, popupNone, m.activePopup)
+
+	m.activePopup = popupColumns
+	m.columnCursor = 0
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(model)
+	assert.False(t, m.columnsDraft[columnValue])
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
+	assert.True(t, m.columns[columnValue])
 	assert.Equal(t, popupNone, m.activePopup)
 	assert.Equal(t, screenMain, m.screen)
 }
@@ -843,12 +920,14 @@ func TestColumnsPopupFooterReplacesMainFooter(t *testing.T) {
 
 	view := m.View()
 
-	assert.Contains(t, view, "space/enter toggle")
-	assert.Contains(t, view, "esc close")
+	assert.Contains(t, view, "enter apply")
+	assert.Contains(t, view, "space toggle")
+	assert.Contains(t, view, "x none")
+	assert.Contains(t, view, "ctrl+/ help")
 	assert.False(t, strings.Contains(view, "enter edit"))
 }
 
-func TestColumnsPopupShortcutsReturnsToPopup(t *testing.T) {
+func TestColumnsPopupShortcutsClosesToScreen(t *testing.T) {
 	m := newModel(nil, nil, Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupColumns
@@ -857,13 +936,13 @@ func TestColumnsPopupShortcutsReturnsToPopup(t *testing.T) {
 	m = updated.(model)
 	assert.Equal(t, screenMain, m.screen)
 	assert.Equal(t, popupShortcuts, m.activePopup)
-	assert.Equal(t, []popupKind{popupColumns}, m.popupStack)
+	assert.Empty(t, m.popupStack)
 	assert.Equal(t, screenColumns, m.shortcutsFor)
 
 	updated, _ = m.updateShortcutsPopup(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 	assert.Equal(t, screenMain, m.screen)
-	assert.Equal(t, popupColumns, m.activePopup)
+	assert.Equal(t, popupNone, m.activePopup)
 }
 
 func TestSingleDeleteConfirmPopupUsesEnterEscWithoutTypedPhrase(t *testing.T) {
@@ -881,7 +960,8 @@ func TestSingleDeleteConfirmPopupUsesEnterEscWithoutTypedPhrase(t *testing.T) {
 	assert.Empty(t, m.confirmExpected)
 	view := m.View()
 	assert.Contains(t, view, "Delete selected parameter?")
-	assert.Contains(t, view, "Enter confirm  Esc cancel")
+	assert.Contains(t, view, "enter confirm")
+	assert.Contains(t, view, "esc cancel")
 	assert.False(t, strings.Contains(view, "Type DELETE"))
 }
 
@@ -987,23 +1067,23 @@ func TestMainRandomShortcutIsMovedToEditor(t *testing.T) {
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlR})
 	m = updated.(model)
-	assert.Equal(t, screenRandom, m.screen)
-	assert.Equal(t, screenTextArea, m.returnScreen)
+	assert.Equal(t, screenTextArea, m.screen)
 }
 
-func TestGeneratedRandomPreviewInsertsIntoEditorWithoutSaving(t *testing.T) {
+func TestRandomPopupInsertsIntoEditorWithoutSaving(t *testing.T) {
 	m := newModel(nil, nil, Options{})
-	m.screen = screenRandomPreview
-	m.returnScreen = screenTextArea
-	m.generatedValue = "generated-value"
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.pushPopup(popupRandomValue)
 
-	updated, cmd := m.updateRandomPreview(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.updateRandomValuePopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, screenTextArea, m.screen)
-	assert.Equal(t, "generated-value", m.textArea.Value())
+	assert.NotEmpty(t, m.textArea.Value())
 	assert.Contains(t, m.message, "Press Ctrl-s to save")
+	assert.Equal(t, popupNone, m.activePopup)
 }
 
 func TestShortcutsFollowSelectedKeymap(t *testing.T) {
@@ -1042,14 +1122,14 @@ func TestMissingSelectedParameterShowsOnlyPathAndDashes(t *testing.T) {
 	compact := m.renderSelectedParameterBlock(false)
 	expanded := m.renderSelectedParameterBlock(true)
 
-	assert.Contains(t, compact, "Path:   /app/missing")
+	assert.Contains(t, compact, "Name:   /app/missing")
 	assert.Contains(t, compact, "Region: -")
 	assert.Contains(t, compact, "Type:   -")
 	assert.Contains(t, compact, "Date:   -")
 	assert.Contains(t, compact, "Value:  -")
 	assert.False(t, strings.Contains(compact, "(hidden)"))
 
-	assert.Contains(t, expanded, "Path:        /app/missing")
+	assert.Contains(t, expanded, "Name:        /app/missing")
 	assert.Contains(t, expanded, "Region:      -")
 	assert.Contains(t, expanded, "Type:        -")
 	assert.Contains(t, expanded, "Version:     -")
@@ -1083,6 +1163,8 @@ func TestColumnsScreenDoesNotOfferStatusColumn(t *testing.T) {
 func TestSaveValueRejectsEmptyValueBeforeAWSRequest(t *testing.T) {
 	m := newModel(fakeSSMClient{}, nil, Options{})
 	m.screen = screenTextArea
+	m.width = 120
+	m.height = 40
 	m.returnScreen = screenMain
 	m.editPathInput.SetValue("/app/value")
 	m.editRegion = "eu-north-1"
@@ -1105,9 +1187,9 @@ func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
 	footer := m.textAreaFooterText()
 
 	assert.Contains(t, footer, "ctrl+/ help • ctrl+s save")
-	assert.Contains(t, footer, "ctrl+r random")
+	assert.Contains(t, footer, "alt+e value actions")
 	assert.False(t, strings.Contains(footer, "save AWS"))
-	assert.Contains(t, footer, "ctrl+o read file")
+	assert.False(t, strings.Contains(footer, "ctrl+o read file"))
 	assert.False(t, strings.Contains(footer, "ctrl+t"))
 	assert.False(t, strings.Contains(footer, ":"))
 }
@@ -1138,15 +1220,15 @@ func TestViEditorStartsNormalAndInsertModeLabelsActiveTextField(t *testing.T) {
 	m.editPathInput.Focus()
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
-	assert.Contains(t, m.renderTextAreaScreen(), "SSM path [INSERT]:")
+	assert.Contains(t, m.renderTextAreaScreen(), "Name [INSERT]:")
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 
-	m.editField = editFieldFilePath
-	m.editFileInput.Focus()
+	m.editField = editFieldDescription
+	m.editDescriptionInput.Focus()
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
-	assert.Contains(t, m.renderTextAreaScreen(), "File path [INSERT]:")
+	assert.Contains(t, m.renderTextAreaScreen(), "Description [INSERT]:")
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 
@@ -1341,7 +1423,7 @@ func TestNewParameterSaveValidatesPathAndValue(t *testing.T) {
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
 	assert.Nil(t, cmd)
-	assert.Equal(t, "SSM path is required.", m.errMessage)
+	assert.Equal(t, "Name is required.", m.errMessage)
 	assert.Equal(t, screenTextArea, m.screen)
 
 	m.editPathInput.SetValue("/app/new")
@@ -1410,10 +1492,10 @@ func TestPrintableQCanBeTypedInEditableFields(t *testing.T) {
 		insert bool
 		field  editField
 	}{
-		{name: "emacs ssm path", keymap: "emacs", insert: true, field: editFieldSSMPath},
+		{name: "emacs name", keymap: "emacs", insert: true, field: editFieldSSMPath},
 		{name: "emacs file path", keymap: "emacs", insert: true, field: editFieldFilePath},
 		{name: "emacs value", keymap: "emacs", insert: true, field: editFieldValue},
-		{name: "vi insert ssm path", keymap: "vi", insert: true, field: editFieldSSMPath},
+		{name: "vi insert name", keymap: "vi", insert: true, field: editFieldSSMPath},
 		{name: "vi insert file path", keymap: "vi", insert: true, field: editFieldFilePath},
 		{name: "vi insert value", keymap: "vi", insert: true, field: editFieldValue},
 	}
@@ -1501,19 +1583,19 @@ func TestEditableTextInputsUseValueStyleInColorMode(t *testing.T) {
 	m.viInsertMode = true
 	m.editPathInput.SetValue("/app/path")
 	m.editPathInput.Focus()
-	m.editFileInput.SetValue("/tmp/value.txt")
+	m.editDescriptionInput.SetValue("Example parameter")
 
 	view := m.renderTextAreaScreen()
 
 	assert.Contains(t, view, "\x1b[38;5;254m/app/path")
-	assert.Contains(t, view, "\x1b[38;5;254m/tmp/value.txt")
+	assert.Contains(t, view, "\x1b[38;5;254mExample parameter")
 }
 
-func TestNewParameterSaveKeepsPathsFileReadOnlyByDefault(t *testing.T) {
+func TestNewParameterSaveKeepsNamesFileReadOnlyByDefault(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/old\n"), 0o600))
 	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, PathsFile: pathsFile})
+	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1535,11 +1617,11 @@ func TestNewParameterSaveKeepsPathsFileReadOnlyByDefault(t *testing.T) {
 	assert.Contains(t, m.visiblePaths(), "/app/new")
 }
 
-func TestNewParameterSaveWithPathsFileUpdateAppendsPath(t *testing.T) {
+func TestNewParameterSaveWithNamesFileUpdateAppendsPath(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/old\n"), 0o600))
 	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, PathsFile: pathsFile, AllowPathsFileUpdate: true})
+	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1558,11 +1640,11 @@ func TestNewParameterSaveWithPathsFileUpdateAppendsPath(t *testing.T) {
 	assert.Equal(t, "/app/old\n/app/new\n", readFileString(t, pathsFile))
 }
 
-func TestNewParameterSaveWithPathsFileUpdateDoesNotDuplicateExistingEntry(t *testing.T) {
+func TestNewParameterSaveWithNamesFileUpdateDoesNotDuplicateExistingEntry(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/new # already tracked\n"), 0o600))
 	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, PathsFile: pathsFile, AllowPathsFileUpdate: true})
+	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1586,6 +1668,18 @@ func readFileString(t *testing.T, file string) string {
 	return string(data)
 }
 
+func submitFileActionPopup(t *testing.T, m model, mode, path string) (model, tea.Cmd) {
+	t.Helper()
+	m.activePopup = popupFileAction
+	m.fileActionMode = mode
+	m.input.SetValue(path)
+	m.input.Focus()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	actual, ok := updated.(model)
+	require.True(t, ok)
+	return actual, cmd
+}
+
 func TestNewParameterEditorDoesNotRenderPlaceholders(t *testing.T) {
 	m := newModel(nil, nil, Options{NoColor: true, Keymap: "vi", Region: "eu-central-1", Regions: []string{"eu-central-1"}})
 	m.width = 120
@@ -1606,8 +1700,8 @@ func TestViInsertLabelsUseLabelStyleForEditableFields(t *testing.T) {
 		field editField
 		label string
 	}{
-		{name: "ssm path", field: editFieldSSMPath, label: "SSM path [INSERT]:"},
-		{name: "file path", field: editFieldFilePath, label: "File path [INSERT]:"},
+		{name: "name", field: editFieldSSMPath, label: "Name [INSERT]:"},
+		{name: "description", field: editFieldDescription, label: "Description [INSERT]:"},
 		{name: "value", field: editFieldValue, label: "Value [INSERT]:"},
 	}
 	for _, tc := range cases {
@@ -1647,7 +1741,7 @@ func TestEditTextInputLineKeepsColorWhenTerminalIsNarrow(t *testing.T) {
 
 	view := m.renderTextAreaScreen()
 
-	assert.Contains(t, view, "\x1b[38;5;214mSSM path [INSERT]:")
+	assert.Contains(t, view, "\x1b[38;5;214mName [INSERT]:")
 	assert.Contains(t, view, "\x1b[38;5;254m")
 }
 
@@ -1662,7 +1756,7 @@ func TestParseColumnOptionAcceptsOnlyAWSBackedOptionalColumns(t *testing.T) {
 			columns, err := ParseColumnOption(name)
 			assert.Nil(t, columns)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "unsupported --columns value")
+			assert.ErrorContains(t, err, "unsupported --show-columns value")
 		})
 	}
 }
@@ -1680,8 +1774,8 @@ func TestInitialColumnsUseIndexAndPathAsBaseColumns(t *testing.T) {
 	assert.Equal(t, columnPath, cols[1].key)
 }
 
-func TestColumnsOptionEnablesOptionalColumnsBetweenIndexAndPath(t *testing.T) {
-	m := newModel(nil, nil, Options{NoColor: true, Columns: []string{"region", "type", "value"}})
+func TestColumnsOptionEnablesOptionalColumnsAfterIndexAndPath(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"region", "type", "value"}})
 	m.width = 120
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/path", Region: "eu-central-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
@@ -1690,10 +1784,10 @@ func TestColumnsOptionEnablesOptionalColumnsBetweenIndexAndPath(t *testing.T) {
 
 	require.Len(t, cols, 5)
 	assert.Equal(t, columnIndex, cols[0].key)
-	assert.Equal(t, columnRegion, cols[1].key)
-	assert.Equal(t, columnType, cols[2].key)
-	assert.Equal(t, columnValue, cols[3].key)
-	assert.Equal(t, columnPath, cols[4].key)
+	assert.Equal(t, columnPath, cols[1].key)
+	assert.Equal(t, columnValue, cols[2].key)
+	assert.Equal(t, columnType, cols[3].key)
+	assert.Equal(t, columnRegion, cols[4].key)
 }
 
 func TestColumnChooserShowsOnlyAWSBackedOptionalColumns(t *testing.T) {
@@ -1702,10 +1796,10 @@ func TestColumnChooserShowsOnlyAWSBackedOptionalColumns(t *testing.T) {
 		labels = append(labels, string(column))
 	}
 
-	assert.Equal(t, []string{"region", "date", "type", "tier", "version", "len", "sha256", "value", "user", "description"}, labels)
+	assert.Equal(t, []string{"value", "type", "region", "date", "version", "tier", "len", "sha256", "user", "description"}, labels)
 }
 
-func TestDeleteWithoutPathsFileRemovesRowsFromUI(t *testing.T) {
+func TestDeleteWithoutNamesFileRemovesRowsFromUI(t *testing.T) {
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
 	m := newModel(fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1"})
 	m.returnScreen = screenMain
@@ -1722,11 +1816,11 @@ func TestDeleteWithoutPathsFileRemovesRowsFromUI(t *testing.T) {
 	assert.True(t, stringSliceContains(m.visiblePaths(), "/app/keep"))
 }
 
-func TestDeleteWithReadOnlyPathsFileMarksRowsMissing(t *testing.T) {
+func TestDeleteWithReadOnlyNamesFileMarksRowsMissing(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/delete\n"), 0o600))
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	m := newModel(fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", PathsFile: pathsFile})
+	m := newModel(fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile})
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: item, Exists: true}}
 
@@ -1743,11 +1837,11 @@ func TestDeleteWithReadOnlyPathsFileMarksRowsMissing(t *testing.T) {
 	assert.Equal(t, "/app/delete\n", readFileString(t, pathsFile))
 }
 
-func TestDeleteWithPathsFileUpdateRemovesPathAndRow(t *testing.T) {
+func TestDeleteWithNamesFileUpdateRemovesPathAndRow(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/delete\n/app/keep\n"), 0o600))
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	m := newModel(fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", PathsFile: pathsFile, AllowPathsFileUpdate: true})
+	m := newModel(fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: item, Exists: true}, {Item: inventory.Item{Path: "/app/keep", Region: "eu-north-1"}, Exists: true}}
 
@@ -1763,6 +1857,426 @@ func TestDeleteWithPathsFileUpdateRemovesPathAndRow(t *testing.T) {
 	assert.Equal(t, "/app/keep\n", readFileString(t, pathsFile))
 }
 
+func TestSortPopupShortcutsShowLetterHotkeysOnlyInSortContext(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "type"}})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.activePopup = popupSort
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
+	m = updated.(model)
+
+	assert.Equal(t, popupShortcuts, m.activePopup)
+	assert.Empty(t, m.popupStack)
+	view := m.View()
+	assert.Contains(t, view, "Sort")
+	assert.Contains(t, view, "n            sort by Name")
+	assert.Contains(t, view, "v            sort by Value")
+	assert.False(t, strings.Contains(view, "1            sort by Name"))
+}
+
+func TestValueActionsPopupAcceptsFooterHotkeys(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.activePopup = popupValueActions
+	m.editField = editFieldValue
+	m.textArea.SetValue("value")
+	m.valueActionCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	m = updated.(model)
+
+	assert.Equal(t, popupRandomValue, m.activePopup)
+	assert.Equal(t, "value", m.textArea.Value())
+}
+
+func TestFileActionPopupConfirmsSecureWriteWarningWithY(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	path := t.TempDir() + "/secret.txt"
+	m.screen = screenTextArea
+	m.activePopup = popupFileAction
+	m.fileActionMode = "write"
+	m.editType = ssm.ParameterTypeSecureString
+	m.textArea.SetValue("secret")
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
+	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
+	assert.Equal(t, fileWriteConfirmationSecure, m.pendingFileWrite)
+
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = updated.(model)
+	assert.Nil(t, cmd)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
+	assert.Equal(t, "secret", readFileString(t, path))
+}
+
+func TestFileActionPopupUsesCompactInputWithVisibleCursor(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.activePopup = popupFileAction
+	m.fileActionMode = "write"
+	m.width = 208
+	m.height = 69
+	m.input.SetValue("")
+	m.input.Focus()
+
+	view := m.View()
+
+	assert.Contains(t, view, "Write to file")
+	assert.Contains(t, view, "File path: █")
+	assert.Contains(t, view, "enter write")
+	assert.Contains(t, view, "esc cancel")
+	assert.False(t, strings.Contains(view, "..."))
+}
+
+func TestSaveValueCmdWritesSelectedParameterTier(t *testing.T) {
+	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	item := inventory.Item{Path: "/app/hosts", Region: "eu-north-1"}
+
+	msg := saveValueCmd(client, item, item.Path, "plain", ssm.ParameterTypeString, ssm.PutParameterOptions{Tier: ssm.ParameterTierAdvanced, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
+
+	updated, ok := msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	require.NoError(t, updated.err)
+	storedMeta := client.metas[itemKey("eu-north-1", "/app/hosts")]
+	assert.Equal(t, ssm.ParameterTierAdvanced.String(), storedMeta.Tier)
+}
+
+func TestEditorShowsPoliciesOnlyForAdvancedTier(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.width = 120
+	m.height = 30
+	m.editField = editFieldValue
+	m.editPathInput.SetValue("/app/value")
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeString
+	m.editDataType = ssm.DefaultParameterDataType
+	m.editOverwrite = true
+	m.textArea.SetValue("value")
+	m.editTier = ssm.ParameterTierStandard
+
+	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "Policies:"))
+
+	m.editTier = ssm.ParameterTierAdvanced
+	assert.Contains(t, m.renderTextAreaScreen(), "Policies:")
+}
+
+func TestSaveValueOmitsPoliciesUnlessTierIsAdvanced(t *testing.T) {
+	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(client, nil, Options{NoColor: true, Region: "eu-north-1"})
+	m.screen = screenTextArea
+	m.editPathInput.SetValue("/app/value")
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeString
+	m.editTier = ssm.ParameterTierStandard
+	m.editDataType = ssm.DefaultParameterDataType
+	m.editOverwrite = true
+	m.editPoliciesArea.SetValue("policy")
+
+	_, cmd := m.saveValue("value")
+	msg := cmd()
+	updated, ok := msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	require.NoError(t, updated.err)
+	assert.Empty(t, client.metas[itemKey("eu-north-1", "/app/value")].Policies)
+}
+
+func TestWrappedMultilineCursorRendersAndMovesAcrossVisualRows(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 40
+	m.height = 20
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	wrapWidth := m.multilineContentWidth()
+	longLine := strings.Repeat("d", wrapWidth+5)
+	m.textArea.SetValue(longLine + "\nnext")
+	m.setTextAreaCursorAbs(wrapWidth + 3)
+
+	view := strings.Join(m.renderMultilineFieldLines(editFieldValue, m.textArea, 4), "\n")
+	assert.Contains(t, view, "| "+strings.Repeat("d", 3)+"█")
+
+	m.setTextAreaCursorAbs(0)
+	m.moveActiveTextLine(1)
+	assert.Equal(t, wrapWidth, m.textAreaCursorAbs())
+	m.moveActiveTextLine(1)
+	assert.Equal(t, len(longLine)+1, m.textAreaCursorAbs())
+}
+
+func TestTextAreaOldValueActionHotkeysAreDisabled(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("keep")
+
+	keys := []tea.KeyMsg{
+		{Type: tea.KeyCtrlK},
+		{Type: tea.KeyCtrlW},
+		{Type: tea.KeyCtrlR},
+		{Type: tea.KeyCtrlV},
+	}
+	for _, key := range keys {
+		updated, cmd := m.updateTextArea(key)
+		m = updated.(model)
+		assert.Nil(t, cmd)
+		assert.Equal(t, "keep", m.textArea.Value())
+		assert.Equal(t, popupNone, m.activePopup)
+		assert.Equal(t, screenTextArea, m.screen)
+	}
+}
+
+func TestOverwriteFieldIsShownOnlyForNewParameters(t *testing.T) {
+	existing := newModel(nil, nil, Options{NoColor: true})
+	existing.width = 120
+	existing.height = 30
+	existing.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
+	updated, _ := existing.startMultiline(screenMain)
+	existing = updated.(model)
+	assert.False(t, existing.shouldShowOverwriteField())
+	assert.False(t, strings.Contains(existing.renderTextAreaScreen(), "Overwrite:"))
+
+	created := newModel(nil, nil, Options{NoColor: true, Region: "eu-north-1"})
+	created.width = 120
+	created.height = 30
+	updated, _ = created.startNewParameter(screenMain)
+	created = updated.(model)
+	assert.True(t, created.shouldShowOverwriteField())
+	assert.False(t, created.editOverwrite)
+	assert.Contains(t, created.renderTextAreaScreen(), "Overwrite:")
+	assert.Contains(t, created.renderTextAreaScreen(), "false")
+}
+
+func TestSaveValueUsesOverwriteOnlyForNewParameters(t *testing.T) {
+	existingClient := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	existing := newModel(existingClient, nil, Options{NoColor: true, Region: "eu-north-1"})
+	existing.screen = screenTextArea
+	existing.statuses = []Status{{Item: inventory.Item{Path: "/app/existing", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "old"}}
+	existing.editPathInput.SetValue("/app/existing")
+	existing.editRegion = "eu-north-1"
+	existing.editType = ssm.ParameterTypeString
+	existing.editTier = ssm.ParameterTierStandard
+	existing.editDataType = ssm.DefaultParameterDataType
+	existing.editOverwrite = false
+	_, cmd := existing.saveValue("new")
+	msg := cmd()
+	statusMsg, ok := msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	require.NoError(t, statusMsg.err)
+	assert.True(t, existingClient.putOpts[itemKey("eu-north-1", "/app/existing")].Overwrite)
+
+	newClient := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	created := newModel(newClient, nil, Options{NoColor: true, Region: "eu-north-1"})
+	created.screen = screenTextArea
+	created.editPathInput.SetValue("/app/new")
+	created.editRegion = "eu-north-1"
+	created.editType = ssm.ParameterTypeString
+	created.editTier = ssm.ParameterTierStandard
+	created.editDataType = ssm.DefaultParameterDataType
+	created.editOverwrite = false
+	_, cmd = created.saveValue("value")
+	msg = cmd()
+	statusMsg, ok = msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	require.NoError(t, statusMsg.err)
+	assert.False(t, newClient.putOpts[itemKey("eu-north-1", "/app/new")].Overwrite)
+}
+
+func TestSortHotkeyTogglesDirectionAndHeaderArrow(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"version"}})
+	m.screen = screenMain
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/v1", Region: "eu-central-1"}, Exists: true, Version: 1},
+		{Item: inventory.Item{Path: "/v18", Region: "eu-central-1"}, Exists: true, Version: 18},
+		{Item: inventory.Item{Path: "/v2", Region: "eu-central-1"}, Exists: true, Version: 2},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+	assert.False(t, m.sortDescending)
+	assert.Equal(t, []string{"/v1", "/v2", "/v18"}, m.visiblePaths())
+	assert.Contains(t, m.renderListBlock(), "VERSION ↑")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+	assert.True(t, m.sortDescending)
+	assert.Equal(t, []string{"/v18", "/v2", "/v1"}, m.visiblePaths())
+	assert.Contains(t, m.renderListBlock(), "VERSION ↓")
+}
+
+func TestPopupShowsInternalActionsAndBottomHotkeys(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m.screen = screenMain
+	m.activePopup = popupSort
+	m.width = 100
+	m.height = 30
+
+	view := m.View()
+
+	assert.Contains(t, view, "Enter sort   Esc cancel")
+	assert.Contains(t, view, "enter sort/toggle")
+	assert.Contains(t, view, "d direction")
+}
+
+func TestColumnsPopupLivePreviewAndEscRollback(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 100
+	m.height = 30
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Value: "secret"}}
+	m.openColumnsPopup()
+	m.columnCursor = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(model)
+	assert.True(t, strings.Contains(m.View(), "VALUE"))
+	assert.False(t, m.columns[columnValue])
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.False(t, strings.Contains(m.View(), "VALUE"))
+	assert.False(t, m.columns[columnValue])
+}
+
+func TestDefaultSortArrowIsShownForName(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 100
+	m.height = 30
+	m.statuses = []Status{{Item: inventory.Item{Path: "/b", Region: "eu-north-1"}, Exists: true}, {Item: inventory.Item{Path: "/a", Region: "eu-north-1"}, Exists: true}}
+	m.applySortWithDirection(columnPath, false)
+
+	view := m.View()
+
+	assert.Contains(t, view, "NAME ↑")
+	assert.Equal(t, "/a", m.statuses[0].Item.Path)
+}
+
+func TestNewParameterShowsOverwriteDefaultFalseFromExistingSelection(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Region: "eu-north-1"})
+	m.width = 120
+	m.height = 30
+	m.screen = screenMain
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/existing", Region: "eu-north-1"}, Exists: true, Value: "old", Type: ssm.ParameterTypeString.String()}}
+
+	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	m = updated.(model)
+
+	assert.True(t, m.shouldShowOverwriteField())
+	assert.False(t, m.editOverwrite)
+	assert.Contains(t, m.renderTextAreaScreen(), "Overwrite:")
+	assert.Contains(t, m.renderTextAreaScreen(), "false")
+}
+
+func TestExpandableFieldCompactsExpandsAndTogglesGutters(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("short")
+
+	assert.Contains(t, m.renderTextAreaScreen(), "Value:       short")
+	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "1 │ short"))
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Contains(t, m.renderTextAreaScreen(), "1 │ short")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m = updated.(model)
+	view := m.renderTextAreaScreen()
+	assert.Contains(t, view, "short")
+	assert.False(t, strings.Contains(view, "1 │ short"))
+}
+
+func TestPoliciesPrettyPrintAndNormalizePolicyText(t *testing.T) {
+	raw := `[{"PolicyStatus":"Pending","PolicyText":"{\"Type\":\"Expiration\",\"Version\":\"1.0\",\"Attributes\":{\"Timestamp\":\"2030-01-01T00:00:00Z\"}}","PolicyType":"Expiration"}]`
+
+	pretty := prettyPoliciesForEditor(raw)
+	assert.Contains(t, pretty, `"Type": "Expiration"`)
+	assert.Contains(t, pretty, `"Timestamp": "2030-01-01T00:00:00Z"`)
+	assert.False(t, strings.Contains(pretty, `"PolicyText"`))
+	assert.False(t, strings.Contains(pretty, `\"Type\"`))
+
+	normalized := normalizePoliciesForAWS(pretty)
+	assert.Equal(t, `[{"Attributes":{"Timestamp":"2030-01-01T00:00:00Z"},"Type":"Expiration","Version":"1.0"}]`, normalized)
+}
+
+func TestEmacsCtrlKDeletesToRealLineEnd(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("alpha beta\ngamma")
+	m.setTextAreaCursorAbs(len("alpha "))
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(model)
+
+	assert.Equal(t, "alpha \ngamma", m.textArea.Value())
+	assert.Equal(t, len("alpha "), m.textAreaCursorAbs())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlK})
+	m = updated.(model)
+	assert.Equal(t, "alpha gamma", m.textArea.Value())
+}
+
+func TestViDDeletesToRealLineEnd(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Keymap: "vi"})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.viInsertMode = false
+	m.textArea.Focus()
+	m.textArea.SetValue("alpha beta\ngamma")
+	m.setTextAreaCursorAbs(len("alpha "))
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = updated.(model)
+	assert.Equal(t, "alpha \ngamma", m.textArea.Value())
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	m = updated.(model)
+	assert.Equal(t, "alpha gamma", m.textArea.Value())
+}
+
+func TestHiddenGuttersRenderTextAtLeftEdge(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 100
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("[\n  {\n    \"a\": 1\n  }\n]")
+	m.expandedFields[editFieldValue] = true
+	m.showGutters = false
+
+	lines := renderLines(stripANSI(m.renderTextAreaScreen()))
+	assert.True(t, strings.HasPrefix(lines[9], "["), "expected first multiline row to start at column 0, got %q", lines[9])
+	assert.True(t, strings.HasPrefix(lines[10], "  {"), "expected JSON indentation only, got %q", lines[10])
+}
+
+func TestConfirmPopupInputPrefixIsNotLabelStyled(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.activePopup = popupConfirm
+	m.confirmPrompt = "Delete visible parameter(s)?"
+	m.confirmExpected = "DELETE ALL"
+	m.input.Focus()
+
+	view := m.renderConfirmPopup()
+	assert.Contains(t, view, "Type ")
+	assert.False(t, strings.Contains(view, labelStyle.Render("Type ")))
+}
+
 func stringSliceContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -1770,4 +2284,437 @@ func stringSliceContains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func TestMainDigitHotkeySortsByValue(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m.screen = screenMain
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/b", Region: "eu-central-1"}, Exists: true, Value: "zebra", Type: ssm.ParameterTypeString.String()},
+		{Item: inventory.Item{Path: "/a", Region: "eu-central-1"}, Exists: true, Value: "alpha", Type: ssm.ParameterTypeString.String()},
+	}
+	m.selected = 0
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+
+	assert.Equal(t, columnValue, m.sortBy)
+	assert.Equal(t, "/a", m.statuses[0].Item.Path)
+	assert.Equal(t, "/b", m.statuses[1].Item.Path)
+}
+
+func TestApplySortUsesNaturalNumericOrder(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/v18", Region: "eu-central-1"}, Exists: true, Version: 18},
+		{Item: inventory.Item{Path: "/v2", Region: "eu-central-1"}, Exists: true, Version: 2},
+		{Item: inventory.Item{Path: "/v1", Region: "eu-central-1"}, Exists: true, Version: 1},
+	}
+
+	m.applySort(columnVersion)
+
+	assert.Equal(t, "/v1", m.statuses[0].Item.Path)
+	assert.Equal(t, "/v2", m.statuses[1].Item.Path)
+	assert.Equal(t, "/v18", m.statuses[2].Item.Path)
+}
+
+func TestSortPopupSelectsSingleColumnWithLetter(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"type"}})
+	m.screen = screenMain
+	m.activePopup = popupSort
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/b", Region: "eu-central-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()},
+		{Item: inventory.Item{Path: "/a", Region: "eu-central-1"}, Exists: true, Type: ssm.ParameterTypeString.String()},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	m = updated.(model)
+
+	assert.Equal(t, columnType, m.sortBy)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, "/b", m.statuses[0].Item.Path)
+	assert.Equal(t, "/a", m.statuses[1].Item.Path)
+}
+
+func TestSortPopupRendersRadioSelectionWithoutInlineHotkeys(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "user"}})
+	m.screen = screenMain
+	m.activePopup = popupSort
+	m.sortBy = columnValue
+	m.sortCursor = 1
+	m.width = 100
+	m.height = 30
+
+	view := m.View()
+
+	assert.Contains(t, view, "Sort By")
+	assert.Contains(t, view, "| (*) Value")
+	assert.Contains(t, view, "( ) Name")
+	assert.Contains(t, view, "( ) User")
+	assert.False(t, strings.Contains(view, "( ) Type"))
+	assert.False(t, strings.Contains(view, "v  Value"))
+	assert.Contains(t, view, "enter sort/toggle")
+	assert.Contains(t, view, "d direction")
+	assert.Contains(t, view, "n name")
+	assert.Contains(t, view, "esc cancel")
+}
+
+func TestBulkDeleteConfirmRendersInlinePhraseInputAndButtons(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 100
+	m.height = 30
+	m.startConfirm("Delete 2 visible parameter(s)?", "DELETE ALL", []inventory.Item{{Path: "/a"}, {Path: "/b"}}, screenMain)
+	m.input.SetValue("DELETE ALL")
+
+	view := m.View()
+
+	assert.Contains(t, view, "Type DELETE ALL to confirm: DELETE ALL")
+	assert.Contains(t, view, "enter confirm")
+	assert.Contains(t, view, "esc cancel")
+	assert.False(t, strings.Contains(view, "Type DELETE ALL to confirm:\n"))
+}
+
+func TestPopupActionLineStylesKeysSeparatelyFromDescriptions(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+
+	styled := m.popupActionLine("Enter apply   Esc cancel")
+
+	assert.Equal(t, "Enter apply   Esc cancel", stripANSI(styled))
+	assert.Contains(t, styled, "\x1b[")
+}
+
+func TestCompactExpandableCursorDoesNotInsertExtraCell(t *testing.T) {
+	m := newModel(nil, nil, Options{})
+	m.width = 80
+	m.height = 20
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("abcdef")
+	m.setTextAreaCursorAbs(3)
+
+	plain := stripANSI(m.singleLineAreaView(editFieldValue, m.textArea, 11))
+
+	assert.Equal(t, "abcdef", plain)
+}
+
+func TestExpandableFieldCollapsesAfterEditedBackToOneLine(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("shortx")
+	m.setTextAreaCursorAbs(len("shortx"))
+	m.expandedFields[editFieldValue] = true
+
+	assert.Contains(t, m.renderTextAreaScreen(), "1 │ shortx")
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(model)
+	view := m.renderTextAreaScreen()
+
+	assert.Contains(t, view, "Value:       short")
+	assert.False(t, strings.Contains(view, "1 │ short"))
+}
+
+func TestPopupTransitionsReplaceParentPopup(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.activePopup = popupValueActions
+	m.editField = editFieldValue
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(model)
+	assert.Equal(t, popupFileAction, m.activePopup)
+	assert.Empty(t, m.popupStack)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, popupNone, m.activePopup)
+}
+
+func TestPoliciesActionsPopupClearsPolicies(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.editField = editFieldPolicies
+	m.editTier = ssm.ParameterTierAdvanced
+	m.editPoliciesArea.SetValue("policy")
+	m.editPoliciesArea.Focus()
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}, Alt: true})
+	m = updated.(model)
+	assert.Equal(t, popupPoliciesActions, m.activePopup)
+	assert.Contains(t, m.textAreaFooterText(), "alt+e policies actions")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	m = updated.(model)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, "[]", m.editPoliciesArea.Value())
+}
+
+func TestPoliciesActionsLoadPrettyPoliciesFromFile(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.editField = editFieldPolicies
+	m.editTier = ssm.ParameterTierAdvanced
+	m.activePopup = popupPoliciesActions
+	raw := `[{"PolicyText":"{\"Type\":\"Expiration\",\"Version\":\"1.0\"}","PolicyType":"Expiration"}]`
+	path := t.TempDir() + "/policies.json"
+	require.NoError(t, os.WriteFile(path, []byte(raw), 0o600))
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	m = updated.(model)
+	assert.Equal(t, popupFileAction, m.activePopup)
+	assert.Equal(t, editFieldPolicies, m.fileActionField)
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.False(t, strings.Contains(m.editPoliciesArea.Value(), `"PolicyText"`))
+	assert.Contains(t, m.editPoliciesArea.Value(), `"Type": "Expiration"`)
+}
+
+func TestUnsavedEditorExitRequiresConfirmation(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 40
+	m.screen = screenMain
+	m.returnScreen = screenMain
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "old", Exists: true}}
+	updated, _ := m.startMultiline(screenMain)
+	m = updated.(model)
+	m.textArea.SetValue("changed")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupUnsavedChanges, m.activePopup)
+	assert.Contains(t, m.renderUnsavedChangesPopup(), "Unsaved changes. Discard unsaved changes?")
+	assert.False(t, strings.Contains(m.renderUnsavedChangesPopup(), "Unsaved changes.\nDiscard"))
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, popupNone, m.activePopup)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, screenMain, m.screen)
+}
+
+func TestTextAreaPageDownKeepsCursorVisible(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m.width = 100
+	m.height = 20
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	lines := make([]string, 0, 40)
+	for i := 0; i < 40; i++ {
+		lines = append(lines, fmt.Sprintf("line-%02d", i))
+	}
+	m.textArea.SetValue(strings.Join(lines, "\n"))
+	m.expandedFields[editFieldValue] = true
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyPgDown})
+	m = updated.(model)
+	view := m.renderTextAreaScreen()
+	assert.Contains(t, view, "█")
+	assert.True(t, m.textAreaCursorAbs() > 0)
+
+	m = newModel(nil, nil, Options{NoColor: true, Keymap: "vi"})
+	m.width = 100
+	m.height = 20
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.viInsertMode = false
+	m.textArea.Focus()
+	m.textArea.SetValue(strings.Join(lines, "\n"))
+	m.expandedFields[editFieldValue] = true
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlF})
+	m = updated.(model)
+	assert.Contains(t, m.renderTextAreaScreen(), "█")
+	assert.True(t, m.textAreaCursorAbs() > 0)
+}
+
+func TestFileActionPopupKeepsInputFocusedAfterWriteError(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	path := filepath.Join(t.TempDir(), "missing", "value.txt")
+	m.screen = screenTextArea
+	m.activePopup = popupFileAction
+	m.fileActionMode = "write"
+	m.fileActionField = editFieldValue
+	m.editType = ssm.ParameterTypeString
+	m.textArea.SetValue("new")
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupFileAction, m.activePopup)
+	assert.NotEmpty(t, m.errMessage)
+	assert.True(t, m.input.Focused())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+	assert.Equal(t, path+"2", m.input.Value())
+}
+
+func TestFileActionPopupKeepsInputFocusedAfterLoadError(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	path := filepath.Join(t.TempDir(), "missing.txt")
+	m.screen = screenTextArea
+	m.activePopup = popupFileAction
+	m.fileActionMode = "load"
+	m.fileActionField = editFieldValue
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupFileAction, m.activePopup)
+	assert.NotEmpty(t, m.errMessage)
+	assert.True(t, m.input.Focused())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+	assert.Equal(t, path+"2", m.input.Value())
+}
+
+func TestFileWriteConfirmEscReturnsToFilePathPopup(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	path := t.TempDir() + "/value.txt"
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+	m.screen = screenTextArea
+	m.width = 120
+	m.height = 40
+	m.activePopup = popupFileAction
+	m.fileActionMode = "write"
+	m.fileActionField = editFieldValue
+	m.editType = ssm.ParameterTypeString
+	m.textArea.SetValue("new")
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
+	assert.Contains(t, m.renderFileWriteConfirmPopup(), "File already exists. Overwrite it?")
+	assert.False(t, strings.Contains(m.renderFileWriteConfirmPopup(), "File already exists.\nOverwrite it?"))
+	view := m.View()
+	assert.Contains(t, view, "File already exists. Overwrite it?")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, popupFileAction, m.activePopup)
+	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
+	assert.Equal(t, path, m.input.Value())
+	assert.True(t, m.input.Focused())
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	m = updated.(model)
+	assert.Equal(t, path+"2", m.input.Value())
+	assert.Equal(t, "old", readFileString(t, path))
+}
+
+func TestFileWriteConfirmShowsSecondConfirmAfterSecureConfirm(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	path := t.TempDir() + "/secret.txt"
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+	m.screen = screenTextArea
+	m.width = 120
+	m.height = 40
+	m.activePopup = popupFileAction
+	m.fileActionMode = "write"
+	m.fileActionField = editFieldValue
+	m.editType = ssm.ParameterTypeSecureString
+	m.textArea.SetValue("secret")
+	m.input.SetValue(path)
+	m.input.Focus()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, fileWriteConfirmationSecure, m.pendingFileWrite)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
+	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
+	assert.Equal(t, fileWriteConfirmationOverwrite, m.pendingFileWrite)
+	assert.Contains(t, m.renderFileWriteConfirmPopup(), "File already exists. Overwrite it?")
+	view := m.View()
+	assert.Contains(t, view, "File already exists. Overwrite it?")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, "secret", readFileString(t, path))
+}
+
+func TestEnterOnCompactExpandableFieldCreatesNewLine(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.Focus()
+	m.textArea.SetValue("short")
+	m.setTextAreaCursorAbs(len("short"))
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Equal(t, "short\n", m.textArea.Value())
+	line, offset := textAreaCursorLineOffset(m.textArea)
+	assert.Equal(t, 1, line)
+	assert.Equal(t, 0, offset)
+	view := m.renderTextAreaScreen()
+	assert.Contains(t, view, "1 │ short")
+	assert.Contains(t, view, "2 │ █")
+}
+
+func TestFieldsOptionLimitsColumnsDetailsAndEditor(t *testing.T) {
+	m := newModel(nil, nil, Options{NoColor: true, Fields: []string{"name", "type"}, ShowColumns: []string{"type", "value", "region"}})
+	m.width = 120
+	m.height = 40
+	m.screen = screenMain
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value", Tier: "Advanced", Description: "desc", Modified: "date"}}
+	m.selectedExpanded = true
+
+	list := m.renderListBlock()
+	assert.Contains(t, list, "NAME")
+	assert.Contains(t, list, "TYPE")
+	assert.False(t, strings.Contains(list, "VALUE"))
+	assert.False(t, strings.Contains(list, "REGION"))
+
+	details := m.renderSelectedParameterBlock(true)
+	assert.Contains(t, details, "Name:")
+	assert.Contains(t, details, "Type:")
+	assert.False(t, strings.Contains(details, "Value:"))
+	assert.False(t, strings.Contains(details, "Region:"))
+	assert.False(t, strings.Contains(details, "Description:"))
+
+	columns := m.renderColumnsPopup()
+	assert.Contains(t, columns, "Type")
+	assert.False(t, strings.Contains(columns, "Value"))
+	assert.False(t, strings.Contains(columns, "Region"))
+
+	m.screen = screenTextArea
+	m.editField = editFieldSSMPath
+	m.editPathInput.SetValue("/app/value")
+	m.editType = ssm.ParameterTypeString
+	editor := m.renderTextAreaScreen()
+	assert.Contains(t, editor, "Name:")
+	assert.Contains(t, editor, "Type:")
+	assert.False(t, strings.Contains(editor, "Value:"))
+	assert.False(t, strings.Contains(editor, "Region:"))
+	assert.Equal(t, []editField{editFieldSSMPath, editFieldType}, m.editFieldOrder())
 }

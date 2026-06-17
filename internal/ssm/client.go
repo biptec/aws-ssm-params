@@ -23,14 +23,16 @@ type Client interface {
 	DescribeMany(paths []string) map[string]Metadata
 	ListParameterMetadata() ([]Metadata, error)
 	PutParameter(path, value string, parameterType ParameterType) error
+	PutParameterWithOptions(path, value string, parameterType ParameterType, opts PutParameterOptions) error
 	DeleteMany(paths []string) error
 }
 
 // AWSCLI implements Client by shelling out to the local aws command.
 // This avoids a direct AWS SDK dependency and reuses the user's existing AWS CLI profiles, SSO sessions, and config.
 type AWSCLI struct {
-	Profile string
-	Region  string
+	Profile        string
+	Region         string
+	WithDecryption bool
 }
 
 // Parameter is the normalized subset of AWS SSM get-parameters output needed by the app.
@@ -49,9 +51,104 @@ type Metadata struct {
 	Region      string
 	Type        string
 	Tier        string
+	DataType    string
+	Policies    string
 	Description string
 	User        string
 	Modified    string
+}
+
+// PutParameterOptions contains optional AWS SSM put-parameter fields.
+type PutParameterOptions struct {
+	Description string
+	Tier        ParameterTier
+	DataType    ParameterDataType
+	Policies    string
+	Overwrite   bool
+}
+
+// ParameterDataType is an AWS SSM data type accepted by put-parameter.
+type ParameterDataType string
+
+const (
+	// ParameterDataTypeText stores an ordinary text value without additional service-side validation.
+	ParameterDataTypeText ParameterDataType = "text"
+	// ParameterDataTypeEC2Image validates that the value is an EC2 AMI id.
+	ParameterDataTypeEC2Image ParameterDataType = "aws:ec2:image"
+	// ParameterDataTypeSSMIntegration is used by AWS SSM service integrations.
+	ParameterDataTypeSSMIntegration ParameterDataType = "aws:ssm:integration"
+)
+
+// DefaultParameterDataType is used when AWS does not report a data type.
+const DefaultParameterDataType = ParameterDataTypeText
+
+// ParseParameterDataType normalizes user-facing data type names into AWS SSM data types.
+func ParseParameterDataType(value string) (ParameterDataType, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "text":
+		return ParameterDataTypeText, nil
+	case "aws:ec2:image", "ec2:image", "ami", "image":
+		return ParameterDataTypeEC2Image, nil
+	case "aws:ssm:integration", "ssm:integration", "integration":
+		return ParameterDataTypeSSMIntegration, nil
+	default:
+		return "", fmt.Errorf("unsupported parameter data type %q; use text, aws:ec2:image, or aws:ssm:integration", value)
+	}
+}
+
+// String returns the AWS API spelling of the parameter data type.
+func (t ParameterDataType) String() string { return string(t) }
+
+// IsValid reports whether the data type is supported by AWS SSM Parameter Store.
+func (t ParameterDataType) IsValid() bool {
+	switch t {
+	case ParameterDataTypeText, ParameterDataTypeEC2Image, ParameterDataTypeSSMIntegration:
+		return true
+	default:
+		return false
+	}
+}
+
+// ParameterTier is an AWS SSM parameter tier accepted by put-parameter.
+type ParameterTier string
+
+const (
+	// ParameterTierStandard stores parameters in the AWS Standard tier.
+	ParameterTierStandard ParameterTier = "Standard"
+	// ParameterTierAdvanced stores parameters in the AWS Advanced tier.
+	ParameterTierAdvanced ParameterTier = "Advanced"
+	// ParameterTierIntelligentTiering lets AWS choose Standard or Advanced as needed.
+	ParameterTierIntelligentTiering ParameterTier = "Intelligent-Tiering"
+)
+
+// DefaultParameterTier is used for new parameters and non-interactive writes.
+const DefaultParameterTier = ParameterTierIntelligentTiering
+
+// ParseParameterTier normalizes user-facing tier names into AWS SSM tier names.
+func ParseParameterTier(value string) (ParameterTier, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "intelligent-tiering", "intelligent_tiering", "intelligenttiering":
+		return ParameterTierIntelligentTiering, nil
+	case "standard":
+		return ParameterTierStandard, nil
+	case "advanced":
+		return ParameterTierAdvanced, nil
+	default:
+		return "", fmt.Errorf("unsupported parameter tier %q; use standard, advanced, or intelligent-tiering", value)
+	}
+}
+
+// String returns the AWS API spelling of the parameter tier.
+func (t ParameterTier) String() string { return string(t) }
+
+// IsValid reports whether the tier is one of the AWS SSM supported parameter tiers.
+func (t ParameterTier) IsValid() bool {
+	switch t {
+	case ParameterTierStandard, ParameterTierAdvanced, ParameterTierIntelligentTiering:
+		return true
+	default:
+		return false
+	}
 }
 
 // ParameterType is an AWS SSM parameter type accepted by put-parameter.
@@ -101,7 +198,7 @@ var ErrNotFound = errors.New("parameter not found")
 
 // NewAWSCLI constructs an AWS CLI backed client for one profile/region pair.
 func NewAWSCLI(profile, region string) *AWSCLI {
-	return &AWSCLI{Profile: profile, Region: region}
+	return &AWSCLI{Profile: profile, Region: region, WithDecryption: true}
 }
 
 // ResolveConfiguredRegion asks the AWS CLI which default region is configured for a profile.
@@ -163,7 +260,7 @@ func (c *AWSCLI) ForRegion(region string) Client {
 	if region == "" || region == c.Region {
 		return c
 	}
-	return &AWSCLI{Profile: c.Profile, Region: region}
+	return &AWSCLI{Profile: c.Profile, Region: region, WithDecryption: c.WithDecryption}
 }
 
 // DefaultRegion returns the region associated with this client.
@@ -202,7 +299,10 @@ func (c *AWSCLI) GetMany(paths []string) (map[string]Parameter, map[string]error
 		args := c.args("ssm", "get-parameters")
 		args = append(args, "--names")
 		args = append(args, chunk...)
-		args = append(args, "--with-decryption", "--output", "json")
+		if c.WithDecryption {
+			args = append(args, "--with-decryption")
+		}
+		args = append(args, "--output", "json")
 		out, err := runAWS(args...)
 		if err != nil {
 			for _, path := range chunk {
@@ -267,6 +367,8 @@ func (c *AWSCLI) ListParameterMetadata() ([]Metadata, error) {
 				Name             string `json:"Name"`
 				Type             string `json:"Type"`
 				Tier             string `json:"Tier"`
+				DataType         string `json:"DataType"`
+				Policies         any    `json:"Policies"`
 				Description      string `json:"Description"`
 				LastModifiedUser string `json:"LastModifiedUser"`
 				LastModifiedDate any    `json:"LastModifiedDate"`
@@ -285,6 +387,8 @@ func (c *AWSCLI) ListParameterMetadata() ([]Metadata, error) {
 				Region:      c.Region,
 				Type:        param.Type,
 				Tier:        param.Tier,
+				DataType:    param.DataType,
+				Policies:    formatPolicies(param.Policies),
 				Description: param.Description,
 				User:        param.LastModifiedUser,
 				Modified:    formatModifiedDate(param.LastModifiedDate),
@@ -318,6 +422,8 @@ func (c *AWSCLI) DescribeMany(paths []string) map[string]Metadata {
 				Name             string `json:"Name"`
 				Type             string `json:"Type"`
 				Tier             string `json:"Tier"`
+				DataType         string `json:"DataType"`
+				Policies         any    `json:"Policies"`
 				Description      string `json:"Description"`
 				LastModifiedUser string `json:"LastModifiedUser"`
 				LastModifiedDate any    `json:"LastModifiedDate"`
@@ -332,6 +438,8 @@ func (c *AWSCLI) DescribeMany(paths []string) map[string]Metadata {
 				Region:      c.Region,
 				Type:        param.Type,
 				Tier:        param.Tier,
+				DataType:    param.DataType,
+				Policies:    formatPolicies(param.Policies),
 				Description: param.Description,
 				User:        param.LastModifiedUser,
 				Modified:    formatModifiedDate(param.LastModifiedDate),
@@ -344,18 +452,39 @@ func (c *AWSCLI) DescribeMany(paths []string) map[string]Metadata {
 // PutParameter creates or overwrites one SSM parameter using the requested AWS parameter type.
 // SecureString values are encrypted by AWS SSM/KMS, while String and StringList are stored as plaintext parameters.
 func (c *AWSCLI) PutParameter(path, value string, parameterType ParameterType) error {
+	return c.PutParameterWithOptions(path, value, parameterType, PutParameterOptions{Overwrite: true})
+}
+
+func (c *AWSCLI) PutParameterWithOptions(path, value string, parameterType ParameterType, opts PutParameterOptions) error {
 	if !parameterType.IsValid() {
 		return fmt.Errorf("unsupported parameter type %q; use string, string-list, or secure-string", parameterType)
+	}
+	tier := opts.Tier
+	if !tier.IsValid() {
+		tier = DefaultParameterTier
+	}
+	dataType := opts.DataType
+	if !dataType.IsValid() {
+		dataType = DefaultParameterDataType
 	}
 	args := c.args("ssm", "put-parameter")
 	args = append(args,
 		"--name", path,
 		"--type", parameterType.String(),
-		"--tier", "Intelligent-Tiering",
+		"--tier", tier.String(),
+		"--data-type", dataType.String(),
 		"--value", value,
-		"--overwrite",
-		"--output", "json",
 	)
+	if opts.Overwrite {
+		args = append(args, "--overwrite")
+	}
+	if strings.TrimSpace(opts.Description) != "" {
+		args = append(args, "--description", opts.Description)
+	}
+	if strings.TrimSpace(opts.Policies) != "" {
+		args = append(args, "--policies", opts.Policies)
+	}
+	args = append(args, "--output", "json")
 	_, err := runAWS(args...)
 	return err
 }
@@ -433,6 +562,25 @@ func formatModifiedDate(value any) string {
 		return v
 	default:
 		return fmt.Sprint(v)
+	}
+}
+
+func formatPolicies(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		trimmed := strings.TrimSpace(string(encoded))
+		if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {
+			return ""
+		}
+		return trimmed
 	}
 }
 
