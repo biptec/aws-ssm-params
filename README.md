@@ -2,15 +2,17 @@
 
 A fast, terminal-first CLI/TUI for managing **AWS Systems Manager Parameter Store**.
 
-`aws-ssm-params` helps developers, DevOps engineers, and platform teams inspect, edit, import, export, and audit `String`, `StringList`, and `SecureString` parameters without writing one-off scripts or clicking through the AWS Console. It can discover parameters directly from AWS, or it can work from a small names file that describes the parameters an application expects.
+`aws-ssm-params` helps developers, DevOps engineers, and platform teams inspect, edit, import, export, and audit `String`, `StringList`, and `SecureString` parameters without writing one-off scripts or clicking through the AWS Console. Run the TUI without a names filter to browse everything in an account/region, or add `--names` / `--names-file` when you want to focus on a known application-specific set.
 
-Use it when you want a quick answer to questions like: _what is missing before deployment, what differs between regions, which secrets are empty, and how do I safely update or migrate a known set of parameters?_
+Use it when you want a quick answer to questions like: _what parameters exist in this account, what is missing before deployment, what differs between regions, which secrets are empty, which old parameters can be deleted, and how do I safely update or migrate a known set of parameters?_
 
 ## Contents
 
 - [Why use it?](#why-use-it)
 - [Features](#features)
+- [Typical workflows](#typical-workflows)
 - [Quick start](#quick-start)
+- [Names file format](#names-file-format)
 - [Command map](#command-map)
 - [Global scope flags](#global-scope-flags)
 - [Interactive TUI](#interactive-tui)
@@ -26,7 +28,8 @@ AWS SSM Parameter Store is reliable, but daily maintenance becomes slow when you
 
 `aws-ssm-params` gives you one terminal workflow for those jobs:
 
-- Browse Parameter Store in a keyboard-driven TUI.
+- Browse all visible Parameter Store names in a keyboard-driven TUI, even without a names file.
+- Find old, unused, duplicate, or forgotten parameters that accumulated over time.
 - Keep secret values hidden by default.
 - Check a known application-specific parameter list from a names file.
 - Compare one name set across one region, selected regions, or all enabled regions.
@@ -40,7 +43,7 @@ AWS SSM Parameter Store is reliable, but daily maintenance becomes slow when you
 - Interactive Bubble Tea TUI for browsing, filtering, sorting, editing, creating, and deleting SSM parameters.
 - Explicit CLI commands: `interactive`, `tui`, `export`, `import`, `get`, and `set`.
 - Supports `SecureString`, `String`, and `StringList` parameters.
-- Works with direct AWS discovery, `--names`, or a `--names-file`.
+- Works with direct AWS discovery, `--names`, or a `--names-file`; no names filter means “show everything AWS returns”.
 - Global `--fields` scope to load/show/import/export only the fields you need.
 - Single-region, selected multi-region, and all-enabled-regions scanning.
 - Secure values are hidden by default, with optional explicit reveal.
@@ -50,6 +53,16 @@ AWS SSM Parameter Store is reliable, but daily maintenance becomes slow when you
 - Dotenv and JSON import/export, including type metadata where the format supports it.
 
 ## Typical workflows
+
+### Parameter inventory and cleanup
+
+Open the TUI without `--names` or `--names-file` to discover all visible parameters in the selected region. This is useful when you want to audit an AWS account, understand what already exists, find old leftovers, or delete parameters that are no longer used.
+
+```bash
+aws-ssm-params --regions eu-north-1 tui
+```
+
+Add `--fields name,type,date,user` or `--show-columns type,date,user` when you want a lightweight inventory view without loading values.
 
 ### Deployment readiness check
 
@@ -217,7 +230,13 @@ cat > names.txt <<'EOF_NAMES'
 EOF_NAMES
 ```
 
-Open the TUI:
+Open the TUI without a names filter to browse everything you can see in the selected region:
+
+```bash
+aws-ssm-params --profile dev --regions eu-north-1 tui
+```
+
+Or scope it to a known application list:
 
 ```bash
 aws-ssm-params --profile dev --regions eu-north-1 --names-file names.txt tui
@@ -403,11 +422,13 @@ Overwrite     Write option; shown only for new/missing parameters in the TUI
 
 ## Interactive TUI
 
-Open the TUI explicitly with `interactive` or the short alias `tui`:
+Open the TUI explicitly with `interactive` or the short alias `tui`. Without `--names` or `--names-file`, it discovers all visible SSM parameters in the selected region(s):
 
 ```bash
 aws-ssm-params --regions eu-north-1 tui
 ```
+
+Use this mode for account inventory and cleanup: sort/filter the list, inspect details with `d`, and delete obsolete parameters when needed.
 
 Useful TUI-only options:
 
@@ -435,7 +456,7 @@ List of N Parameters
 
 Press `d` to show the selected parameter details above the list. Details stay visible while you move through rows until you press `d` again.
 
-`List of N Parameters` shows discovered or scoped names with optional metadata columns. Press `n` to create a new parameter; the editor opens with focus on `Name`. With `--names-file`, newly created names are shown immediately in the UI. The file itself is updated only when `--allow-names-file-update` is enabled.
+`List of N Parameters` shows discovered names or the scoped names from `--names` / `--names-file`. When no names scope is provided, this is a full Parameter Store inventory for the selected region(s), useful for analysis and cleanup. Press `n` to create a new parameter; the editor opens with focus on `Name`. With `--names-file`, newly created names are shown immediately in the UI. The file itself is updated only when `--allow-names-file-update` is enabled.
 
 ### Footer and shortcuts
 
