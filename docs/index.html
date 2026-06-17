@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Terminal-first CLI/TUI for AWS Systems Manager Parameter Store." />
+    <title>aws-ssm-params — AWS SSM Parameter Store from your terminal</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero" id="top">
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="brand" href="#top">aws-ssm-params</a>
+        <div class="nav-links">
+          <a href="#tui">TUI</a>
+          <a href="#commands">CLI</a>
+          <a href="#workflows">Workflows</a>
+          <a href="#security">Security</a>
+          <a href="https://github.com/biptec/aws-ssm-params#readme">README</a>
+        </div>
+      </nav>
+
+      <section class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">AWS Systems Manager Parameter Store, without the console fatigue</p>
+          <h1>Inspect, edit, audit, import, and export SSM parameters from your terminal.</h1>
+          <p class="lead">
+            <code>aws-ssm-params</code> is a fast CLI/TUI for developers, DevOps engineers, and platform teams who manage
+            <code>SecureString</code>, <code>String</code>, and <code>StringList</code> parameters. Browse everything in a region, or focus on a known
+            application-specific name set with `--names` or `--names-file`.
+          </p>
+          <div class="cta-row">
+            <a class="button primary" href="#quick-start">Quick start</a>
+            <a class="button" href="#screens">View screenshots</a>
+          </div>
+          <div class="terminal-command" role="img" aria-label="Example command">
+            <span>$</span> aws-ssm-params --regions eu-north-1 tui
+          </div>
+        </div>
+        <div class="hero-shot terminal-card">
+          <img src="assets/screens/01-main-inventory.svg" alt="TUI inventory screen" />
+        </div>
+      </section>
+    </header>
+
+    <main>
+      <section class="section" id="workflows">
+        <div class="section-heading">
+          <p class="eyebrow">Why people use it</p>
+          <h2>One tool for the Parameter Store jobs that usually become scripts.</h2>
+        </div>
+        <div class="cards four">
+          <article class="card">
+            <h3>Discover & clean up</h3>
+            <p>Run the TUI without a names file to see everything AWS returns in a region. Sort, search, inspect details, and remove old leftovers.</p>
+            <code>aws-ssm-params --regions eu-north-1 tui</code>
+          </article>
+          <article class="card">
+            <h3>Deployment readiness</h3>
+            <p>Keep a versioned names file beside your service and check which required parameters are missing or empty before deploying.</p>
+            <code>aws-ssm-params --names-file names.txt tui</code>
+          </article>
+          <article class="card">
+            <h3>Multi-region audit</h3>
+            <p>Check whether replicated services and DR regions have the same expected secret/configuration set.</p>
+            <code>aws-ssm-params --regions eu-north-1,eu-central-1 tui</code>
+          </article>
+          <article class="card">
+            <h3>Backup & migration</h3>
+            <p>Export dotenv/JSON, review it, and import into another account, region, or profile when onboarding environments.</p>
+            <code>aws-ssm-params export --to-file values.env</code>
+          </article>
+        </div>
+      </section>
+
+      <section class="section split" id="quick-start">
+        <div>
+          <p class="eyebrow">Quick start</p>
+          <h2>Open the TUI in seconds.</h2>
+          <p>
+            No names file is required. Without <code>--names</code> or <code>--names-file</code>, the app discovers all visible SSM
+            parameters in the selected region. Add scope flags only when you want a focused application list.
+          </p>
+        </div>
+        <div class="code-block">
+<pre><code># Browse everything visible in one region
+aws-ssm-params --regions eu-north-1 tui
+
+# Focus on a known service-specific set
+aws-ssm-params --regions eu-north-1 --names-file names.txt tui
+
+# Lightweight inventory view without loading values
+aws-ssm-params --fields name,type,date,user --regions eu-north-1 tui</code></pre>
+        </div>
+      </section>
+
+      <section class="section" id="tui">
+        <div class="section-heading">
+          <p class="eyebrow">Interactive TUI</p>
+          <h2>Keyboard-driven screens for browsing, editing, and auditing parameters.</h2>
+          <p>
+            The TUI keeps values hidden by default, shows context-sensitive shortcuts, supports Emacs and Vi keymaps,
+            and lets you work with values, metadata, policies, and file actions without leaving the terminal.
+          </p>
+        </div>
+
+        <div class="screen-grid" id="screens">
+          <article class="screen-card wide">
+            <div>
+              <h3>Main inventory</h3>
+              <p>Discover all visible parameters or show only names from `--names` / `--names-file`. Sort, search, reveal details, create, edit, and delete.</p>
+            </div>
+            <img src="assets/screens/01-main-inventory.svg" alt="Main inventory screen" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Selected details</h3>
+            <p>Press `d` to inspect metadata, version, hash prefix, date, user, tier, type, policies, and value state.</p>
+            <img src="assets/screens/02-details.svg" alt="Selected parameter details screen" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Columns popup</h3>
+            <p>Choose visible columns with live preview. `--fields` limits what can appear anywhere in the TUI.</p>
+            <img src="assets/screens/03-columns-popup.svg" alt="Columns popup" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Sort popup</h3>
+            <p>Sort by visible fields only. Repeating the same sort toggles ascending/descending and updates the arrow in the header.</p>
+            <img src="assets/screens/04-sort-popup.svg" alt="Sort popup" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Shortcuts</h3>
+            <p>`ctrl+/` opens contextual help for the current page or popup, including navigation and action keys.</p>
+            <img src="assets/screens/05-shortcuts.svg" alt="Shortcuts popup" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Edit parameter</h3>
+            <p>Edit value and metadata in one screen. Short fields stay inline; long or multiline fields expand into text areas.</p>
+            <img src="assets/screens/06-edit-parameter.svg" alt="Edit parameter screen" />
+          </article>
+
+          <article class="screen-card">
+            <h3>New parameter</h3>
+            <p>Create a missing value with explicit type, tier, data type, description, policies, and overwrite behavior.</p>
+            <img src="assets/screens/07-new-parameter.svg" alt="New parameter screen" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Value actions</h3>
+            <p>Clear, generate random secrets, load from file, or write to file. Risky file writes ask for confirmation.</p>
+            <img src="assets/screens/08-value-actions.svg" alt="Value actions popup" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Advanced policies</h3>
+            <p>Advanced-tier parameter policies are shown as editable pretty JSON instead of AWS read-only wrapper metadata.</p>
+            <img src="assets/screens/09-policies-editor.svg" alt="Policies editor" />
+          </article>
+
+          <article class="screen-card">
+            <h3>Policies actions</h3>
+            <p>Clear, load, or write policy JSON from the same popup workflow used for values.</p>
+            <img src="assets/screens/10-policies-actions.svg" alt="Policies actions popup" />
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="commands">
+        <div class="section-heading">
+          <p class="eyebrow">CLI commands</p>
+          <h2>Script-friendly commands for direct reads, writes, import, and export.</h2>
+          <p>Global <code>--names</code> / <code>--names-file</code> and <code>--fields</code> scope every command. If <code>--fields</code> is omitted, all fields are available.</p>
+        </div>
+
+        <div class="command-grid">
+          <article class="command-card">
+            <h3>Command overview</h3>
+            <img src="assets/screens/11-cli-help.svg" alt="CLI command overview help" />
+          </article>
+          <article class="command-card">
+            <h3>Export</h3>
+            <p>Export dotenv or JSON for review, backup, and migration.</p>
+            <img src="assets/screens/12-export-help.svg" alt="Export command help" />
+          </article>
+          <article class="command-card">
+            <h3>Import</h3>
+            <p>Import dotenv or JSON with safe overwrite defaults and optional metadata defaults.</p>
+            <img src="assets/screens/13-import-help.svg" alt="Import command help" />
+          </article>
+          <article class="command-card">
+            <h3>Set</h3>
+            <p>Set a single value from the command line or from a file.</p>
+            <img src="assets/screens/14-set-help.svg" alt="Set command help" />
+          </article>
+          <article class="command-card">
+            <h3>Get</h3>
+            <p>Read one value to stdout or write it directly to a local file.</p>
+            <img src="assets/screens/15-get-help.svg" alt="Get command help" />
+          </article>
+        </div>
+      </section>
+
+      <section class="section split" id="asciinema">
+        <div>
+          <p class="eyebrow">Animated demo</p>
+          <h2>Record a terminal demo with asciinema.</h2>
+          <p>
+            The site already includes static SVG terminal screenshots. For a live animated demo, record a short TUI session locally
+            and upload or embed the resulting cast.
+          </p>
+        </div>
+        <div class="code-block">
+<pre><code># Install asciinema locally, then record a demo
+asciinema rec docs/assets/aws-ssm-params.cast \
+  --command 'aws-ssm-params --regions eu-north-1 tui'
+
+# Optional: convert the cast to SVG/GIF with your preferred tool
+# or embed the cast from asciinema.org.</code></pre>
+        </div>
+      </section>
+
+      <section class="section split" id="security">
+        <div>
+          <p class="eyebrow">Security-first defaults</p>
+          <h2>Secrets stay hidden unless you explicitly reveal or export them.</h2>
+          <p>
+            SecureString values are hidden by default in the TUI. Exports and write-to-file actions are intentionally explicit because
+            they place plaintext secrets on disk.
+          </p>
+        </div>
+        <ul class="feature-list">
+          <li>Use <code>--without-decryption</code> when you do not have KMS decrypt permissions.</li>
+          <li>Use restrictive permissions and encrypted storage for exported files.</li>
+          <li>Scope IAM policies to your SSM name prefix where possible.</li>
+          <li>Review <code>--override</code> and delete operations carefully.</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <a href="#top">Back to top</a>
+      <span>Built for terminal-first AWS SSM maintenance.</span>
+    </footer>
+  </body>
+</html>
