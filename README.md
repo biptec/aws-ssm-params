@@ -75,7 +75,7 @@ custom base64 byte length
 Scan a known set of parameters across selected regions:
 
 ```bash
-aws-ssm-params --regions eu-north-1 --regions eu-central-1 --names-file paths.txt
+aws-ssm-params --regions eu-north-1,eu-central-1 --names-file paths.txt
 ```
 
 Or scan all AWS regions enabled for the account:
@@ -277,7 +277,7 @@ By default, `--names-file` is treated as a read-only filter/list. New parameters
 ## Global options
 
 ```text
---regions REGION    AWS regions. Repeat or comma-separate to scan selected regions.
+--regions LIST      Comma-separated AWS regions. Use this flag once; repeat values inside LIST.
 --all-regions       Search parameters across all enabled AWS regions.
 --profile PROFILE   AWS profile name.
 --no-color          Disable colored output.
@@ -321,11 +321,11 @@ Notes:
 
 - `--regions` and `--all-regions` cannot be used together.
 - If `--regions` is omitted, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
-- `--regions` accepts one region or multiple comma-separated regions.
+- `--regions` accepts one region or multiple comma-separated regions in a single flag.
 - `--names` and `--names-file` define the global parameter-name scope. `--names` and `--names-file` can be combined; the resulting scope is the union.
 - `--fields` defines the global field scope. If omitted, all fields are loaded, displayed, imported, and exported. If set, only the requested fields are available everywhere. `name` is always kept internally so records can still be identified.
 - Direct `get`, `set`, and `import` operate on one concrete region.
-- `interactive` and `export` support repeated/comma-separated `--regions` and `--all-regions`.
+- `interactive` and `export` support one or multiple comma-separated `--regions` values, or `--all-regions`.
 - `interactive --allow-names-file-update` requires `--names-file`.
 - CLI flags override `AWS_SSM_PARAMS_*` environment variables.
 - `--keymap emacs` uses Emacs-style navigation shortcuts in the TUI. `--keymap vi` uses vi-style navigation on list/selector screens and a modal `NORMAL`/`INSERT` editor for text fields.
@@ -710,7 +710,7 @@ All visible SSM parameters are discovered in `eu-north-1`. Add `--names-file nam
 ### Selected regions
 
 ```bash
-aws-ssm-params --regions eu-north-1 --regions eu-central-1 interactive
+aws-ssm-params --regions eu-north-1,eu-central-1 interactive
 ```
 
 Parameters are discovered in each selected region. With `--names-file names.txt`, each listed name is searched in the selected regions; existing parameters are shown as regional rows and paths missing from every scanned region are shown as wildcard missing rows.

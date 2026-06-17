@@ -52,15 +52,18 @@ OPTIONS:{{template "visibleFlagTemplate" .}}{{end}}
 
 // main builds the command-line application definition and delegates all business logic to the internal app package.
 // The root command intentionally only shows help; users must choose interactive, import, export, set, or get explicitly.
-func main() {
-	cliApp := &cli.App{
+func newCLIApp(rawArgs []string) *cli.App {
+	return &cli.App{
 		Name:                  "aws-ssm-params",
 		Usage:                 "Manage AWS SSM parameters",
 		UsageText:             "aws-ssm-params [global options] <command> [command options]",
 		EnableBashCompletion:  true,
 		CustomAppHelpTemplate: alignedAppHelpTemplate,
+		Before: func(ctx *cli.Context) error {
+			return app.RejectRepeatedFlagArgs(rawArgs, "regions")
+		},
 		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: "regions", EnvVars: []string{"AWS_SSM_PARAMS_REGIONS"}, Usage: "AWS regions; repeat or comma-separate to scan multiple regions; when omitted, AWS CLI resolves it from env/profile config"},
+			&cli.StringFlag{Name: "regions", EnvVars: []string{"AWS_SSM_PARAMS_REGIONS"}, Usage: "comma-separated AWS regions; when omitted, AWS CLI resolves it from env/profile config"},
 			&cli.BoolFlag{Name: "all-regions", EnvVars: []string{"AWS_SSM_PARAMS_ALL_REGIONS"}, Usage: "search parameters across all enabled AWS regions"},
 			&cli.StringFlag{Name: "profile", EnvVars: []string{"AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"}, Usage: "AWS profile"},
 			&cli.BoolFlag{Name: "no-color", EnvVars: []string{"AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR"}, Usage: "disable colored output"},
@@ -152,6 +155,10 @@ func main() {
 		},
 	}
 
+}
+
+func main() {
+	cliApp := newCLIApp(os.Args[1:])
 	if err := cliApp.Run(os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(1)

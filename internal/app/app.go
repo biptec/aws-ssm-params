@@ -113,15 +113,32 @@ func includeValuesForFields(fields []string) bool {
 	return false
 }
 
+// RejectRepeatedFlagArgs reports an error when a command-line flag that is intended to be provided once
+// appears more than once. Values may still contain comma-separated lists, for example --regions a,b.
+func RejectRepeatedFlagArgs(args []string, flagName string) error {
+	needle := "--" + flagName
+	count := 0
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			break
+		}
+		if arg == needle || strings.HasPrefix(arg, needle+"=") {
+			count++
+			if count > 1 {
+				return fmt.Errorf("--%s can only be specified once; use comma-separated values", flagName)
+			}
+		}
+	}
+	return nil
+}
+
 // ConfigFromCLI converts raw urfave/cli state into a Config that the rest of the application can use.
 // It enforces mutually exclusive region modes, falls back to AWS_PROFILE/AWS_REGION/AWS_DEFAULT_REGION,
-// deduplicates repeated --regions values, and decides whether a names-file argument should be read for the command.
+// parses comma-separated --regions values, and decides whether a names-file argument should be read for the command.
 func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 	allRegions := boolFlagValue(ctx, "all-regions", "AWS_SSM_PARAMS_ALL_REGIONS", false)
-	regionArgs := compactStrings(ctx.StringSlice("regions"))
-	if len(regionArgs) == 0 {
-		regionArgs = compactStrings([]string{os.Getenv("AWS_SSM_PARAMS_REGIONS")})
-	}
+	regionArgs := compactStrings([]string{stringFlagValue(ctx, "regions", "AWS_SSM_PARAMS_REGIONS", "")})
 	if allRegions && len(regionArgs) > 0 {
 		return Config{}, errors.New("--regions and --all-regions cannot be used together")
 	}

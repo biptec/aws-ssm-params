@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -203,8 +204,7 @@ func TestConfigFromCLIRejectsUnsupportedColumns(t *testing.T) {
 func testCLIContext(t *testing.T, args []string) *cli.Context {
 	t.Helper()
 	set := flag.NewFlagSet("test", flag.ContinueOnError)
-	regions := cli.NewStringSlice()
-	set.Var(regions, "regions", "")
+	set.String("regions", "", "")
 	set.Bool("all-regions", false, "")
 	set.String("profile", "", "")
 	set.Bool("no-color", false, "")
@@ -256,4 +256,116 @@ func TestLoadItemsUnionsNamesFileAndNames(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 3)
 	assert.Equal(t, []string{"/app/a", "/app/b", "/app/c"}, []string{items[0].Path, items[1].Path, items[2].Path})
+}
+
+func TestConfigFromCLIParsesCommaSeparatedRegionsFromSingleFlag(t *testing.T) {
+	ctx := testCLIContext(t, []string{"--regions", "eu-north-1,eu-central-1"})
+
+	cfg, err := ConfigFromCLI(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "eu-north-1", cfg.Region)
+	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
+}
+
+func TestConfigFromCLIRejectsRegionsWithAllRegions(t *testing.T) {
+	ctx := testCLIContext(t, []string{"--regions", "eu-north-1", "--all-regions"})
+
+	cfg, err := ConfigFromCLI(ctx)
+
+	assert.Empty(t, cfg)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "--regions and --all-regions cannot be used together")
+}
+
+func TestRejectRepeatedFlagArgsAllowsCommaSeparatedSingleUse(t *testing.T) {
+	err := RejectRepeatedFlagArgs([]string{"--regions", "eu-north-1,eu-central-1", "interactive"}, "regions")
+
+	require.NoError(t, err)
+}
+
+func TestRejectRepeatedFlagArgsRejectsRepeatedLongFlagForms(t *testing.T) {
+	err := RejectRepeatedFlagArgs([]string{"--regions", "eu-north-1", "--regions=eu-central-1", "interactive"}, "regions")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "--regions can only be specified once")
+}
+
+func TestRejectRepeatedFlagArgsIgnoresArgsAfterDoubleDash(t *testing.T) {
+	err := RejectRepeatedFlagArgs([]string{"--regions", "eu-north-1", "--", "--regions", "eu-central-1"}, "regions")
+
+	require.NoError(t, err)
+}
+
+func TestFieldAllowedTreatsMissingFieldsAsAllAndNameAsInternal(t *testing.T) {
+	assert.True(t, fieldAllowed(nil, "value"))
+	assert.True(t, fieldAllowed([]string{"value"}, "name"))
+	assert.True(t, fieldAllowed([]string{"name", "value"}, "value"))
+	assert.False(t, fieldAllowed([]string{"name", "value"}, "region"))
+}
+
+func TestFilterRecordsByNamesScopesImportRecords(t *testing.T) {
+	records := []secretfmt.Record{
+		{Path: "/app/a", Value: "a"},
+		{Path: "/app/b", Value: "b"},
+		{Path: "/app/c", Value: "c"},
+	}
+
+	filtered := filterRecordsByNames(records, []string{"/app/c", "/app/a"})
+
+	require.Len(t, filtered, 2)
+	assert.Equal(t, []string{"/app/a", "/app/c"}, []string{filtered[0].Path, filtered[1].Path})
+}
+
+func TestCombinedFilterNamesUsesNamesAndNamesFileItems(t *testing.T) {
+	items := []inventory.Item{{Path: "/app/b"}, {Path: "/app/c"}}
+	cfg := Config{Names: []string{"/app/a", "/app/b"}}
+
+	names := combinedFilterNames(cfg, items)
+
+	assert.Equal(t, []string{"/app/a", "/app/b", "/app/c"}, names)
+}
+
+func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
+	ctx := testImportCLIContext(t, []string{"--default-description", "desc"})
+
+	opts, err := importDefaultOptions(ctx, Config{Fields: []string{"name", "value"}})
+
+	require.NoError(t, err)
+	assert.Empty(t, opts.Description)
+}
+
+func TestSetOptionsRejectsMetadataFlagsOutsideFieldsScope(t *testing.T) {
+	ctx := testSetCLIContext(t, []string{"--tier", "advanced"})
+
+	opts, err := setOptions(ctx, Config{Fields: []string{"name", "value"}}, true)
+
+	assert.Empty(t, opts)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `--tier requires field "tier"`)
+}
+
+func testImportCLIContext(t *testing.T, args []string) *cli.Context {
+	t.Helper()
+	set := flag.NewFlagSet("import", flag.ContinueOnError)
+	set.Bool("default-override", false, "")
+	set.String("default-type", "", "")
+	set.String("default-tier", "", "")
+	set.String("default-data-type", "", "")
+	set.String("default-region", "", "")
+	set.String("default-description", "", "")
+	require.NoError(t, set.Parse(args))
+	return cli.NewContext(cli.NewApp(), set, nil)
+}
+
+func testSetCLIContext(t *testing.T, args []string) *cli.Context {
+	t.Helper()
+	set := flag.NewFlagSet("set", flag.ContinueOnError)
+	set.String("tier", "", "")
+	set.String("data-type", "", "")
+	set.String("description", "", "")
+	set.String("policies", "", "")
+	set.String("policies-file", "", "")
+	require.NoError(t, set.Parse(args))
+	return cli.NewContext(cli.NewApp(), set, nil)
 }
