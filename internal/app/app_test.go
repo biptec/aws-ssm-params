@@ -8,6 +8,8 @@ import (
 
 	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
+	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/urfave/cli/v2"
@@ -369,3 +371,199 @@ func testSetCLIContext(t *testing.T, args []string) *cli.Context {
 	require.NoError(t, set.Parse(args))
 	return cli.NewContext(cli.NewApp(), set, nil)
 }
+
+func TestExportFieldsDefaultsToAllFields(t *testing.T) {
+	fields := exportFields(Config{})
+
+	assert.Equal(t, []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, fields)
+}
+
+func TestExportRecordFromStatusIncludesAllFieldsWhenFieldsOmitted(t *testing.T) {
+	status := ui.Status{
+		Item:         inventory.Item{Path: "/app/prod/api/key", Region: "eu-north-1"},
+		Exists:       true,
+		Type:         "SecureString",
+		Tier:         "Advanced",
+		DataType:     "text",
+		Policies:     `[{"Type":"Expiration"}]`,
+		Description:  "API key",
+		Value:        "secret",
+		Modified:     "2026-06-17T00:00:00Z",
+		Version:      7,
+		Length:       6,
+		SHA256Prefix: "2bb80d53",
+		User:         "arn:aws:iam::123:user/dev",
+	}
+
+	record := exportRecordFromStatus(status, exportFields(Config{}))
+
+	assert.Equal(t, []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, record.Fields)
+	assert.Equal(t, "eu-north-1", record.Region)
+	assert.Equal(t, "SecureString", record.Type)
+	assert.Equal(t, "Advanced", record.Tier)
+	assert.Equal(t, "text", record.DataType)
+	assert.Equal(t, `[{"Type":"Expiration"}]`, record.Policies)
+	assert.Equal(t, "API key", record.Description)
+	assert.Equal(t, "secret", record.Value)
+	assert.Equal(t, "2026-06-17T00:00:00Z", record.Date)
+	assert.Equal(t, int64(7), record.Version)
+	assert.Equal(t, 6, record.Len)
+	assert.Equal(t, "2bb80d53", record.SHA256)
+	assert.Equal(t, "arn:aws:iam::123:user/dev", record.User)
+}
+
+func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
+	status := ui.Status{
+		Item:        inventory.Item{Path: "/app/prod/api/key", Region: "eu-north-1"},
+		Exists:      true,
+		Type:        "SecureString",
+		Value:       "secret",
+		Description: "API key",
+	}
+
+	record := exportRecordFromStatus(status, []string{"name", "value"})
+
+	assert.Equal(t, []string{"name", "value"}, record.Fields)
+	assert.Equal(t, "secret", record.Value)
+	assert.Empty(t, record.Region)
+	assert.Empty(t, record.Type)
+	assert.Empty(t, record.Description)
+}
+
+func TestParseGetArgFlagsDefaultsToValueAndSupportsTailField(t *testing.T) {
+	args, flags, err := parseGetArgFlags([]string{"/app/key", "--field", "type", "--file=out.txt"}, "", "")
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"/app/key"}, args)
+	assert.Equal(t, "type", flags.field)
+	assert.Equal(t, "out.txt", flags.file)
+}
+
+func TestParseGetArgFlagsRejectsMultipleFields(t *testing.T) {
+	args, flags, err := parseGetArgFlags([]string{"/app/key"}, "", "type,value")
+
+	require.Error(t, err)
+	assert.Nil(t, args)
+	assert.Empty(t, flags.field)
+}
+
+func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
+	record := secretfmt.Record{
+		Fields:      []string{"name", "tier", "data-type", "description", "policies"},
+		Tier:        "Advanced",
+		DataType:    "aws:ec2:image",
+		Description: "from file",
+		Policies:    `[{"Type":"Expiration"}]`,
+	}
+	defaults := ssmPutOptionsForTest(t, "standard", "text", "default desc")
+
+	opts, err := importOptionsForRecord(record, defaults, Config{})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Advanced", opts.Tier.String())
+	assert.Equal(t, "aws:ec2:image", opts.DataType.String())
+	assert.Equal(t, "from file", opts.Description)
+	assert.Equal(t, `[{"Type":"Expiration"}]`, opts.Policies)
+}
+
+func TestImportOptionsForRecordIgnoresMetadataOutsideFieldsScope(t *testing.T) {
+	record := secretfmt.Record{
+		Fields:      []string{"name", "tier", "data-type", "description", "policies"},
+		Tier:        "Advanced",
+		DataType:    "aws:ec2:image",
+		Description: "from file",
+		Policies:    `[{"Type":"Expiration"}]`,
+	}
+	defaults := ssmPutOptionsForTest(t, "standard", "text", "default desc")
+
+	opts, err := importOptionsForRecord(record, defaults, Config{Fields: []string{"name", "value"}})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Standard", opts.Tier.String())
+	assert.Equal(t, "text", opts.DataType.String())
+	assert.Equal(t, "default desc", opts.Description)
+	assert.Empty(t, opts.Policies)
+}
+
+func TestGetParameterFieldReturnsSelectedValueFields(t *testing.T) {
+	client := fakeSSMClient{
+		parameter: ssm.Parameter{Name: "/app/key", Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: "2026-06-17T00:00:00Z"},
+	}
+
+	value, err := getParameterField(client, "/app/key", "value", "eu-north-1")
+	require.NoError(t, err)
+	assert.Equal(t, "secret", value)
+
+	version, err := getParameterField(client, "/app/key", "version", "eu-north-1")
+	require.NoError(t, err)
+	assert.Equal(t, "7", version)
+
+	length, err := getParameterField(client, "/app/key", "len", "eu-north-1")
+	require.NoError(t, err)
+	assert.Equal(t, "6", length)
+}
+
+func TestGetParameterFieldReturnsSelectedMetadataFields(t *testing.T) {
+	client := fakeSSMClient{
+		parameter: ssm.Parameter{Name: "/app/key", Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: "2026-06-17T00:00:00Z"},
+		metadata:  ssm.Metadata{Name: "/app/key", Region: "eu-north-1", Type: "SecureString", Tier: "Advanced", DataType: "text", Policies: `[{"Type":"Expiration"}]`, Description: "API key", User: "arn:user/dev", Modified: "2026-06-18T00:00:00Z"},
+	}
+
+	for field, expected := range map[string]string{
+		"name":        "/app/key",
+		"region":      "eu-north-1",
+		"type":        "SecureString",
+		"tier":        "Advanced",
+		"data-type":   "text",
+		"policies":    `[{"Type":"Expiration"}]`,
+		"description": "API key",
+		"date":        "2026-06-18T00:00:00Z",
+		"user":        "arn:user/dev",
+	} {
+		actual, err := getParameterField(client, "/app/key", field, "eu-north-1")
+		require.NoError(t, err, field)
+		assert.Equal(t, expected, actual, field)
+	}
+}
+
+func ssmPutOptionsForTest(t *testing.T, tierValue, dataTypeValue, description string) ssm.PutParameterOptions {
+	t.Helper()
+	tier, err := ssm.ParseParameterTier(tierValue)
+	require.NoError(t, err)
+	dataType, err := ssm.ParseParameterDataType(dataTypeValue)
+	require.NoError(t, err)
+	return ssm.PutParameterOptions{Tier: tier, DataType: dataType, Description: description}
+}
+
+type fakeSSMClient struct {
+	parameter ssm.Parameter
+	metadata  ssm.Metadata
+}
+
+func (f fakeSSMClient) CheckAccess() error                 { return nil }
+func (f fakeSSMClient) ListRegions() ([]string, error)     { return nil, nil }
+func (f fakeSSMClient) ForRegion(region string) ssm.Client { return f }
+func (f fakeSSMClient) DefaultRegion() string              { return f.parameter.Region }
+func (f fakeSSMClient) Get(path string) (ssm.Parameter, error) {
+	if f.parameter.Name == path {
+		return f.parameter, nil
+	}
+	return ssm.Parameter{}, ssm.ErrNotFound
+}
+func (f fakeSSMClient) GetMany(paths []string) (map[string]ssm.Parameter, map[string]error) {
+	return nil, nil
+}
+func (f fakeSSMClient) DescribeMany(paths []string) map[string]ssm.Metadata {
+	if f.metadata.Name == "" {
+		return map[string]ssm.Metadata{}
+	}
+	return map[string]ssm.Metadata{f.metadata.Name: f.metadata}
+}
+func (f fakeSSMClient) ListParameterMetadata() ([]ssm.Metadata, error) { return nil, nil }
+func (f fakeSSMClient) PutParameter(path, value string, parameterType ssm.ParameterType) error {
+	return nil
+}
+func (f fakeSSMClient) PutParameterWithOptions(path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+	return nil
+}
+func (f fakeSSMClient) DeleteMany(paths []string) error { return nil }

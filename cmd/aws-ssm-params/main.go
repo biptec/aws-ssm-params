@@ -97,11 +97,12 @@ func newCLIApp(rawArgs []string) *cli.App {
 			},
 			{
 				Name:               "get",
-				Usage:              "Print a parameter value",
-				UsageText:          "aws-ssm-params [global options] get <name> [--file path]",
+				Usage:              "Print one selected parameter field",
+				UsageText:          "aws-ssm-params [global options] get <name> [--field field] [--file path]",
 				CustomHelpTemplate: alignedCommandHelpTemplate,
 				Flags: []cli.Flag{
-					&cli.StringFlag{Name: "file", Usage: "write value to file instead of stdout"},
+					&cli.StringFlag{Name: "field", Value: "value", Usage: "single parameter field to print; default is value"},
+					&cli.StringFlag{Name: "file", Usage: "write selected field to file instead of stdout"},
 				},
 				Action: app.Get,
 			},

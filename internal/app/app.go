@@ -1,6 +1,8 @@
 package app
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -338,6 +340,30 @@ func rejectDisallowedFlag(ctx *cli.Context, cfg Config, flagName, field string) 
 	return nil
 }
 
+func parseSingleField(value, flagName string, defaultField string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = defaultField
+	}
+	if strings.Contains(value, ",") {
+		return "", fmt.Errorf("--%s accepts one field only", flagName)
+	}
+	canonical, ok := supportedFields[strings.ToLower(value)]
+	if !ok {
+		return "", fmt.Errorf("unsupported --%s value %q", flagName, value)
+	}
+	return canonical, nil
+}
+
+func recordHasField(record secretfmt.Record, field string) bool {
+	for _, candidate := range record.Fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return len(record.Fields) == 0
+}
+
 func importDefaultOptions(ctx *cli.Context, cfg Config) (ssm.PutParameterOptions, error) {
 	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
 	if err != nil {
@@ -347,9 +373,40 @@ func importDefaultOptions(ctx *cli.Context, cfg Config) (ssm.PutParameterOptions
 	if err != nil {
 		return ssm.PutParameterOptions{}, err
 	}
-	opts := ssm.PutParameterOptions{Overwrite: ctx.Bool("default-override"), Tier: tier, DataType: dataType}
+	opts := ssm.PutParameterOptions{Overwrite: ctx.Bool("default-override")}
+	if fieldAllowed(cfg.Fields, "tier") {
+		opts.Tier = tier
+	}
+	if fieldAllowed(cfg.Fields, "data-type") {
+		opts.DataType = dataType
+	}
 	if fieldAllowed(cfg.Fields, "description") {
 		opts.Description = ctx.String("default-description")
+	}
+	return opts, nil
+}
+
+func importOptionsForRecord(record secretfmt.Record, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
+	opts := defaults
+	if fieldAllowed(cfg.Fields, "tier") && recordHasField(record, "tier") && strings.TrimSpace(record.Tier) != "" {
+		tier, err := ssm.ParseParameterTier(record.Tier)
+		if err != nil {
+			return ssm.PutParameterOptions{}, err
+		}
+		opts.Tier = tier
+	}
+	if fieldAllowed(cfg.Fields, "data-type") && recordHasField(record, "data-type") && strings.TrimSpace(record.DataType) != "" {
+		dataType, err := ssm.ParseParameterDataType(record.DataType)
+		if err != nil {
+			return ssm.PutParameterOptions{}, err
+		}
+		opts.DataType = dataType
+	}
+	if fieldAllowed(cfg.Fields, "description") && recordHasField(record, "description") {
+		opts.Description = record.Description
+	}
+	if fieldAllowed(cfg.Fields, "policies") && recordHasField(record, "policies") {
+		opts.Policies = record.Policies
 	}
 	return opts, nil
 }
@@ -535,14 +592,11 @@ func Interactive(ctx *cli.Context) error {
 	})
 }
 
-// Get prints one parameter value or writes it to a file.
-// It intentionally rejects all-regions and multi-region modes because a single path could resolve to multiple values.
+// Get prints one selected parameter field or writes it to a file.
+// It intentionally rejects all-regions and multi-region modes because a single name could resolve to multiple values.
 func Get(ctx *cli.Context) error {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
-		return err
-	}
-	if err := requireFieldForCommand(cfg, "value", "get"); err != nil {
 		return err
 	}
 	if cfg.AllRegions {
@@ -551,12 +605,15 @@ func Get(ctx *cli.Context) error {
 	if len(cfg.Regions) > 1 {
 		return errors.New("multiple --regions values are only supported for interactive and export")
 	}
-	args, flags, err := parseCommonArgFlags(ctx.Args().Slice(), ctx.String("file"), false, "")
+	args, flags, err := parseGetArgFlags(ctx.Args().Slice(), ctx.String("file"), ctx.String("field"))
 	if err != nil {
 		return err
 	}
 	if len(args) != 1 {
 		return errors.New("get requires parameter name")
+	}
+	if err := requireFieldForCommand(cfg, flags.field, "get"); err != nil {
+		return err
 	}
 	if err := requireNameInScope(args[0], cfg, "get"); err != nil {
 		return err
@@ -564,18 +621,138 @@ func Get(ctx *cli.Context) error {
 	if err := ensureRegions(&cfg); err != nil {
 		return err
 	}
-	param, err := NewClient(cfg).Get(args[0])
+	value, err := getParameterField(NewClient(cfg), args[0], flags.field, cfg.Region)
 	if err != nil {
 		return err
 	}
 	if flags.file != "" {
-		return os.WriteFile(flags.file, []byte(param.Value), 0o600)
+		return os.WriteFile(flags.file, []byte(value), 0o600)
 	}
-	fmt.Print(param.Value)
-	if !strings.HasSuffix(param.Value, "\n") {
+	fmt.Print(value)
+	if !strings.HasSuffix(value, "\n") {
 		fmt.Println()
 	}
 	return nil
+}
+
+type getArgFlags struct {
+	file  string
+	field string
+}
+
+func parseGetArgFlags(raw []string, initialFile string, initialField string) ([]string, getArgFlags, error) {
+	field, err := parseSingleField(initialField, "field", "value")
+	if err != nil {
+		return nil, getArgFlags{}, err
+	}
+	args := []string{}
+	flags := getArgFlags{file: initialFile, field: field}
+	for i := 0; i < len(raw); i++ {
+		arg := raw[i]
+		switch {
+		case arg == "--file":
+			if i+1 >= len(raw) {
+				return nil, getArgFlags{}, errors.New("--file requires a value")
+			}
+			flags.file = raw[i+1]
+			i++
+		case strings.HasPrefix(arg, "--file="):
+			flags.file = strings.TrimPrefix(arg, "--file=")
+		case arg == "--field":
+			if i+1 >= len(raw) {
+				return nil, getArgFlags{}, errors.New("--field requires a value")
+			}
+			field, err := parseSingleField(raw[i+1], "field", "value")
+			if err != nil {
+				return nil, getArgFlags{}, err
+			}
+			flags.field = field
+			i++
+		case strings.HasPrefix(arg, "--field="):
+			field, err := parseSingleField(strings.TrimPrefix(arg, "--field="), "field", "value")
+			if err != nil {
+				return nil, getArgFlags{}, err
+			}
+			flags.field = field
+		default:
+			args = append(args, arg)
+		}
+	}
+	return args, flags, nil
+}
+
+func getParameterField(client ssm.Client, name, field, region string) (string, error) {
+	switch field {
+	case "value", "version", "len", "sha256":
+		param, err := client.Get(name)
+		if err != nil {
+			return "", err
+		}
+		switch field {
+		case "value":
+			return param.Value, nil
+		case "version":
+			return fmt.Sprint(param.Version), nil
+		case "len":
+			return fmt.Sprint(len(param.Value)), nil
+		case "sha256":
+			return hashPrefix(param.Value), nil
+		}
+	}
+
+	metas := client.DescribeMany([]string{name})
+	if meta, ok := metas[name]; ok {
+		switch field {
+		case "name":
+			return meta.Name, nil
+		case "region":
+			if meta.Region != "" {
+				return meta.Region, nil
+			}
+			return region, nil
+		case "type":
+			return meta.Type, nil
+		case "tier":
+			return meta.Tier, nil
+		case "data-type":
+			return meta.DataType, nil
+		case "policies":
+			return meta.Policies, nil
+		case "description":
+			return meta.Description, nil
+		case "date":
+			return meta.Modified, nil
+		case "user":
+			return meta.User, nil
+		}
+	}
+
+	param, err := client.Get(name)
+	if err != nil {
+		return "", err
+	}
+	switch field {
+	case "name":
+		if param.Name != "" {
+			return param.Name, nil
+		}
+		return name, nil
+	case "region":
+		if param.Region != "" {
+			return param.Region, nil
+		}
+		return region, nil
+	case "type":
+		return param.Type, nil
+	case "date":
+		return param.Modified, nil
+	}
+	return "", fmt.Errorf("field %q is not available for %s", field, name)
+}
+
+func hashPrefix(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:8]
 }
 
 // Set writes one String, StringList, or SecureString value from an argument or file.
@@ -806,16 +983,27 @@ func Import(ctx *cli.Context) error {
 			existingType = existing.Type
 		}
 		recordType := record.Type
-		if !fieldAllowed(cfg.Fields, "type") {
+		if !fieldAllowed(cfg.Fields, "type") || !recordHasField(record, "type") {
 			recordType = ""
 		}
-		parameterType, err := resolveImportType(importFlags.parameterType, existingType, recordType)
+		defaultType := importFlags.parameterType
+		if !fieldAllowed(cfg.Fields, "type") {
+			defaultType = ""
+		}
+		parameterType, err := resolveImportType(defaultType, existingType, recordType)
 		if err != nil {
 			return fmt.Errorf("%s: %w", record.Path, err)
 		}
-		opts := defaultOpts
+		opts, err := importOptionsForRecord(record, defaultOpts, cfg)
+		if err != nil {
+			return fmt.Errorf("%s: %w", record.Path, err)
+		}
 		opts.Overwrite = importFlags.override
-		if err := client.PutParameterWithOptions(record.Path, record.Value, parameterType, opts); err != nil {
+		writeClient := client
+		if fieldAllowed(cfg.Fields, "region") && recordHasField(record, "region") && strings.TrimSpace(record.Region) != "" {
+			writeClient = client.ForRegion(strings.TrimSpace(record.Region))
+		}
+		if err := writeClient.PutParameterWithOptions(record.Path, record.Value, parameterType, opts); err != nil {
 			return err
 		}
 	}
@@ -823,6 +1011,65 @@ func Import(ctx *cli.Context) error {
 		return fmt.Errorf("skipped existing non-empty parameters without --override:\n%s", strings.Join(skipped, "\n"))
 	}
 	return nil
+}
+
+var allExportFields = []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
+
+func exportFields(cfg Config) []string {
+	if len(cfg.Fields) == 0 {
+		return append([]string(nil), allExportFields...)
+	}
+	return append([]string(nil), cfg.Fields...)
+}
+
+func hasExportField(fields []string, field string) bool {
+	for _, candidate := range fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+func exportRecordFromStatus(status ui.Status, fields []string) secretfmt.Record {
+	record := secretfmt.Record{Path: status.Item.Path, Alias: secretfmt.AliasForItem(status.Item), Fields: fields}
+	if hasExportField(fields, "region") {
+		record.Region = status.Item.Region
+	}
+	if hasExportField(fields, "type") {
+		record.Type = status.Type
+	}
+	if hasExportField(fields, "tier") {
+		record.Tier = status.Tier
+	}
+	if hasExportField(fields, "data-type") {
+		record.DataType = status.DataType
+	}
+	if hasExportField(fields, "policies") {
+		record.Policies = status.Policies
+	}
+	if hasExportField(fields, "description") {
+		record.Description = status.Description
+	}
+	if hasExportField(fields, "value") && status.Exists {
+		record.Value = status.Value
+	}
+	if hasExportField(fields, "date") {
+		record.Date = status.Modified
+	}
+	if hasExportField(fields, "version") {
+		record.Version = status.Version
+	}
+	if hasExportField(fields, "len") {
+		record.Len = status.Length
+	}
+	if hasExportField(fields, "sha256") {
+		record.SHA256 = status.SHA256Prefix
+	}
+	if hasExportField(fields, "user") {
+		record.User = status.User
+	}
+	return record
 }
 
 // Export loads statuses for the requested inventory and writes existing parameter values as dotenv or JSON.
@@ -853,20 +1100,13 @@ func Export(ctx *cli.Context) error {
 		statuses = ui.LoadStatusesWithProgressForRegions(client, items, includeValuesForFields(cfg.Fields), regions)
 	}
 
+	fields := exportFields(cfg)
 	var records []secretfmt.Record
 	for _, status := range statuses {
 		if !status.Exists && !ctx.Bool("include-missing") {
 			continue
 		}
-		value := status.Value
-		if !status.Exists || !fieldAllowed(cfg.Fields, "value") {
-			value = ""
-		}
-		parameterType := status.Type
-		if !fieldAllowed(cfg.Fields, "type") {
-			parameterType = ""
-		}
-		records = append(records, secretfmt.Record{Path: status.Item.Path, Alias: secretfmt.AliasForItem(status.Item), Value: value, Type: parameterType})
+		records = append(records, exportRecordFromStatus(status, fields))
 	}
 
 	writer, closeFn, err := outputWriter(ctx.String("to-file"))

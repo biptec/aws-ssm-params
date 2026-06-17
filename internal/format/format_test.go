@@ -99,6 +99,44 @@ func TestImportJSONSupportsTypedRecordObjects(t *testing.T) {
 	assert.Equal(t, "debug", records[0].Value)
 }
 
+func TestImportJSONSupportsFullRecordObjects(t *testing.T) {
+	input := strings.NewReader(`{
+		"/app/prod/api/key": {
+			"region": "eu-north-1",
+			"type": "SecureString",
+			"tier": "Advanced",
+			"dataType": "text",
+			"policies": "[{\"Type\":\"Expiration\"}]",
+			"description": "API key",
+			"value": "secret",
+			"date": "2026-06-17T00:00:00Z",
+			"version": 7,
+			"len": 6,
+			"sha256": "2bb80d53",
+			"user": "arn:aws:iam::123:user/dev"
+		}
+	}`)
+
+	records, err := ImportJSON(input)
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	record := records[0]
+	assert.Equal(t, []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, record.Fields)
+	assert.Equal(t, "eu-north-1", record.Region)
+	assert.Equal(t, "SecureString", record.Type)
+	assert.Equal(t, "Advanced", record.Tier)
+	assert.Equal(t, "text", record.DataType)
+	assert.Equal(t, `[{"Type":"Expiration"}]`, record.Policies)
+	assert.Equal(t, "API key", record.Description)
+	assert.Equal(t, "secret", record.Value)
+	assert.Equal(t, "2026-06-17T00:00:00Z", record.Date)
+	assert.Equal(t, int64(7), record.Version)
+	assert.Equal(t, 6, record.Len)
+	assert.Equal(t, "2bb80d53", record.SHA256)
+	assert.Equal(t, "arn:aws:iam::123:user/dev", record.User)
+}
+
 func TestExportJSONUsesTypedShapeWhenTypeMetadataExists(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/log-level", Value: "debug", Type: "String"}}
@@ -117,4 +155,63 @@ func TestAliasForPathHandlesKnownSecretTypes(t *testing.T) {
 	assert.Equal(t, "FLUX_GITHUB_TOKEN", AliasForPath("/flux/github/token", inventory.Item{}))
 	assert.Equal(t, "TLS_EXAMPLE_COM_CRT", AliasForPath("/app-infra/prod/tls/example.com/tls.crt", inventory.Item{}))
 	assert.Equal(t, "TLS_EXAMPLE_COM_KEY", AliasForPath("/app-infra/prod/tls/example.com/tls.key", inventory.Item{}))
+}
+
+func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
+	var out bytes.Buffer
+	records := []Record{{
+		Path:        "/app/prod/api/key",
+		Fields:      []string{"name", "region", "type", "tier", "data-type", "description", "value", "date", "version", "len", "sha256", "user"},
+		Region:      "eu-north-1",
+		Type:        "SecureString",
+		Tier:        "Advanced",
+		DataType:    "text",
+		Description: "API key",
+		Value:       "secret",
+		Date:        "2026-06-17T00:00:00Z",
+		Version:     7,
+		Len:         6,
+		SHA256:      "2bb80d53",
+		User:        "arn:aws:iam::123:user/dev",
+	}}
+
+	err := ExportJSON(&out, records)
+
+	require.NoError(t, err)
+	json := out.String()
+	assert.Contains(t, json, `"/app/prod/api/key": {`)
+	assert.Contains(t, json, `"region": "eu-north-1"`)
+	assert.Contains(t, json, `"type": "SecureString"`)
+	assert.Contains(t, json, `"tier": "Advanced"`)
+	assert.Contains(t, json, `"dataType": "text"`)
+	assert.Contains(t, json, `"description": "API key"`)
+	assert.Contains(t, json, `"value": "secret"`)
+	assert.Contains(t, json, `"date": "2026-06-17T00:00:00Z"`)
+	assert.Contains(t, json, `"version": 7`)
+	assert.Contains(t, json, `"len": 6`)
+	assert.Contains(t, json, `"sha256": "2bb80d53"`)
+	assert.Contains(t, json, `"user": "arn:aws:iam::123:user/dev"`)
+}
+
+func TestExportJSONUsesObjectShapeForValueOnlyFields(t *testing.T) {
+	var out bytes.Buffer
+	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: "secret", Type: "SecureString"}}
+
+	err := ExportJSON(&out, records)
+
+	require.NoError(t, err)
+	assert.Equal(t, "{\n  \"/app/prod/api/key\": {\n    \"value\": \"secret\"\n  }\n}\n", out.String())
+}
+
+func TestExportJSONCanExportMetadataWithoutValue(t *testing.T) {
+	var out bytes.Buffer
+	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "type", "date"}, Type: "String", Value: "secret", Date: "2026-06-17T00:00:00Z"}}
+
+	err := ExportJSON(&out, records)
+
+	require.NoError(t, err)
+	json := out.String()
+	assert.Contains(t, json, `"type": "String"`)
+	assert.Contains(t, json, `"date": "2026-06-17T00:00:00Z"`)
+	assert.False(t, strings.Contains(json, `"value"`))
 }

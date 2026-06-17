@@ -16,10 +16,21 @@ import (
 // Path is the canonical SSM name, Alias is the human-friendly dotenv variable name, Value is the parameter value,
 // and Type optionally carries the AWS SSM parameter type when an import/export format preserves it.
 type Record struct {
-	Path  string
-	Alias string
-	Value string
-	Type  string
+	Path        string
+	Alias       string
+	Fields      []string
+	Region      string
+	Value       string
+	Type        string
+	Tier        string
+	DataType    string
+	Policies    string
+	Description string
+	Date        string
+	Version     int64
+	Len         int
+	SHA256      string
+	User        string
 }
 
 // ExportDotenv writes records as dotenv assignments with SSM metadata comments before each value.
@@ -48,34 +59,98 @@ func ExportDotenv(w io.Writer, records []Record) error {
 }
 
 // ExportJSON writes a stable JSON object keyed by SSM name.
-// Records without type metadata keep the compact legacy shape {"/path":"value"}; records with type metadata use
-// {"/path":{"type":"SecureString","value":"..."}} so JSON backups can preserve parameter types.
+// Every record uses the same object shape, even value-only exports, for example
+// {"/path":{"value":"..."}} or {"/path":{"type":"SecureString","value":"..."}}.
 func ExportJSON(w io.Writer, records []Record) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if !hasTypedRecords(records) {
-		data := map[string]string{}
-		for _, record := range records {
-			data[record.Path] = record.Value
-		}
-		return encoder.Encode(data)
-	}
-
-	data := map[string]jsonRecord{}
+	data := map[string]exportJSONRecord{}
 	for _, record := range records {
-		data[record.Path] = jsonRecord{Type: record.Type, Value: record.Value}
+		data[record.Path] = record.exportJSONRecord()
 	}
 	return encoder.Encode(data)
 }
 
-type jsonRecord struct {
-	Type  string `json:"type,omitempty"`
-	Value string `json:"value"`
+type exportJSONRecord struct {
+	Region      string  `json:"region,omitempty"`
+	Type        string  `json:"type,omitempty"`
+	Tier        string  `json:"tier,omitempty"`
+	DataType    string  `json:"dataType,omitempty"`
+	Policies    string  `json:"policies,omitempty"`
+	Description string  `json:"description,omitempty"`
+	Value       *string `json:"value,omitempty"`
+	Date        string  `json:"date,omitempty"`
+	Version     *int64  `json:"version,omitempty"`
+	Len         *int    `json:"len,omitempty"`
+	SHA256      string  `json:"sha256,omitempty"`
+	User        string  `json:"user,omitempty"`
 }
 
-func hasTypedRecords(records []Record) bool {
-	for _, record := range records {
-		if record.Type != "" {
+type jsonRecord struct {
+	Region      string `json:"region,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Tier        string `json:"tier,omitempty"`
+	DataType    string `json:"dataType,omitempty"`
+	Policies    string `json:"policies,omitempty"`
+	Description string `json:"description,omitempty"`
+	Value       string `json:"value"`
+	Date        string `json:"date,omitempty"`
+	Version     int64  `json:"version,omitempty"`
+	Len         int    `json:"len,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
+	User        string `json:"user,omitempty"`
+}
+
+func (r Record) exportJSONRecord() exportJSONRecord {
+	out := exportJSONRecord{}
+	if r.includesField("region") {
+		out.Region = r.Region
+	}
+	if r.includesField("type") {
+		out.Type = r.Type
+	}
+	if r.includesField("tier") {
+		out.Tier = r.Tier
+	}
+	if r.includesField("data-type") {
+		out.DataType = r.DataType
+	}
+	if r.includesField("policies") {
+		out.Policies = r.Policies
+	}
+	if r.includesField("description") {
+		out.Description = r.Description
+	}
+	if r.includesField("value") {
+		value := r.Value
+		out.Value = &value
+	}
+	if r.includesField("date") {
+		out.Date = r.Date
+	}
+	if r.includesField("version") {
+		version := r.Version
+		out.Version = &version
+	}
+	if r.includesField("len") {
+		length := r.Len
+		out.Len = &length
+	}
+	if r.includesField("sha256") {
+		out.SHA256 = r.SHA256
+	}
+	if r.includesField("user") {
+		out.User = r.User
+	}
+	return out
+}
+
+func (r Record) includesField(field string) bool {
+	if len(r.Fields) == 0 {
+		return true
+	}
+	for _, candidate := range r.Fields {
+		if candidate == field {
 			return true
 		}
 	}
@@ -167,14 +242,76 @@ func ImportJSON(r io.Reader) ([]Record, error) {
 func parseJSONRecord(path string, raw json.RawMessage) (Record, error) {
 	var value string
 	if err := json.Unmarshal(raw, &value); err == nil {
-		return Record{Path: path, Alias: AliasForPath(path, inventory.Item{}), Value: value}, nil
+		return Record{Path: path, Alias: AliasForPath(path, inventory.Item{}), Fields: []string{"name", "value"}, Value: value}, nil
 	}
 
 	var typed jsonRecord
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		return Record{}, fmt.Errorf("invalid JSON record for %s: %w", path, err)
 	}
-	return Record{Path: path, Alias: AliasForPath(path, inventory.Item{}), Value: typed.Value, Type: typed.Type}, nil
+	fields, err := jsonRecordFields(raw)
+	if err != nil {
+		return Record{}, fmt.Errorf("invalid JSON record for %s: %w", path, err)
+	}
+	return Record{
+		Path:        path,
+		Alias:       AliasForPath(path, inventory.Item{}),
+		Fields:      fields,
+		Region:      typed.Region,
+		Value:       typed.Value,
+		Type:        typed.Type,
+		Tier:        typed.Tier,
+		DataType:    typed.DataType,
+		Policies:    typed.Policies,
+		Description: typed.Description,
+		Date:        typed.Date,
+		Version:     typed.Version,
+		Len:         typed.Len,
+		SHA256:      typed.SHA256,
+		User:        typed.User,
+	}, nil
+}
+
+func jsonRecordFields(raw json.RawMessage) ([]string, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	fields := []string{"name"}
+	for _, field := range []struct {
+		jsonName string
+		field    string
+	}{
+		{"region", "region"},
+		{"type", "type"},
+		{"tier", "tier"},
+		{"dataType", "data-type"},
+		{"data_type", "data-type"},
+		{"data-type", "data-type"},
+		{"policies", "policies"},
+		{"description", "description"},
+		{"value", "value"},
+		{"date", "date"},
+		{"version", "version"},
+		{"len", "len"},
+		{"length", "len"},
+		{"sha256", "sha256"},
+		{"user", "user"},
+	} {
+		if _, ok := object[field.jsonName]; ok {
+			fields = appendUniqueField(fields, field.field)
+		}
+	}
+	return fields, nil
+}
+
+func appendUniqueField(fields []string, field string) []string {
+	for _, candidate := range fields {
+		if candidate == field {
+			return fields
+		}
+	}
+	return append(fields, field)
 }
 
 // AliasForItem derives a dotenv-safe alias from an inventory item and its kind metadata.

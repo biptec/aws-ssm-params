@@ -317,13 +317,13 @@ A command is required. Running `aws-ssm-params` without a command prints CLI hel
 | [`interactive`](#interactive-tui) / `tui` | Open the terminal UI | `aws-ssm-params --regions eu-north-1 tui` |
 | [`export`](#import-and-export) | Export values to dotenv/JSON | `aws-ssm-params --names-file names.txt export --to-file values.env` |
 | [`import`](#import-and-export) | Import values from dotenv/JSON | `aws-ssm-params --names-file names.txt import --from-file values.env` |
-| [`get`](#direct-getset) | Read one parameter value | `aws-ssm-params get /app/dev/api/JWT_SECRET` |
+| [`get`](#direct-getset) | Read one selected field from one parameter | `aws-ssm-params get /app/dev/api/JWT_SECRET --field value` |
 | [`set`](#direct-getset) | Write one parameter value | `aws-ssm-params set /app/dev/api/LOG_LEVEL debug --type string` |
 
 ```text
 aws-ssm-params [global options] <command> [command options]
 aws-ssm-params [global options] interactive|tui [command options]
-aws-ssm-params [global options] get <name> [--file path]
+aws-ssm-params [global options] get <name> [--field field] [--file path]
 aws-ssm-params [global options] set <name> <value> [command options]
 aws-ssm-params [global options] set <name> --file path [command options]
 aws-ssm-params [global options] import [--from-file path] [command options]
@@ -667,7 +667,7 @@ Example output:
 }
 ```
 
-JSON uses SSM names as keys, so it can be imported without alias resolution. The compact legacy JSON shape `{ "/path": "value" }` is still accepted for imports; typed exports use `{ "type": "...", "value": "..." }` records when type metadata is available.
+JSON uses SSM names as keys, so it can be imported without alias resolution. JSON export always uses object records, even when only `value` is exported. The compact legacy JSON shape `{ "/path": "value" }` is still accepted for imports.
 
 ### Import
 
@@ -701,16 +701,27 @@ aws-ssm-params --regions eu-north-1 import --format json --from-file values.json
 
 ## Direct get/set
 
-Read one parameter:
+Read one parameter value. `get` is intentionally single-field output for shell scripts; the default field is `value`:
 
 ```bash
 aws-ssm-params --regions eu-north-1 get /my-app/dev/api/JWT_SECRET
+aws-ssm-params --regions eu-north-1 get /my-app/dev/api/JWT_SECRET --field value
 ```
 
-Write the value to a file instead of stdout:
+Read one metadata field as plain text:
 
 ```bash
-aws-ssm-params --regions eu-north-1 get /my-app/dev/api/TLS_KEY --file tls.key
+aws-ssm-params --regions eu-north-1 get /my-app/dev/api/JWT_SECRET --field type
+aws-ssm-params --regions eu-north-1 get /my-app/dev/api/JWT_SECRET --field version
+aws-ssm-params --regions eu-north-1 get /my-app/dev/api/JWT_SECRET --field description
+```
+
+If global `--fields` is set, `--field` must be included in that scope. For example, `--fields type get ... --field value` is rejected because `value` was not loaded.
+
+Write the selected field to a file instead of stdout:
+
+```bash
+aws-ssm-params --regions eu-north-1 get /my-app/dev/api/TLS_KEY --field value --file tls.key
 ```
 
 Set one value. Existing parameters keep their current AWS type when `--type` is omitted; new parameters are created as `SecureString` by default:
