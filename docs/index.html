@@ -204,25 +204,6 @@ aws-ssm-params --fields name,type,date,user --regions eu-north-1 tui</code></pre
         </div>
       </section>
 
-      <section class="section split" id="asciinema">
-        <div>
-          <p class="eyebrow">Animated demo</p>
-          <h2>Record a terminal demo with asciinema.</h2>
-          <p>
-            The site already includes static SVG terminal screenshots. For a live animated demo, record a short TUI session locally
-            and upload or embed the resulting cast.
-          </p>
-        </div>
-        <div class="code-block">
-<pre><code># Install asciinema locally, then record a demo
-asciinema rec docs/assets/aws-ssm-params.cast \
-  --command 'aws-ssm-params --regions eu-north-1 tui'
-
-# Optional: convert the cast to SVG/GIF with your preferred tool
-# or embed the cast from asciinema.org.</code></pre>
-        </div>
-      </section>
-
       <section class="section split" id="security">
         <div>
           <p class="eyebrow">Security-first defaults</p>
