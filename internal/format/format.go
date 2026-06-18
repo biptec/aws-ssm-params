@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	crerr "github.com/cockroachdb/errors"
+
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 )
 
@@ -38,22 +40,23 @@ type Record struct {
 // The path comment makes import lossless even when aliases are duplicated or later renamed; the optional type
 // comment lets a future import recreate String/StringList/SecureString parameters without a separate flag.
 func ExportDotenv(w io.Writer, records []Record) error {
-	for i, record := range records {
+	for i := range records {
+		record := &records[i]
 		if i > 0 {
 			if _, err := fmt.Fprintln(w); err != nil {
-				return err
+				return crerr.Wrap(err, "write dotenv separator")
 			}
 		}
 		if _, err := fmt.Fprintf(w, "# ssm: %s\n", record.Path); err != nil {
-			return err
+			return crerr.Wrap(err, "write dotenv path comment")
 		}
 		if record.Type != "" {
 			if _, err := fmt.Fprintf(w, "# type: %s\n", record.Type); err != nil {
-				return err
+				return crerr.Wrap(err, "write dotenv type comment")
 			}
 		}
 		if _, err := fmt.Fprintf(w, "%s=%s\n", record.Alias, quoteDotenv(record.Value)); err != nil {
-			return err
+			return crerr.Wrap(err, "write dotenv value")
 		}
 	}
 	return nil
@@ -66,10 +69,10 @@ func ExportJSON(w io.Writer, records []Record) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	data := map[string]exportJSONRecord{}
-	for _, record := range records {
-		data[record.Path] = record.exportJSONRecord()
+	for i := range records {
+		data[records[i].Path] = records[i].exportJSONRecord()
 	}
-	return encoder.Encode(data)
+	return crerr.Wrap(encoder.Encode(data), "encode JSON export")
 }
 
 type exportJSONRecord struct {
@@ -165,7 +168,7 @@ func (r Record) includesField(field string) bool {
 func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "read dotenv input")
 	}
 
 	aliases := AliasMap(items)
@@ -194,7 +197,7 @@ func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
 		alias := strings.TrimSpace(key)
 		value, err := parseDotenvValue(strings.TrimSpace(rawValue))
 		if err != nil {
-			return nil, fmt.Errorf("invalid dotenv value for %s on line %d: %w", alias, lineNumber+1, err)
+			return nil, crerr.Wrapf(err, "invalid dotenv value for %s on line %d", alias, lineNumber+1)
 		}
 
 		path := pendingPath
@@ -222,7 +225,7 @@ func ImportJSON(r io.Reader) ([]Record, error) {
 	data := map[string]json.RawMessage{}
 	decoder := json.NewDecoder(r)
 	if err := decoder.Decode(&data); err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "decode JSON import")
 	}
 	paths := make([]string, 0, len(data))
 	for path := range data {
@@ -248,11 +251,11 @@ func parseJSONRecord(path string, raw json.RawMessage) (Record, error) {
 
 	var typed jsonRecord
 	if err := json.Unmarshal(raw, &typed); err != nil {
-		return Record{}, fmt.Errorf("invalid JSON record for %s: %w", path, err)
+		return Record{}, crerr.Wrapf(err, "invalid JSON record for %s", path)
 	}
 	fields, err := jsonRecordFields(raw)
 	if err != nil {
-		return Record{}, fmt.Errorf("invalid JSON record for %s: %w", path, err)
+		return Record{}, crerr.Wrapf(err, "invalid JSON record for %s", path)
 	}
 	return Record{
 		Path:        path,
@@ -276,7 +279,7 @@ func parseJSONRecord(path string, raw json.RawMessage) (Record, error) {
 func jsonRecordFields(raw json.RawMessage) ([]string, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "decode JSON record fields")
 	}
 	fields := []string{"name"}
 	for _, field := range []struct {
@@ -369,7 +372,11 @@ func parseDotenvValue(value string) (string, error) {
 		return "", nil
 	}
 	if strings.HasPrefix(value, "\"") {
-		return strconv.Unquote(value)
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", crerr.Wrap(err, "unquote dotenv value")
+		}
+		return unquoted, nil
 	}
 	if strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'") && len(value) >= 2 {
 		return value[1 : len(value)-1], nil

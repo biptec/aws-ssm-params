@@ -74,9 +74,7 @@ func newCLIApp(rawArgs []string) *cli.App {
 			&cli.StringSliceFlag{Name: "fields", EnvVars: []string{"AWS_SSM_PARAMS_FIELDS"}, Usage: "comma-separated parameter fields to load/show/import/export; omitted means all fields"},
 			&cli.BoolFlag{Name: "without-decryption", EnvVars: []string{"AWS_SSM_PARAMS_WITHOUT_DECRYPTION"}, Usage: "load SecureString values without KMS decryption"},
 		},
-		Action: func(ctx *cli.Context) error {
-			return cli.ShowAppHelp(ctx)
-		},
+		Action: cli.ShowAppHelp,
 		Commands: []*cli.Command{
 			{
 				Name:               "interactive",

@@ -1,9 +1,12 @@
 package inventory
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
+
+	crerr "github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
 
 // yamlLine is a deliberately small representation of a non-empty YAML line.
@@ -48,9 +51,9 @@ type componentData struct {
 // It supports two families of references: app secrets declared under secrets.keys and TLS certificate/key paths
 // either provided directly via externalSecret or generated from backupToSsm domain settings.
 func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrapf(err, "read values file %s", path)
 	}
 
 	values := parseValues(string(data))
@@ -75,7 +78,8 @@ func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 		}
 	}
 
-	for componentName, component := range values.Components {
+	for componentName := range values.Components {
+		component := values.Components[componentName]
 		if !component.Enabled || !component.IngressEnabled || !component.TLSEnabled {
 			continue
 		}

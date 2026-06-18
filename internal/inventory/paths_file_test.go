@@ -5,6 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/biptec/aws-ssm-params/internal/fileio"
+
+	crerr "github.com/cockroachdb/errors"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +44,7 @@ func TestLoadPathsFileRejectsRelativePaths(t *testing.T) {
 }
 
 func writeTestFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o600)
+	return crerr.Wrapf(os.WriteFile(path, []byte(content), 0o600), "write test file %s", path)
 }
 
 func writeTempFile(t *testing.T, content string) string {
@@ -75,7 +79,7 @@ func TestAppendPathIfMissingAddsMissingNewlineBeforeAppending(t *testing.T) {
 
 func readTempFile(t *testing.T, file string) string {
 	t.Helper()
-	data, err := os.ReadFile(file)
+	data, err := fileio.ReadFile(file)
 	require.NoError(t, err)
 	return string(data)
 }

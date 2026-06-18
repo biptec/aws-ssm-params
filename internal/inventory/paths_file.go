@@ -2,20 +2,26 @@ package inventory
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
+
+	crerr "github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
 
 // LoadPathsFile reads a simple newline-based SSM inventory file.
 // Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
 // duplicates are removed, and the final list is sorted to make downstream output deterministic.
 func LoadPathsFile(filePath string) ([]Item, error) {
-	file, err := os.Open(filePath)
+	file, err := fileio.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrapf(err, "open paths file %s", filePath)
 	}
 	defer func() { _ = file.Close() }()
 
@@ -45,7 +51,7 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 		items = append(items, Item{Path: raw, Kind: "path-file", Source: filePath, SecretName: path.Base(raw)})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return nil, crerr.Wrapf(err, "scan paths file %s", filePath)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil
@@ -56,15 +62,16 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 	parameterPath = strings.TrimSpace(parameterPath)
 	if parameterPath == "" {
-		return false, fmt.Errorf("SSM name is required")
+		return false, errors.New("SSM name is required")
 	}
 	if !strings.HasPrefix(parameterPath, "/") {
 		return false, fmt.Errorf("invalid SSM name: %s", parameterPath)
 	}
 
-	data, err := os.ReadFile(filePath)
+	cleanPath := filepath.Clean(filePath)
+	data, err := fileio.ReadFile(cleanPath)
 	if err != nil && !os.IsNotExist(err) {
-		return false, err
+		return false, crerr.Wrapf(err, "read paths file %s", filePath)
 	}
 	if pathFileContainsPath(string(data), parameterPath) {
 		return false, nil
@@ -74,13 +81,13 @@ func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		prefix = "\n"
 	}
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := fileio.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return false, err
+		return false, crerr.Wrapf(err, "open paths file %s", filePath)
 	}
 	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(prefix + parameterPath + "\n"); err != nil {
-		return false, err
+		return false, crerr.Wrapf(err, "append path to %s", filePath)
 	}
 	return true, nil
 }
@@ -115,9 +122,10 @@ func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error)
 	if len(targets) == 0 {
 		return 0, nil
 	}
-	data, err := os.ReadFile(filePath)
+	cleanPath := filepath.Clean(filePath)
+	data, err := fileio.ReadFile(cleanPath)
 	if err != nil {
-		return 0, err
+		return 0, crerr.Wrapf(err, "read paths file %s", cleanPath)
 	}
 	parts := strings.SplitAfter(string(data), "\n")
 	remaining := make([]string, 0, len(parts))
@@ -135,8 +143,16 @@ func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error)
 	if removed == 0 {
 		return 0, nil
 	}
-	if err := os.WriteFile(filePath, []byte(strings.Join(remaining, "")), 0o600); err != nil { // #nosec G703 -- filePath is an explicit user-configured paths file.
-		return 0, err
+	file, err := fileio.OpenFile(cleanPath, os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return 0, crerr.Wrapf(err, "open paths file %s", cleanPath)
+	}
+	if _, err := file.WriteString(strings.Join(remaining, "")); err != nil {
+		_ = file.Close()
+		return 0, crerr.Wrapf(err, "write paths file %s", cleanPath)
+	}
+	if err := file.Close(); err != nil {
+		return 0, crerr.Wrapf(err, "close paths file %s", cleanPath)
 	}
 	return removed, nil
 }

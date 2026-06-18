@@ -552,7 +552,7 @@ func (f fakeSSMClient) Get(_ context.Context, path string) (ssm.Parameter, error
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
 
-func (f fakeSSMClient) GetMany(_ context.Context, _ []string) (map[string]ssm.Parameter, map[string]error) {
+func (f fakeSSMClient) GetMany(_ context.Context, _ []string) (values map[string]ssm.Parameter, errs map[string]error) {
 	return nil, nil
 }
 

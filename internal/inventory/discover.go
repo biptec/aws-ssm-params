@@ -8,6 +8,10 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	crerr "github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
 
 // Discover scans the original GitOps repository layout and builds an inventory of SSM parameters.
@@ -22,12 +26,12 @@ func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
 
 	enabledApps, err := discoverEnabledApps(envDir)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "discover enabled apps")
 	}
 
 	entries, err := os.ReadDir(appsDir)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrapf(err, "read apps directory %s", appsDir)
 	}
 
 	var items []Item
@@ -45,20 +49,20 @@ func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
 		}
 		appItems, err := scanValuesFile(valuesPath, appName)
 		if err != nil {
-			return nil, err
+			return nil, crerr.Wrapf(err, "scan values file %s", valuesPath)
 		}
 		items = append(items, appItems...)
 	}
 
 	kItems, err := scanKustomizationForSecrets(envDir, env)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "scan kustomization secrets")
 	}
 	items = append(items, kItems...)
 
 	fItems, err := scanTerraformFluxToken(repoRoot, env)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "scan Terraform Flux token")
 	}
 	items = append(items, fItems...)
 
@@ -71,9 +75,10 @@ func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
 // This lets discovery ignore app directories that exist in the repo but are not deployed in the selected environment.
 func discoverEnabledApps(envDir string) (map[string]bool, error) {
 	result := map[string]bool{}
-	data, err := os.ReadFile(filepath.Join(envDir, "kustomization.yaml"))
+	path := filepath.Join(envDir, "kustomization.yaml")
+	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return result, err
+		return result, crerr.Wrapf(err, "read kustomization %s", path)
 	}
 	re := regexp.MustCompile(`apps/([^/]+)/helmrelease\.yaml`)
 	for _, raw := range strings.Split(string(data), "\n") {
@@ -93,9 +98,9 @@ func discoverEnabledApps(envDir string) (map[string]bool, error) {
 // Currently it extracts GHCR token references because those are shared infrastructure secrets, not app-local values.
 func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
 	path := filepath.Join(envDir, "kustomization.yaml")
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrapf(err, "read kustomization %s", path)
 	}
 	seen := map[string]bool{}
 	var items []Item
@@ -114,7 +119,7 @@ func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
 func scanTerraformFluxToken(repoRoot, env string) ([]Item, error) {
 	path := filepath.Join(repoRoot, "terraform", "environments", env, "terraform.tfvars")
 	value := "/flux/github/token"
-	if data, err := os.ReadFile(path); err == nil {
+	if data, err := fileio.ReadFile(path); err == nil {
 		re := regexp.MustCompile(`(?m)^\s*gitops_token_ssm_parameter\s*=\s*"([^"]+)"`)
 		m := re.FindStringSubmatch(string(data))
 		if len(m) == 2 && m[1] != "" {

@@ -121,7 +121,7 @@ func (m model) updateViTextFieldNormal(key string) (model, bool) {
 	return m, false
 }
 
-func (m *model) handlePendingEditSequence(key string) (bool, bool) {
+func (m *model) handlePendingEditSequence(key string) (handled, consumed bool) {
 	if m.pendingKeySequence == "" {
 		return false, false
 	}
@@ -144,6 +144,7 @@ func (m *model) handlePendingEditSequence(key string) (bool, bool) {
 
 func (m *model) moveActiveTextCursor(delta int) {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
 		m.editPathInput.SetCursor(m.editPathInput.Position() + delta)
 	case editFieldFilePath:
@@ -191,8 +192,10 @@ func (m *model) moveActiveWrappedLine(delta int) {
 	m.setActiveTextCursorAbs(multilineAbsPosition(lines, targetSegment.logical, newOffset))
 }
 
-func (m *model) activeTextCursorLineOffset() (int, int) {
+func (m *model) activeTextCursorLineOffset() (line, offset int) {
 	switch m.editField {
+	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
+		return 0, 0
 	case editFieldDescription:
 		return textAreaCursorLineOffset(m.editDescriptionArea)
 	case editFieldPolicies:
@@ -209,15 +212,15 @@ func textAreaCursorLineOffset(area interface {
 	Line() int
 	LineInfo() textarea.LineInfo
 },
-) (int, int) {
+) (line, offset int) {
 	lines := strings.Split(area.Value(), "\n")
-	line := min(max(0, area.Line()), len(lines)-1)
+	line = min(max(0, area.Line()), len(lines)-1)
 	lineInfo := area.LineInfo()
 	// Bubbles textarea exposes CharOffset/ColumnOffset relative to the current
 	// soft-wrapped visual row. Add StartColumn to recover the logical offset
 	// inside the underlying line so our custom renderer and wrapped navigation
 	// can keep the cursor on the correct visual continuation row.
-	offset := min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(lines[line])))
+	offset = min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(lines[line])))
 	return line, offset
 }
 
@@ -233,6 +236,7 @@ func multilineAbsPosition(lines []string, line, offset int) int {
 
 func (m *model) activeTextLineStart() {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
 		m.editPathInput.CursorStart()
 	case editFieldFilePath:
@@ -248,6 +252,7 @@ func (m *model) activeTextLineStart() {
 
 func (m *model) activeTextLineEnd() {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
 		m.editPathInput.CursorEnd()
 	case editFieldFilePath:
@@ -331,6 +336,8 @@ func (m *model) activeTextDeleteWordBackward() {
 
 func (m *model) activeTextValue() string {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
+		return ""
 	case editFieldSSMPath:
 		return m.editPathInput.Value()
 	case editFieldFilePath:
@@ -348,6 +355,8 @@ func (m *model) activeTextValue() string {
 
 func (m *model) activeTextCursorAbs() int {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
+		return 0
 	case editFieldSSMPath:
 		return m.editPathInput.Position()
 	case editFieldFilePath:
@@ -365,6 +374,7 @@ func (m *model) activeTextCursorAbs() int {
 
 func (m *model) setActiveTextCursorAbs(pos int) {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
 		m.editPathInput.SetCursor(pos)
 	case editFieldFilePath:
@@ -380,6 +390,7 @@ func (m *model) setActiveTextCursorAbs(pos int) {
 
 func (m *model) setActiveTextValueAndCursor(value string, pos int) {
 	switch m.editField {
+	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
 		m.editPathInput.SetValue(value)
 		m.editPathInput.SetCursor(pos)

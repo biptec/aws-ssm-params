@@ -11,6 +11,9 @@ import (
 	"os"
 	"strings"
 
+	crerr "github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/fileio"
 	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -185,7 +188,7 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 	}
 	showColumns, err := ui.ParseColumnOption(stringFlagValue(ctx, "show-columns", "AWS_SSM_PARAMS_SHOW_COLUMNS", ""))
 	if err != nil {
-		return Config{}, err
+		return Config{}, crerr.Wrap(err, "parse show columns")
 	}
 	allowNamesFileUpdate := boolFlagValue(ctx, "allow-names-file-update", "AWS_SSM_PARAMS_ALLOW_NAMES_FILE_UPDATE", false)
 	if allowNamesFileUpdate && namesFile == "" {
@@ -228,7 +231,7 @@ func LoadItems(cfg Config) ([]inventory.Item, error) {
 	if cfg.NamesFile != "" {
 		fileItems, err := inventory.LoadPathsFile(cfg.NamesFile)
 		if err != nil {
-			return nil, err
+			return nil, crerr.Wrapf(err, "load names file %s", cfg.NamesFile)
 		}
 		items = append(items, fileItems...)
 	}
@@ -285,9 +288,9 @@ func filterRecordsByNames(records []secretfmt.Record, names []string) []secretfm
 		allowed[name] = true
 	}
 	out := make([]secretfmt.Record, 0, len(records))
-	for _, record := range records {
-		if allowed[record.Path] {
-			out = append(out, record)
+	for i := range records {
+		if allowed[records[i].Path] {
+			out = append(out, records[i])
 		}
 	}
 	return out
@@ -341,7 +344,7 @@ func rejectDisallowedFlag(ctx *cli.Context, cfg Config, flagName, field string) 
 	return nil
 }
 
-func parseSingleField(value, flagName string, defaultField string) (string, error) {
+func parseSingleField(value, flagName, defaultField string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		value = defaultField
@@ -368,11 +371,11 @@ func recordHasField(record secretfmt.Record, field string) bool {
 func importDefaultOptions(ctx *cli.Context, cfg Config) (ssm.PutParameterOptions, error) {
 	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, err
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default tier")
 	}
 	dataType, err := ssm.ParseParameterDataType(ctx.String("default-data-type"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, err
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default data type")
 	}
 	opts := ssm.PutParameterOptions{Overwrite: ctx.Bool("default-override")}
 	if fieldAllowed(cfg.Fields, "tier") {
@@ -392,14 +395,14 @@ func importOptionsForRecord(record secretfmt.Record, defaults ssm.PutParameterOp
 	if fieldAllowed(cfg.Fields, "tier") && recordHasField(record, "tier") && strings.TrimSpace(record.Tier) != "" {
 		tier, err := ssm.ParseParameterTier(record.Tier)
 		if err != nil {
-			return ssm.PutParameterOptions{}, err
+			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
 		}
 		opts.Tier = tier
 	}
 	if fieldAllowed(cfg.Fields, "data-type") && recordHasField(record, "data-type") && strings.TrimSpace(record.DataType) != "" {
 		dataType, err := ssm.ParseParameterDataType(record.DataType)
 		if err != nil {
-			return ssm.PutParameterOptions{}, err
+			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
 		}
 		opts.DataType = dataType
 	}
@@ -430,17 +433,17 @@ func setOptions(ctx *cli.Context, cfg Config, overwrite bool) (ssm.PutParameterO
 	}
 	tier, err := ssm.ParseParameterTier(ctx.String("tier"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, err
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse tier")
 	}
 	dataType, err := ssm.ParseParameterDataType(ctx.String("data-type"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, err
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse data type")
 	}
 	policies := ctx.String("policies")
 	if file := strings.TrimSpace(ctx.String("policies-file")); file != "" {
-		data, err := os.ReadFile(file)
+		data, err := fileio.ReadFile(file)
 		if err != nil {
-			return ssm.PutParameterOptions{}, err
+			return ssm.PutParameterOptions{}, crerr.Wrapf(err, "read policies file %s", file)
 		}
 		policies = string(data)
 	}
@@ -560,7 +563,7 @@ func Interactive(ctx *cli.Context) error {
 	}
 	client := NewClient(cfg)
 	if err := client.CheckAccess(ctx.Context); err != nil {
-		return err
+		return crerr.Wrap(err, "check AWS access")
 	}
 	regionLabel := cfg.Region
 	regions := append([]string(nil), cfg.Regions...)
@@ -568,12 +571,12 @@ func Interactive(ctx *cli.Context) error {
 		regionLabel = "all regions"
 		regions, err = client.ListRegions(ctx.Context)
 		if err != nil {
-			return fmt.Errorf("list AWS regions: %w", err)
+			return crerr.Wrap(err, "list AWS regions")
 		}
 	} else if len(regions) > 1 {
 		regionLabel = strings.Join(regions, ", ")
 	}
-	return ui.RunInteractive(ctx.Context, client, items, ui.Options{
+	return crerr.Wrap(ui.RunInteractive(ctx.Context, client, items, ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,
 		Profile:                   cfg.Profile,
@@ -590,7 +593,7 @@ func Interactive(ctx *cli.Context) error {
 		NoConfirmWriteSecureValue: cfg.NoConfirmWriteSecureValue,
 		NoConfirmDeleteOne:        cfg.NoConfirmDeleteOne,
 		NoConfirmDeleteAll:        cfg.NoConfirmDeleteAll,
-	})
+	}), "run interactive")
 }
 
 // Get prints one selected parameter field or writes it to a file.
@@ -627,11 +630,11 @@ func Get(ctx *cli.Context) error {
 		return err
 	}
 	if flags.file != "" {
-		return os.WriteFile(flags.file, []byte(value), 0o600)
+		return crerr.Wrapf(os.WriteFile(flags.file, []byte(value), 0o600), "write output file %s", flags.file)
 	}
-	fmt.Print(value)
+	_, _ = fmt.Fprint(os.Stdout, value)
 	if !strings.HasSuffix(value, "\n") {
-		fmt.Println()
+		_, _ = fmt.Fprintln(os.Stdout)
 	}
 	return nil
 }
@@ -649,7 +652,7 @@ func commandTailValue(raw []string, index int, flag string) (string, error) {
 	return raw[next], nil
 }
 
-func parseGetArgFlags(raw []string, initialFile string, initialField string) ([]string, getArgFlags, error) {
+func parseGetArgFlags(raw []string, initialFile, initialField string) ([]string, getArgFlags, error) {
 	field, err := parseSingleField(initialField, "field", "value")
 	if err != nil {
 		return nil, getArgFlags{}, err
@@ -697,7 +700,7 @@ func getParameterField(ctx context.Context, client ssm.Client, name, field, regi
 	case "value", "version", "len", "sha256":
 		param, err := client.Get(ctx, name)
 		if err != nil {
-			return "", err
+			return "", crerr.Wrapf(err, "get parameter %s", name)
 		}
 		switch field {
 		case "value":
@@ -740,7 +743,7 @@ func getParameterField(ctx context.Context, client ssm.Client, name, field, regi
 
 	param, err := client.Get(ctx, name)
 	if err != nil {
-		return "", err
+		return "", crerr.Wrapf(err, "get parameter %s", name)
 	}
 	switch field {
 	case "name":
@@ -798,9 +801,9 @@ func Set(ctx *cli.Context) error {
 	}
 	var value string
 	if flags.file != "" {
-		data, err := os.ReadFile(flags.file)
+		data, err := fileio.ReadFile(flags.file)
 		if err != nil {
-			return err
+			return crerr.Wrapf(err, "read value file %s", flags.file)
 		}
 		value = string(data)
 	} else {
@@ -819,8 +822,8 @@ func Set(ctx *cli.Context) error {
 	}
 	client := NewClient(cfg)
 	existing, existingErr := client.Get(ctx.Context, path)
-	if existingErr != nil && !errors.Is(existingErr, ssm.ErrNotFound) {
-		return existingErr
+	if existingErr != nil && !crerr.Is(existingErr, ssm.ErrNotFound) {
+		return crerr.Wrapf(existingErr, "get existing parameter %s", path)
 	}
 	if !flags.override && existingErr == nil && existing.Value != "" {
 		return fmt.Errorf("parameter already has a non-empty value: %s; use --override", path)
@@ -836,7 +839,7 @@ func Set(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	return client.PutParameterWithOptions(ctx.Context, path, value, parameterType, opts)
+	return crerr.Wrapf(client.PutParameterWithOptions(ctx.Context, path, value, parameterType, opts), "put parameter %s", path)
 }
 
 type commonArgFlags struct {
@@ -887,7 +890,7 @@ func resolveSetType(requestedType, existingType string) (ssm.ParameterType, erro
 		if strings.TrimSpace(candidate) == "" {
 			continue
 		}
-		return ssm.ParseParameterType(candidate)
+		return wrapParameterType(ssm.ParseParameterType(candidate))
 	}
 	return ssm.DefaultParameterType, nil
 }
@@ -897,9 +900,16 @@ func resolveImportType(defaultType, existingType, recordType string) (ssm.Parame
 		if strings.TrimSpace(candidate) == "" {
 			continue
 		}
-		return ssm.ParseParameterType(candidate)
+		return wrapParameterType(ssm.ParseParameterType(candidate))
 	}
 	return ssm.DefaultParameterType, nil
+}
+
+func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.ParameterType, error) {
+	if err != nil {
+		return "", crerr.Wrap(err, "parse parameter type")
+	}
+	return parameterType, nil
 }
 
 // PrepareImportItems loads path inventory only when the selected import format needs it.
@@ -971,8 +981,8 @@ func Import(ctx *cli.Context) error {
 
 	client := NewClient(cfg)
 	paths := make([]string, 0, len(records))
-	for _, record := range records {
-		paths = append(paths, record.Path)
+	for i := range records {
+		paths = append(paths, records[i].Path)
 	}
 
 	values, errs := client.GetMany(ctx.Context, paths)
@@ -980,15 +990,16 @@ func Import(ctx *cli.Context) error {
 	writer := uilive.New()
 	writer.Start()
 	defer writer.Stop()
-	for i, record := range records {
+	for i := range records {
+		record := &records[i]
 		_, _ = fmt.Fprintf(writer, "Importing %d/%d...\n%s\n", i, len(records), record.Path)
 		if !importFlags.override {
 			if existing, ok := values[record.Path]; ok && existing.Value != "" {
 				skipped = append(skipped, record.Path)
 				continue
 			}
-			if err, ok := errs[record.Path]; ok && !errors.Is(err, ssm.ErrNotFound) {
-				return err
+			if err, ok := errs[record.Path]; ok && !crerr.Is(err, ssm.ErrNotFound) {
+				return crerr.Wrap(err, record.Path)
 			}
 		}
 		existingType := ""
@@ -996,7 +1007,7 @@ func Import(ctx *cli.Context) error {
 			existingType = existing.Type
 		}
 		recordType := record.Type
-		if !fieldAllowed(cfg.Fields, "type") || !recordHasField(record, "type") {
+		if !fieldAllowed(cfg.Fields, "type") || !recordHasField(*record, "type") {
 			recordType = ""
 		}
 		defaultType := importFlags.parameterType
@@ -1005,19 +1016,19 @@ func Import(ctx *cli.Context) error {
 		}
 		parameterType, err := resolveImportType(defaultType, existingType, recordType)
 		if err != nil {
-			return fmt.Errorf("%s: %w", record.Path, err)
+			return crerr.Wrap(err, record.Path)
 		}
-		opts, err := importOptionsForRecord(record, defaultOpts, cfg)
+		opts, err := importOptionsForRecord(*record, defaultOpts, cfg)
 		if err != nil {
-			return fmt.Errorf("%s: %w", record.Path, err)
+			return crerr.Wrap(err, record.Path)
 		}
 		opts.Overwrite = importFlags.override
 		writeClient := client
-		if fieldAllowed(cfg.Fields, "region") && recordHasField(record, "region") && strings.TrimSpace(record.Region) != "" {
+		if fieldAllowed(cfg.Fields, "region") && recordHasField(*record, "region") && strings.TrimSpace(record.Region) != "" {
 			writeClient = client.ForRegion(strings.TrimSpace(record.Region))
 		}
 		if err := writeClient.PutParameterWithOptions(ctx.Context, record.Path, record.Value, parameterType, opts); err != nil {
-			return err
+			return crerr.Wrap(err, record.Path)
 		}
 	}
 	if len(skipped) > 0 {
@@ -1102,7 +1113,7 @@ func Export(ctx *cli.Context) error {
 		var err error
 		regions, err = client.ListRegions(ctx.Context)
 		if err != nil {
-			return fmt.Errorf("list AWS regions: %w", err)
+			return crerr.Wrap(err, "list AWS regions")
 		}
 	}
 
@@ -1115,11 +1126,11 @@ func Export(ctx *cli.Context) error {
 
 	fields := exportFields(cfg)
 	var records []secretfmt.Record
-	for _, status := range statuses {
-		if !status.Exists && !ctx.Bool("include-missing") {
+	for i := range statuses {
+		if !statuses[i].Exists && !ctx.Bool("include-missing") {
 			continue
 		}
-		records = append(records, exportRecordFromStatus(status, fields))
+		records = append(records, exportRecordFromStatus(statuses[i], fields))
 	}
 
 	writer, closeFn, err := outputWriter(ctx.String("to-file"))
@@ -1130,9 +1141,9 @@ func Export(ctx *cli.Context) error {
 
 	switch ctx.String("format") {
 	case "dotenv":
-		return secretfmt.ExportDotenv(writer, records)
+		return crerr.Wrap(secretfmt.ExportDotenv(writer, records), "export dotenv")
 	case "json":
-		return secretfmt.ExportJSON(writer, records)
+		return crerr.Wrap(secretfmt.ExportJSON(writer, records), "export JSON")
 	default:
 		return fmt.Errorf("unsupported format: %s", ctx.String("format"))
 	}
@@ -1142,9 +1153,11 @@ func Export(ctx *cli.Context) error {
 func parseImport(format string, reader io.Reader, items []inventory.Item) ([]secretfmt.Record, error) {
 	switch format {
 	case "dotenv":
-		return secretfmt.ImportDotenv(reader, items)
+		records, err := secretfmt.ImportDotenv(reader, items)
+		return records, crerr.Wrap(err, "import dotenv")
 	case "json":
-		return secretfmt.ImportJSON(reader)
+		records, err := secretfmt.ImportJSON(reader)
+		return records, crerr.Wrap(err, "import JSON")
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
@@ -1156,9 +1169,9 @@ func inputReader(file string) (io.Reader, func(), error) {
 	if file == "" {
 		return os.Stdin, func() {}, nil
 	}
-	f, err := os.Open(file)
+	f, err := fileio.Open(file)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, func() {}, crerr.Wrapf(err, "open input file %s", file)
 	}
 	return f, func() { _ = f.Close() }, nil
 }
@@ -1169,9 +1182,9 @@ func outputWriter(file string) (io.Writer, func(), error) {
 	if file == "" {
 		return os.Stdout, func() {}, nil
 	}
-	f, err := os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	f, err := fileio.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
-		return nil, func() {}, err
+		return nil, func() {}, crerr.Wrapf(err, "open output file %s", file)
 	}
 	return f, func() { _ = f.Close() }, nil
 }

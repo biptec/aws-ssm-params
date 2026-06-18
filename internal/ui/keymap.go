@@ -21,6 +21,8 @@ const (
 
 func normalizeKeymapStyle(value string) keymapStyle {
 	switch keymapStyle(value) {
+	case keymapEmacs:
+		return keymapEmacs
 	case keymapVi:
 		return keymapVi
 	default:

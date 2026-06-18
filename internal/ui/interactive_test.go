@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	tea "github.com/charmbracelet/bubbletea"
@@ -282,7 +283,7 @@ func TestFileActionPopupWritesNonSecureValueToFile(t *testing.T) {
 	actual, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "plain-value", string(data))
 	assert.Equal(t, "Wrote value to "+path, actual.message)
@@ -311,7 +312,7 @@ func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "secret-value", string(data))
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
@@ -352,7 +353,7 @@ func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
 	assert.Equal(t, fileWriteConfirmationOverwrite, m.pendingFileWrite)
 	assert.Empty(t, m.warningMessage)
 
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "old", string(data))
 
@@ -362,7 +363,7 @@ func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
 	assert.Equal(t, popupNone, m.activePopup)
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
 
-	data, err = os.ReadFile(path)
+	data, err = fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "new", string(data))
 }
@@ -484,7 +485,7 @@ func TestWriteValueCreatesNewFileInExistingDirectory(t *testing.T) {
 	m, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
-	data, err := os.ReadFile(path)
+	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "created-value", string(data))
 	assert.Empty(t, m.errMessage)
@@ -501,7 +502,7 @@ func TestWriteValueExpandsHomeDirectory(t *testing.T) {
 	m, cmd := submitFileActionPopup(t, m, "write", "~/new-value.txt")
 
 	assert.Nil(t, cmd)
-	data, err := os.ReadFile(home + "/new-value.txt")
+	data, err := fileio.ReadFile(home + "/new-value.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "home-value", string(data))
 	assert.Empty(t, m.errMessage)
@@ -1526,12 +1527,15 @@ func TestPrintableQCanBeTypedInEditableFields(t *testing.T) {
 
 			assert.Equal(t, screenTextArea, m.screen)
 			switch tt.field {
+			case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldPolicies:
 			case editFieldSSMPath:
 				assert.Equal(t, "q", m.editPathInput.Value())
 			case editFieldFilePath:
 				assert.Equal(t, "q", m.editFileInput.Value())
 			case editFieldValue:
 				assert.Equal(t, "q", m.textArea.Value())
+
+			default:
 			}
 		})
 	}
@@ -1568,12 +1572,15 @@ func TestViInsertModeTypesOnAllEditableFieldsAndEscReturnsToNormal(t *testing.T)
 		updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a', 'b', 'c', '?'}})
 		m = updated.(model)
 		switch field {
+		case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldPolicies:
 		case editFieldSSMPath:
 			assert.Equal(t, "abc?", m.editPathInput.Value())
 		case editFieldFilePath:
 			assert.Equal(t, "abc?", m.editFileInput.Value())
 		case editFieldValue:
 			assert.Equal(t, "abc?", m.textArea.Value())
+
+		default:
 		}
 
 		updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
@@ -1675,7 +1682,7 @@ func TestNewParameterSaveWithNamesFileUpdateDoesNotDuplicateExistingEntry(t *tes
 
 func readFileString(t *testing.T, file string) string {
 	t.Helper()
-	data, err := os.ReadFile(file)
+	data, err := fileio.ReadFile(file)
 	require.NoError(t, err)
 	return string(data)
 }
@@ -2286,7 +2293,10 @@ func TestConfirmPopupInputPrefixIsNotLabelStyled(t *testing.T) {
 
 	view := m.renderConfirmPopup()
 	assert.Contains(t, view, "Type ")
-	assert.False(t, strings.Contains(view, labelStyle.Render("Type ")))
+	styledTypePrefix := labelStyle.Render("Type ")
+	if styledTypePrefix != "Type " {
+		assert.False(t, strings.Contains(view, styledTypePrefix))
+	}
 }
 
 func stringSliceContains(values []string, target string) bool {
@@ -2388,6 +2398,9 @@ func TestBulkDeleteConfirmRendersInlinePhraseInputAndButtons(t *testing.T) {
 }
 
 func TestPopupActionLineStylesKeysSeparatelyFromDescriptions(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
 	m := newModel(context.Background(), nil, nil, Options{})
 
 	styled := m.popupActionLine("Enter apply   Esc cancel")

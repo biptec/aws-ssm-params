@@ -49,9 +49,9 @@ func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, err
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
 
-func (f fakeSSMClient) GetMany(_ context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
-	values := map[string]ssm.Parameter{}
-	errs := map[string]error{}
+func (f fakeSSMClient) GetMany(_ context.Context, paths []string) (values map[string]ssm.Parameter, errs map[string]error) {
+	values = map[string]ssm.Parameter{}
+	errs = map[string]error{}
 	for _, path := range paths {
 		key := itemKey(f.region, path)
 		if err, ok := f.errs[key]; ok {
@@ -86,7 +86,8 @@ func (f fakeSSMClient) DescribeMany(_ context.Context, paths []string) map[strin
 
 func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
 	var result []ssm.Metadata
-	for key, meta := range f.metas {
+	for key := range f.metas {
+		meta := f.metas[key]
 		region, _ := splitItemKey(key)
 		if region != f.region {
 			continue
@@ -99,7 +100,7 @@ func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, e
 	return result, nil
 }
 
-func splitItemKey(key string) (string, string) {
+func splitItemKey(key string) (region, path string) {
 	for i := range key {
 		if key[i] == '\x00' {
 			return key[:i], key[i+1:]

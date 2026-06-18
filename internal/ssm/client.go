@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	crerr "github.com/cockroachdb/errors"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -252,7 +254,7 @@ func ResolveConfiguredRegion(ctx context.Context, profile string) string {
 // It fails early before the UI starts so users do not wait through partial scans with broken credentials.
 func (c *AWSClient) CheckAccess(ctx context.Context) error {
 	if _, err := c.sts(ctx).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
-		return fmt.Errorf("cannot access AWS with current credentials/profile: %w", normalizeAWSError(err))
+		return crerr.Wrap(normalizeAWSError(err), "cannot access AWS with current credentials/profile")
 	}
 	return nil
 }
@@ -305,9 +307,9 @@ func (c *AWSClient) Get(ctx context.Context, path string) (Parameter, error) {
 // GetMany loads parameters in AWS SSM batches of up to ten names.
 // It initializes every requested path as ErrNotFound, clears successful entries, and preserves per-path errors so
 // callers can distinguish missing parameters from AWS/API failures.
-func (c *AWSClient) GetMany(ctx context.Context, paths []string) (map[string]Parameter, map[string]error) {
-	values := map[string]Parameter{}
-	errs := map[string]error{}
+func (c *AWSClient) GetMany(ctx context.Context, paths []string) (values map[string]Parameter, errs map[string]error) {
+	values = map[string]Parameter{}
+	errs = map[string]error{}
 	for _, path := range paths {
 		if path != "" {
 			errs[path] = ErrNotFound
@@ -366,7 +368,8 @@ func (c *AWSClient) ListParameterMetadata(ctx context.Context) ([]Metadata, erro
 		if err != nil {
 			return nil, normalizeAWSError(err)
 		}
-		for _, param := range out.Parameters {
+		for i := range out.Parameters {
+			param := out.Parameters[i]
 			if aws.ToString(param.Name) == "" {
 				continue
 			}
@@ -398,7 +401,8 @@ func (c *AWSClient) DescribeMany(ctx context.Context, paths []string) map[string
 		if err != nil {
 			continue
 		}
-		for _, param := range out.Parameters {
+		for i := range out.Parameters {
+			param := out.Parameters[i]
 			name := aws.ToString(param.Name)
 			if name == "" {
 				continue
@@ -520,7 +524,11 @@ func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, err
 	if region != "" {
 		opts = append(opts, config.WithRegion(region))
 	}
-	return config.LoadDefaultConfig(ctx, opts...)
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return aws.Config{}, crerr.Wrap(err, "load AWS SDK config")
+	}
+	return cfg, nil
 }
 
 func metadataFromSDK(region string, param ssmtypes.ParameterMetadata) Metadata {
@@ -542,7 +550,7 @@ func normalizeAWSError(err error) error {
 		return nil
 	}
 	var apiErr smithy.APIError
-	if errors.As(err, &apiErr) {
+	if crerr.As(err, &apiErr) {
 		switch apiErr.ErrorCode() {
 		case "ParameterNotFound", "ParameterVersionNotFound", "ParameterPatternMismatchException":
 			return ErrNotFound

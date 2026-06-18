@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
+
+	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -184,8 +186,9 @@ func loadStatusesByItemRegion(ctx context.Context, client ssm.Client, items []in
 				paths = append(paths, item.Path)
 			}
 			regionalClient := client.ForRegion(region)
-			for path, meta := range regionalClient.DescribeMany(ctx, paths) {
-				metas[itemKey(region, path)] = meta
+			described := regionalClient.DescribeMany(ctx, paths)
+			for path := range described {
+				metas[itemKey(region, path)] = described[path]
 			}
 			chunkValues, chunkErrs := regionalClient.GetMany(ctx, paths)
 			for path, value := range chunkValues {
@@ -217,7 +220,7 @@ func loadAllStatusesForRegions(ctx context.Context, client ssm.Client, includeVa
 			regions = []string{""}
 		}
 	}
-	statuses := []Status{}
+	statuses := make([]Status, 0, len(regions)*64)
 	for _, region := range regions {
 		statuses = append(statuses, loadAllStatusesRegion(ctx, client.ForRegion(region), region, includeValues, progress)...)
 	}
@@ -240,7 +243,8 @@ func loadAllStatusesRegion(ctx context.Context, client ssm.Client, region string
 	}
 	items := make([]inventory.Item, 0, len(metas))
 	metaByKey := map[string]ssm.Metadata{}
-	for _, meta := range metas {
+	for i := range metas {
+		meta := metas[i]
 		if meta.Name == "" {
 			continue
 		}
@@ -344,8 +348,9 @@ func loadStatusesRegions(ctx context.Context, client ssm.Client, items []invento
 
 			regionalClient := client.ForRegion(region)
 			metas := map[string]ssm.Metadata{}
-			for path, meta := range regionalClient.DescribeMany(ctx, paths) {
-				metas[itemKey(region, path)] = meta
+			described := regionalClient.DescribeMany(ctx, paths)
+			for path := range described {
+				metas[itemKey(region, path)] = described[path]
 			}
 			values, errs := regionalClient.GetMany(ctx, paths)
 			for path, param := range values {
@@ -356,7 +361,7 @@ func loadStatusesRegions(ctx context.Context, client ssm.Client, items []invento
 				found[path] = true
 			}
 			for path, err := range errs {
-				if errors.Is(err, ssm.ErrNotFound) {
+				if crerr.Is(err, ssm.ErrNotFound) {
 					continue
 				}
 				item := byPath[path]
@@ -399,7 +404,7 @@ func statusFromMaps(item inventory.Item, region string, metas map[string]ssm.Met
 	}
 	if param, ok := values[key]; ok {
 		status = statusFromValue(item, param, metas[key], includeValues)
-	} else if err, ok := errs[key]; ok && !errors.Is(err, ssm.ErrNotFound) {
+	} else if err, ok := errs[key]; ok && !crerr.Is(err, ssm.ErrNotFound) {
 		status.Error = err.Error()
 	}
 	if !includeValues {
@@ -455,9 +460,11 @@ func itemKey(region, path string) string {
 
 // PrintStatusTable renders a compact non-interactive status table to stdout.
 func PrintStatusTable(statuses []Status, noColor bool) {
-	fmt.Printf("%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "NAME")
-	for i, status := range statuses {
-		fmt.Printf(
+	_, _ = fmt.Fprintf(os.Stdout, "%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "NAME")
+	for i := range statuses {
+		status := &statuses[i]
+		_, _ = fmt.Fprintf(
+			os.Stdout,
 			"%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
 			i+1,
 			colorStatus(status.Label(), noColor),

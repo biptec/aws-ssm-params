@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+
+	crerr "github.com/cockroachdb/errors"
 )
 
 // Base64 returns a cryptographically random base64 string based on the requested byte count.
@@ -42,5 +44,8 @@ func UUID() (string, error) {
 func randomBytes(n int) ([]byte, error) {
 	data := make([]byte, n)
 	_, err := rand.Read(data)
-	return data, err
+	if err != nil {
+		return nil, crerr.Wrap(err, "read random bytes")
+	}
+	return data, nil
 }
