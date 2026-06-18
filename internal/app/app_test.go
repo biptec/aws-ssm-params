@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"flag"
 	"os"
 	"path/filepath"
@@ -117,7 +118,7 @@ func TestLoadItemsAllowsMissingNamesFileAndRejectsEmptyNamesFile(t *testing.T) {
 func TestPrepareImportItemsAllowsJSONWithoutNamesFile(t *testing.T) {
 	cfg := Config{Region: "eu-north-1"}
 
-	items, err := PrepareImportItems(&cfg, "json")
+	items, err := PrepareImportItems(context.Background(), &cfg, "json")
 
 	require.NoError(t, err)
 	assert.Nil(t, items)
@@ -127,7 +128,7 @@ func TestPrepareImportItemsAllowsJSONWithoutNamesFile(t *testing.T) {
 func TestPrepareImportItemsRequiresNamesFileForDotenv(t *testing.T) {
 	cfg := Config{Region: "eu-north-1"}
 
-	items, err := PrepareImportItems(&cfg, "dotenv")
+	items, err := PrepareImportItems(context.Background(), &cfg, "dotenv")
 
 	require.Error(t, err)
 	assert.Nil(t, items)
@@ -139,7 +140,7 @@ func TestPrepareImportItemsLoadsNamesFileForDotenv(t *testing.T) {
 	require.NoError(t, os.WriteFile(file, []byte("/app/dev/api/JWT_SECRET\n"), 0o600))
 	cfg := Config{NamesFile: file, Region: "eu-north-1"}
 
-	items, err := PrepareImportItems(&cfg, "dotenv")
+	items, err := PrepareImportItems(context.Background(), &cfg, "dotenv")
 
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -490,15 +491,15 @@ func TestGetParameterFieldReturnsSelectedValueFields(t *testing.T) {
 		parameter: ssm.Parameter{Name: "/app/key", Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: "2026-06-17T00:00:00Z"},
 	}
 
-	value, err := getParameterField(client, "/app/key", "value", "eu-north-1")
+	value, err := getParameterField(context.Background(), client, "/app/key", "value", "eu-north-1")
 	require.NoError(t, err)
 	assert.Equal(t, "secret", value)
 
-	version, err := getParameterField(client, "/app/key", "version", "eu-north-1")
+	version, err := getParameterField(context.Background(), client, "/app/key", "version", "eu-north-1")
 	require.NoError(t, err)
 	assert.Equal(t, "7", version)
 
-	length, err := getParameterField(client, "/app/key", "len", "eu-north-1")
+	length, err := getParameterField(context.Background(), client, "/app/key", "len", "eu-north-1")
 	require.NoError(t, err)
 	assert.Equal(t, "6", length)
 }
@@ -520,7 +521,7 @@ func TestGetParameterFieldReturnsSelectedMetadataFields(t *testing.T) {
 		"date":        "2026-06-18T00:00:00Z",
 		"user":        "arn:user/dev",
 	} {
-		actual, err := getParameterField(client, "/app/key", field, "eu-north-1")
+		actual, err := getParameterField(context.Background(), client, "/app/key", field, "eu-north-1")
 		require.NoError(t, err, field)
 		assert.Equal(t, expected, actual, field)
 	}
@@ -540,30 +541,32 @@ type fakeSSMClient struct {
 	metadata  ssm.Metadata
 }
 
-func (f fakeSSMClient) CheckAccess() error                 { return nil }
-func (f fakeSSMClient) ListRegions() ([]string, error)     { return nil, nil }
-func (f fakeSSMClient) ForRegion(region string) ssm.Client { return f }
-func (f fakeSSMClient) DefaultRegion() string              { return f.parameter.Region }
-func (f fakeSSMClient) Get(path string) (ssm.Parameter, error) {
+func (f fakeSSMClient) CheckAccess(context.Context) error             { return nil }
+func (f fakeSSMClient) ListRegions(context.Context) ([]string, error) { return nil, nil }
+func (f fakeSSMClient) ForRegion(region string) ssm.Client            { return f }
+func (f fakeSSMClient) DefaultRegion() string                         { return f.parameter.Region }
+func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, error) {
 	if f.parameter.Name == path {
 		return f.parameter, nil
 	}
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
-func (f fakeSSMClient) GetMany(paths []string) (map[string]ssm.Parameter, map[string]error) {
+func (f fakeSSMClient) GetMany(ctx context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
 	return nil, nil
 }
-func (f fakeSSMClient) DescribeMany(paths []string) map[string]ssm.Metadata {
+func (f fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[string]ssm.Metadata {
 	if f.metadata.Name == "" {
 		return map[string]ssm.Metadata{}
 	}
 	return map[string]ssm.Metadata{f.metadata.Name: f.metadata}
 }
-func (f fakeSSMClient) ListParameterMetadata() ([]ssm.Metadata, error) { return nil, nil }
-func (f fakeSSMClient) PutParameter(path, value string, parameterType ssm.ParameterType) error {
+func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
+	return nil, nil
+}
+func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, parameterType ssm.ParameterType) error {
 	return nil
 }
-func (f fakeSSMClient) PutParameterWithOptions(path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+func (f fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
 	return nil
 }
-func (f fakeSSMClient) DeleteMany(paths []string) error { return nil }
+func (f fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error { return nil }

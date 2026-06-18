@@ -63,7 +63,7 @@ func newCLIApp(rawArgs []string) *cli.App {
 			return app.RejectRepeatedFlagArgs(rawArgs, "regions")
 		},
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: "regions", EnvVars: []string{"AWS_SSM_PARAMS_REGIONS"}, Usage: "comma-separated AWS regions; when omitted, AWS CLI resolves it from env/profile config"},
+			&cli.StringFlag{Name: "regions", EnvVars: []string{"AWS_SSM_PARAMS_REGIONS"}, Usage: "comma-separated AWS regions; when omitted, AWS SDK resolves it from env/profile config"},
 			&cli.BoolFlag{Name: "all-regions", EnvVars: []string{"AWS_SSM_PARAMS_ALL_REGIONS"}, Usage: "search parameters across all enabled AWS regions"},
 			&cli.StringFlag{Name: "profile", EnvVars: []string{"AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"}, Usage: "AWS profile"},
 			&cli.BoolFlag{Name: "no-color", EnvVars: []string{"AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR"}, Usage: "disable colored output"},

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -213,9 +214,9 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 }
 
 // NewClient creates the concrete AWS SSM client for the selected profile and primary region.
-// Keeping this in one function makes command handlers independent from the AWSCLI implementation details.
+// Keeping this in one function makes command handlers independent from the AWS SDK implementation details.
 func NewClient(cfg Config) ssm.Client {
-	client := ssm.NewAWSCLI(cfg.Profile, cfg.Region)
+	client := ssm.NewAWSClient(cfg.Profile, cfg.Region)
 	client.WithDecryption = !cfg.WithoutDecryption
 	return client
 }
@@ -246,10 +247,10 @@ func LoadItems(cfg Config) ([]inventory.Item, error) {
 
 // PrepareItems loads optional inventory entries and attaches the correct region information to each item.
 // Without a paths file, the returned inventory is nil and downstream loaders discover parameters from AWS SSM.
-func PrepareItems(cfg *Config) ([]inventory.Item, error) {
+func PrepareItems(ctx context.Context, cfg *Config) ([]inventory.Item, error) {
 	if cfg.AllRegions {
 		ensureAllRegionsSeedRegion(cfg)
-	} else if err := ensureRegions(cfg); err != nil {
+	} else if err := ensureRegions(ctx, cfg); err != nil {
 		return nil, err
 	}
 	items, err := LoadItems(*cfg)
@@ -447,14 +448,14 @@ func setOptions(ctx *cli.Context, cfg Config, overwrite bool) (ssm.PutParameterO
 }
 
 // ensureRegions guarantees that non-all-regions commands have one usable AWS region.
-// It first asks the AWS CLI profile configuration if CLI/env flags did not provide a region, then mirrors the
+// It first asks the AWS SDK profile configuration if CLI/env flags did not provide a region, then mirrors the
 // resolved primary region into cfg.Regions when the user did not pass an explicit list.
-func ensureRegions(cfg *Config) error {
+func ensureRegions(ctx context.Context, cfg *Config) error {
 	if cfg.AllRegions {
 		return nil
 	}
 	if cfg.Region == "" {
-		cfg.Region = ssm.ResolveConfiguredRegion(cfg.Profile)
+		cfg.Region = ssm.ResolveConfiguredRegion(ctx, cfg.Profile)
 	}
 	if cfg.Region == "" {
 		return errors.New("AWS region is required; pass --regions, set AWS_REGION/AWS_DEFAULT_REGION, or configure a default region in the AWS profile")
@@ -466,7 +467,7 @@ func ensureRegions(cfg *Config) error {
 }
 
 // ensureAllRegionsSeedRegion sets a safe seed region for AWS API calls that are needed before per-region scanning.
-// Listing AWS regions itself requires a region-aware AWS CLI invocation, so all-regions mode uses us-east-1 by default.
+// Listing AWS regions itself requires a region-aware AWS SDK call, so all-regions mode uses us-east-1 by default.
 func ensureAllRegionsSeedRegion(cfg *Config) {
 	if cfg.Region == "" {
 		cfg.Region = allRegionsSeedRegion
@@ -553,26 +554,26 @@ func Interactive(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	items, err := PrepareItems(&cfg)
+	items, err := PrepareItems(ctx.Context, &cfg)
 	if err != nil {
 		return err
 	}
 	client := NewClient(cfg)
-	if err := client.CheckAccess(); err != nil {
+	if err := client.CheckAccess(ctx.Context); err != nil {
 		return err
 	}
 	regionLabel := cfg.Region
 	regions := append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
 		regionLabel = "all regions"
-		regions, err = client.ListRegions()
+		regions, err = client.ListRegions(ctx.Context)
 		if err != nil {
 			return fmt.Errorf("list AWS regions: %w", err)
 		}
 	} else if len(regions) > 1 {
 		regionLabel = strings.Join(regions, ", ")
 	}
-	return ui.RunInteractive(client, items, ui.Options{
+	return ui.RunInteractive(ctx.Context, client, items, ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,
 		Profile:                   cfg.Profile,
@@ -618,10 +619,10 @@ func Get(ctx *cli.Context) error {
 	if err := requireNameInScope(args[0], cfg, "get"); err != nil {
 		return err
 	}
-	if err := ensureRegions(&cfg); err != nil {
+	if err := ensureRegions(ctx.Context, &cfg); err != nil {
 		return err
 	}
-	value, err := getParameterField(NewClient(cfg), args[0], flags.field, cfg.Region)
+	value, err := getParameterField(ctx.Context, NewClient(cfg), args[0], flags.field, cfg.Region)
 	if err != nil {
 		return err
 	}
@@ -681,10 +682,10 @@ func parseGetArgFlags(raw []string, initialFile string, initialField string) ([]
 	return args, flags, nil
 }
 
-func getParameterField(client ssm.Client, name, field, region string) (string, error) {
+func getParameterField(ctx context.Context, client ssm.Client, name, field, region string) (string, error) {
 	switch field {
 	case "value", "version", "len", "sha256":
-		param, err := client.Get(name)
+		param, err := client.Get(ctx, name)
 		if err != nil {
 			return "", err
 		}
@@ -700,7 +701,7 @@ func getParameterField(client ssm.Client, name, field, region string) (string, e
 		}
 	}
 
-	metas := client.DescribeMany([]string{name})
+	metas := client.DescribeMany(ctx, []string{name})
 	if meta, ok := metas[name]; ok {
 		switch field {
 		case "name":
@@ -727,7 +728,7 @@ func getParameterField(client ssm.Client, name, field, region string) (string, e
 		}
 	}
 
-	param, err := client.Get(name)
+	param, err := client.Get(ctx, name)
 	if err != nil {
 		return "", err
 	}
@@ -803,11 +804,11 @@ func Set(ctx *cli.Context) error {
 		cfg.Region = commandRegion
 		cfg.Regions = []string{commandRegion}
 	}
-	if err := ensureRegions(&cfg); err != nil {
+	if err := ensureRegions(ctx.Context, &cfg); err != nil {
 		return err
 	}
 	client := NewClient(cfg)
-	existing, existingErr := client.Get(path)
+	existing, existingErr := client.Get(ctx.Context, path)
 	if existingErr != nil && !errors.Is(existingErr, ssm.ErrNotFound) {
 		return existingErr
 	}
@@ -825,7 +826,7 @@ func Set(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	return client.PutParameterWithOptions(path, value, parameterType, opts)
+	return client.PutParameterWithOptions(ctx.Context, path, value, parameterType, opts)
 }
 
 type commonArgFlags struct {
@@ -892,18 +893,18 @@ func resolveImportType(defaultType, existingType, recordType string) (ssm.Parame
 // PrepareImportItems loads path inventory only when the selected import format needs it.
 // Dotenv imports need paths.txt to resolve aliases such as JWT_SECRET back to full SSM names.
 // JSON imports already contain full SSM names as keys, so paths.txt is optional for that format.
-func PrepareImportItems(cfg *Config, format string) ([]inventory.Item, error) {
+func PrepareImportItems(ctx context.Context, cfg *Config, format string) ([]inventory.Item, error) {
 	switch format {
 	case "dotenv":
 		if cfg.NamesFile == "" {
 			return nil, errors.New("--names-file is required for dotenv import")
 		}
-		return PrepareItems(cfg)
+		return PrepareItems(ctx, cfg)
 	case "json":
 		if cfg.NamesFile == "" {
-			return nil, ensureRegions(cfg)
+			return nil, ensureRegions(ctx, cfg)
 		}
-		return PrepareItems(cfg)
+		return PrepareItems(ctx, cfg)
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}
@@ -927,7 +928,7 @@ func Import(ctx *cli.Context) error {
 		return errors.New("multiple --regions values are only supported for interactive and export")
 	}
 	format := ctx.String("format")
-	items, err := PrepareImportItems(&cfg, format)
+	items, err := PrepareImportItems(ctx.Context, &cfg, format)
 	if err != nil {
 		return err
 	}
@@ -962,7 +963,7 @@ func Import(ctx *cli.Context) error {
 		paths = append(paths, record.Path)
 	}
 
-	values, errs := client.GetMany(paths)
+	values, errs := client.GetMany(ctx.Context, paths)
 	var skipped []string
 	writer := uilive.New()
 	writer.Start()
@@ -1003,7 +1004,7 @@ func Import(ctx *cli.Context) error {
 		if fieldAllowed(cfg.Fields, "region") && recordHasField(record, "region") && strings.TrimSpace(record.Region) != "" {
 			writeClient = client.ForRegion(strings.TrimSpace(record.Region))
 		}
-		if err := writeClient.PutParameterWithOptions(record.Path, record.Value, parameterType, opts); err != nil {
+		if err := writeClient.PutParameterWithOptions(ctx.Context, record.Path, record.Value, parameterType, opts); err != nil {
 			return err
 		}
 	}
@@ -1079,7 +1080,7 @@ func Export(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	items, err := PrepareItems(&cfg)
+	items, err := PrepareItems(ctx.Context, &cfg)
 	if err != nil {
 		return err
 	}
@@ -1087,7 +1088,7 @@ func Export(ctx *cli.Context) error {
 	regions := append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
 		var err error
-		regions, err = client.ListRegions()
+		regions, err = client.ListRegions(ctx.Context)
 		if err != nil {
 			return fmt.Errorf("list AWS regions: %w", err)
 		}
@@ -1095,9 +1096,9 @@ func Export(ctx *cli.Context) error {
 
 	var statuses []ui.Status
 	if ctx.String("to-file") == "" {
-		statuses = ui.LoadStatusesForRegions(client, items, includeValuesForFields(cfg.Fields), regions)
+		statuses = ui.LoadStatusesForRegions(ctx.Context, client, items, includeValuesForFields(cfg.Fields), regions)
 	} else {
-		statuses = ui.LoadStatusesWithProgressForRegions(client, items, includeValuesForFields(cfg.Fields), regions)
+		statuses = ui.LoadStatusesWithProgressForRegions(ctx.Context, client, items, includeValuesForFields(cfg.Fields), regions)
 	}
 
 	fields := exportFields(cfg)

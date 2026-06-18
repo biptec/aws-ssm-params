@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -41,18 +42,18 @@ type LoadProgress func(done, total int, region string, chunk []inventory.Item)
 
 // LoadStatusesWithProgress loads statuses and prints progress to the terminal.
 // It is used by non-interactive commands that write to a file and therefore need visible progress feedback.
-func LoadStatusesWithProgress(client ssm.Client, items []inventory.Item, includeValues bool) []Status {
-	return LoadStatusesWithProgressForRegions(client, items, includeValues, nil)
+func LoadStatusesWithProgress(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool) []Status {
+	return LoadStatusesWithProgressForRegions(ctx, client, items, includeValues, nil)
 }
 
 // LoadStatusesWithProgressForRegions is the progress-printing variant with an explicit region list.
 // It wraps the shared batch loader with a uilive writer so repeated progress updates repaint cleanly.
-func LoadStatusesWithProgressForRegions(client ssm.Client, items []inventory.Item, includeValues bool, regions []string) []Status {
+func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string) []Status {
 	writer := uilive.New()
 	writer.Start()
 	defer writer.Stop()
 
-	return LoadStatusesBatchForRegions(client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
+	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
 		if region != "" {
 			fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
 		} else {
@@ -65,34 +66,34 @@ func LoadStatusesWithProgressForRegions(client ssm.Client, items []inventory.Ite
 }
 
 // LoadStatuses loads statuses without progress output using item-level region information.
-func LoadStatuses(client ssm.Client, items []inventory.Item, includeValues bool) []Status {
-	return LoadStatusesForRegions(client, items, includeValues, nil)
+func LoadStatuses(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool) []Status {
+	return LoadStatusesForRegions(ctx, client, items, includeValues, nil)
 }
 
 // LoadStatusesForRegions loads statuses without progress output but with an explicit region scan list.
-func LoadStatusesForRegions(client ssm.Client, items []inventory.Item, includeValues bool, regions []string) []Status {
-	return LoadStatusesBatchForRegions(client, items, includeValues, regions, nil)
+func LoadStatusesForRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string) []Status {
+	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, nil)
 }
 
 // LoadStatusesBatch is the shared status loader entry point for item-level region lookup.
-func LoadStatusesBatch(client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
-	return LoadStatusesBatchForRegions(client, items, includeValues, nil, progress)
+func LoadStatusesBatch(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
+	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, nil, progress)
 }
 
 // LoadStatusesBatchForRegions chooses the correct status-loading strategy.
 // Concrete-region items are loaded directly by their item region; wildcard items are expanded across either an explicit
 // region list or every enabled AWS region discovered from the client.
-func LoadStatusesBatchForRegions(client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
+func LoadStatusesBatchForRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
 	if len(items) == 0 {
-		return loadAllStatusesForRegions(client, includeValues, regions, progress)
+		return loadAllStatusesForRegions(ctx, client, includeValues, regions, progress)
 	}
 	if containsAllRegionItems(items) {
 		if len(regions) > 0 {
-			return loadStatusesRegions(client, items, includeValues, regions, progress)
+			return loadStatusesRegions(ctx, client, items, includeValues, regions, progress)
 		}
-		return loadStatusesAllRegions(client, items, includeValues, progress)
+		return loadStatusesAllRegions(ctx, client, items, includeValues, progress)
 	}
-	return loadStatusesByItemRegion(client, items, includeValues, progress)
+	return loadStatusesByItemRegion(ctx, client, items, includeValues, progress)
 }
 
 // containsAllRegionItems reports whether at least one inventory item needs wildcard region expansion.
@@ -107,7 +108,7 @@ func containsAllRegionItems(items []inventory.Item) bool {
 
 // loadStatusesByItemRegion loads items that already have concrete regions.
 // Items are processed in chunks of ten and grouped by region inside each chunk so SSM batch calls stay region-correct.
-func loadStatusesByItemRegion(client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
+func loadStatusesByItemRegion(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
 	statuses := make([]Status, 0, len(items))
 	metas := map[string]ssm.Metadata{}
 	values := map[string]ssm.Parameter{}
@@ -133,10 +134,10 @@ func loadStatusesByItemRegion(client ssm.Client, items []inventory.Item, include
 				paths = append(paths, item.Path)
 			}
 			regionalClient := client.ForRegion(region)
-			for path, meta := range regionalClient.DescribeMany(paths) {
+			for path, meta := range regionalClient.DescribeMany(ctx, paths) {
 				metas[itemKey(region, path)] = meta
 			}
-			chunkValues, chunkErrs := regionalClient.GetMany(paths)
+			chunkValues, chunkErrs := regionalClient.GetMany(ctx, paths)
 			for path, value := range chunkValues {
 				values[itemKey(region, path)] = value
 			}
@@ -158,7 +159,7 @@ func loadStatusesByItemRegion(client ssm.Client, items []inventory.Item, include
 
 // loadAllStatusesForRegions discovers every SSM parameter in the selected regions.
 // It is used when no paths file was provided, so the TUI can be opened as a full SSM parameter browser/manager.
-func loadAllStatusesForRegions(client ssm.Client, includeValues bool, regions []string, progress LoadProgress) []Status {
+func loadAllStatusesForRegions(ctx context.Context, client ssm.Client, includeValues bool, regions []string, progress LoadProgress) []Status {
 	if len(regions) == 0 {
 		if region := client.DefaultRegion(); region != "" {
 			regions = []string{region}
@@ -168,7 +169,7 @@ func loadAllStatusesForRegions(client ssm.Client, includeValues bool, regions []
 	}
 	statuses := []Status{}
 	for _, region := range regions {
-		statuses = append(statuses, loadAllStatusesRegion(client.ForRegion(region), region, includeValues, progress)...)
+		statuses = append(statuses, loadAllStatusesRegion(ctx, client.ForRegion(region), region, includeValues, progress)...)
 	}
 	sort.Slice(statuses, func(i, j int) bool {
 		if statuses[i].Item.Region != statuses[j].Item.Region {
@@ -179,11 +180,11 @@ func loadAllStatusesForRegions(client ssm.Client, includeValues bool, regions []
 	return statuses
 }
 
-func loadAllStatusesRegion(client ssm.Client, region string, includeValues bool, progress LoadProgress) []Status {
+func loadAllStatusesRegion(ctx context.Context, client ssm.Client, region string, includeValues bool, progress LoadProgress) []Status {
 	if progress != nil {
 		progress(0, 0, region, nil)
 	}
-	metas, err := client.ListParameterMetadata()
+	metas, err := client.ListParameterMetadata(ctx)
 	if err != nil {
 		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
 	}
@@ -218,7 +219,7 @@ func loadAllStatusesRegion(client ssm.Client, region string, includeValues bool,
 			for _, item := range chunkItems {
 				paths = append(paths, item.Path)
 			}
-			chunkValues, chunkErrs := client.GetMany(paths)
+			chunkValues, chunkErrs := client.GetMany(ctx, paths)
 			for path, value := range chunkValues {
 				if value.Region == "" {
 					value.Region = region
@@ -255,8 +256,8 @@ func loadAllStatusesRegion(client ssm.Client, region string, includeValues bool,
 
 // loadStatusesAllRegions discovers enabled AWS regions, then scans wildcard items across all of them.
 // If region discovery fails, every item receives an error status so the UI can show the failure inline.
-func loadStatusesAllRegions(client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
-	regions, err := client.ListRegions()
+func loadStatusesAllRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
+	regions, err := client.ListRegions(ctx)
 	if err != nil {
 		statuses := make([]Status, 0, len(items))
 		for _, item := range items {
@@ -265,13 +266,13 @@ func loadStatusesAllRegions(client ssm.Client, items []inventory.Item, includeVa
 		}
 		return statuses
 	}
-	return loadStatusesRegions(client, items, includeValues, regions, progress)
+	return loadStatusesRegions(ctx, client, items, includeValues, regions, progress)
 }
 
 // loadStatusesRegions scans wildcard items across a fixed region list.
 // It creates one status row per region where a parameter exists or errors, then appends a wildcard missing row
 // for paths that were not found in any scanned region.
-func loadStatusesRegions(client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
+func loadStatusesRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
 	statuses := []Status{}
 	found := map[string]bool{}
 	for _, region := range regions {
@@ -293,10 +294,10 @@ func loadStatusesRegions(client ssm.Client, items []inventory.Item, includeValue
 
 			regionalClient := client.ForRegion(region)
 			metas := map[string]ssm.Metadata{}
-			for path, meta := range regionalClient.DescribeMany(paths) {
+			for path, meta := range regionalClient.DescribeMany(ctx, paths) {
 				metas[itemKey(region, path)] = meta
 			}
-			values, errs := regionalClient.GetMany(paths)
+			values, errs := regionalClient.GetMany(ctx, paths)
 			for path, param := range values {
 				item := byPath[path]
 				item.Region = region

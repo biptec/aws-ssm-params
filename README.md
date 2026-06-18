@@ -37,7 +37,7 @@ AWS SSM Parameter Store is reliable, but daily maintenance becomes slow when you
 - Edit existing parameters or create missing ones without leaving the terminal.
 - Generate random secrets and load/write values from files.
 - Export/import dotenv or JSON for backup, migration, review, and onboarding.
-- Use your existing AWS CLI profiles, SSO sessions, environment credentials, or instance role.
+- Use your existing AWS SDK-compatible profiles, SSO sessions, environment credentials, or instance role.
 
 ## Features
 
@@ -130,9 +130,8 @@ AWS_PROFILE=target aws-ssm-params --regions eu-central-1 --names-file names.txt 
 
 ## Requirements
 
-- Go 1.23+ to build from source.
-- AWS CLI installed and available as `aws` in `PATH`.
-- AWS credentials configured through environment variables, named profiles, SSO, instance role, or any other AWS CLI-supported method.
+- Go 1.24+ to build from source.
+- AWS credentials configured through environment variables, named profiles, SSO, instance role, or any other AWS SDK-supported method. AWS CLI is not required at runtime.
 - IAM permissions for the operations you plan to use.
 
 For read-only browsing and export, you typically need:
@@ -373,7 +372,7 @@ These forms are intentionally rejected:
 aws-ssm-params --regions eu-north-1 --regions eu-central-1 tui
 ```
 
-`--regions` and `--all-regions` cannot be used together. If neither is provided, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS CLI profile configuration.
+`--regions` and `--all-regions` cannot be used together. If neither is provided, the tool falls back to `AWS_REGION`, `AWS_DEFAULT_REGION`, or AWS SDK profile configuration.
 
 ### `--names` and `--names-file`
 
@@ -829,4 +828,4 @@ go build ./cmd/aws-ssm-params
 
 `aws-ssm-params` focuses on one job: making AWS SSM Parameter Store maintenance fast, visible, and repeatable from the terminal.
 
-It is intentionally small, script-friendly, and designed to fit into existing AWS CLI workflows.
+It is intentionally small, script-friendly, and designed to fit into existing AWS workflows.

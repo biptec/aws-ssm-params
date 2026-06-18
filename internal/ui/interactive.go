@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -159,6 +160,7 @@ type editSnapshot struct {
 // and per-screen state such as cursors, text inputs, confirmation prompts, and loading messages.
 type model struct {
 	client   ssm.Client
+	ctx      context.Context
 	opts     Options
 	items    []inventory.Item
 	statuses []Status
@@ -356,8 +358,8 @@ func columnByFieldName(name string) (columnName, bool) {
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
 // The function returns only after the user quits the TUI or Bubble Tea reports an error.
-func RunInteractive(client ssm.Client, items []inventory.Item, opts Options) error {
-	m := newModel(client, items, opts)
+func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) error {
+	m := newModel(ctx, client, items, opts)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err := p.Run()
 	return err
@@ -365,7 +367,10 @@ func RunInteractive(client ssm.Client, items []inventory.Item, opts Options) err
 
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
-func newModel(client ssm.Client, items []inventory.Item, opts Options) model {
+func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) model {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	sortBy, sortDescending := parseInitialSortOption(opts.Sort)
 	input := textinput.New()
 	input.Prompt = ""
@@ -444,15 +449,15 @@ func configureTextInputStyles(input *textinput.Model, opts Options) {
 
 // Init starts the initial background status load and registers a command that waits for loader messages.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(startLoadCmd(m.client, m.items, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh))
+	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh))
 }
 
 // startLoadCmd launches the initial SSM status scan in a goroutine.
 // Progress and final results are sent through loadCh so the Bubble Tea event loop can render loading updates.
-func startLoadCmd(client ssm.Client, items []inventory.Item, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
+func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			statuses := LoadStatusesBatchForRegions(client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
+			statuses := LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
 				ch <- progressMsg{done: done, total: total, region: region, items: append([]inventory.Item(nil), chunk...)}
 			})
 			ch <- loadedMsg(statuses)
@@ -754,7 +759,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.visible()) > 0 {
 			items := []inventory.Item{m.currentItem()}
 			if m.opts.NoConfirmDeleteOne {
-				return m, deleteCmd(m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 			}
 			m.startConfirm("Delete selected parameter?", "", items, screenMain)
 		}
@@ -762,7 +767,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		items := m.visibleItems()
 		if len(items) > 0 {
 			if m.opts.NoConfirmDeleteAll {
-				return m, deleteCmd(m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 			}
 			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "DELETE ALL", items, screenMain)
 		}
@@ -1486,7 +1491,7 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loadingTitle = "Deleting parameters..."
 		m.loadingLines = itemPaths(items)
 		m.screen = screenLoading
-		return m, deleteCmd(m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -1607,7 +1612,7 @@ func (m model) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activePopup = popupNone
 		m.popupStack = nil
 		m.screen = screenLoading
-		return m, deleteCmd(m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	if m.confirmExpected == "" {
 		return m, nil
@@ -2111,7 +2116,7 @@ func (m model) ensureRegionSelectOptions() model {
 	if len(m.editRegionOptions) > 0 || m.client == nil {
 		return m
 	}
-	regions, err := m.client.ListRegions()
+	regions, err := m.client.ListRegions(m.ctx)
 	if err != nil {
 		m.errMessage = err.Error()
 		return m
@@ -2399,25 +2404,25 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	if description == "" {
 		description = strings.TrimSpace(m.editDescriptionInput.Value())
 	}
-	return m, saveValueCmd(m.client, item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	return m, saveValueCmd(m.ctx, m.client, item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
 // Wildcard items must be converted to a concrete region before saving, otherwise the command returns an inline error.
-func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func saveValueCmd(ctx context.Context, client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		if item.Region == "*" {
 			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
 		}
 		regionalClient := client.ForRegion(item.Region)
-		if err := regionalClient.PutParameterWithOptions(item.Path, value, parameterType, opts); err != nil {
+		if err := regionalClient.PutParameterWithOptions(ctx, item.Path, value, parameterType, opts); err != nil {
 			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: err}
 		}
 		appendedToNamesFile := false
 		if pathsFile != "" && allowNamesFileUpdate {
 			appended, err := inventory.AppendPathIfMissing(pathsFile, item.Path)
 			if err != nil {
-				st := LoadStatuses(regionalClient, []inventory.Item{item}, true)[0]
+				st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
 				return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", item.Path, pathsFile, err)}
 			}
 			if appended {
@@ -2426,7 +2431,7 @@ func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string,
 				item.Source = pathsFile
 			}
 		}
-		st := LoadStatuses(regionalClient, []inventory.Item{item}, true)[0]
+		st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
 		message := "Updated " + item.Path
 		if appendedToNamesFile {
 			message += " and added it to " + pathsFile
@@ -2437,7 +2442,7 @@ func saveValueCmd(client ssm.Client, item inventory.Item, oldPath, value string,
 
 // deleteCmd groups selected items by concrete region and deletes them from SSM.
 // Wildcard missing rows are skipped because they do not represent a real parameter in one AWS region.
-func deleteCmd(client ssm.Client, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func deleteCmd(ctx context.Context, client ssm.Client, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		byRegion := map[string][]string{}
 		for _, item := range items {
@@ -2447,7 +2452,7 @@ func deleteCmd(client ssm.Client, items []inventory.Item, pathsFile string, allo
 			byRegion[item.Region] = append(byRegion[item.Region], item.Path)
 		}
 		for region, paths := range byRegion {
-			if err := client.ForRegion(region).DeleteMany(paths); err != nil {
+			if err := client.ForRegion(region).DeleteMany(ctx, paths); err != nil {
 				return deleteDoneMsg{items: items, err: err}
 			}
 		}

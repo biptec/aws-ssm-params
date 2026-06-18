@@ -1,41 +1,76 @@
 package ssm
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 )
 
 // Client is the small SSM capability surface used by commands and the TUI.
-// The interface keeps AWS access mockable in tests and lets status-loading code operate without knowing about aws CLI details.
+// The interface keeps AWS access mockable in tests and lets status-loading code operate without knowing about AWS SDK details.
 type Client interface {
-	CheckAccess() error
-	ListRegions() ([]string, error)
+	CheckAccess(ctx context.Context) error
+	ListRegions(ctx context.Context) ([]string, error)
 	ForRegion(region string) Client
 	DefaultRegion() string
-	Get(path string) (Parameter, error)
-	GetMany(paths []string) (map[string]Parameter, map[string]error)
-	DescribeMany(paths []string) map[string]Metadata
-	ListParameterMetadata() ([]Metadata, error)
-	PutParameter(path, value string, parameterType ParameterType) error
-	PutParameterWithOptions(path, value string, parameterType ParameterType, opts PutParameterOptions) error
-	DeleteMany(paths []string) error
+	Get(ctx context.Context, path string) (Parameter, error)
+	GetMany(ctx context.Context, paths []string) (map[string]Parameter, map[string]error)
+	DescribeMany(ctx context.Context, paths []string) map[string]Metadata
+	ListParameterMetadata(ctx context.Context) ([]Metadata, error)
+	PutParameter(ctx context.Context, path, value string, parameterType ParameterType) error
+	PutParameterWithOptions(ctx context.Context, path, value string, parameterType ParameterType, opts PutParameterOptions) error
+	DeleteMany(ctx context.Context, paths []string) error
 }
 
-// AWSCLI implements Client by shelling out to the local aws command.
-// This avoids a direct AWS SDK dependency and reuses the user's existing AWS CLI profiles, SSO sessions, and config.
-type AWSCLI struct {
+// AWSClient implements Client with AWS SDK for Go v2.
+// It uses the default SDK credential and config chain, including AWS profiles, SSO sessions, environment variables,
+// shared config files, web identity, IMDS, and any other provider supported by the SDK.
+type AWSClient struct {
 	Profile        string
 	Region         string
 	WithDecryption bool
+
+	cfgMu  sync.Mutex
+	cfg    aws.Config
+	cfgErr error
+	loaded bool
+
+	clientMu  sync.Mutex
+	ssmClient ssmAPI
+	ec2Client ec2API
+	stsClient stsAPI
 }
 
-// Parameter is the normalized subset of AWS SSM get-parameters output needed by the app.
+type ssmAPI interface {
+	GetParameters(context.Context, *awsssm.GetParametersInput, ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error)
+	DescribeParameters(context.Context, *awsssm.DescribeParametersInput, ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error)
+	PutParameter(context.Context, *awsssm.PutParameterInput, ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error)
+	DeleteParameters(context.Context, *awsssm.DeleteParametersInput, ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error)
+}
+
+type ec2API interface {
+	DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
+}
+
+type stsAPI interface {
+	GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
+}
+
+// Parameter is the normalized subset of AWS SSM GetParameters output needed by the app.
 type Parameter struct {
 	Name     string
 	Region   string
@@ -45,7 +80,7 @@ type Parameter struct {
 	Modified string
 }
 
-// Metadata is the normalized subset of AWS SSM describe-parameters output shown in the UI/export status.
+// Metadata is the normalized subset of AWS SSM DescribeParameters output shown in the UI/export status.
 type Metadata struct {
 	Name        string
 	Region      string
@@ -58,7 +93,7 @@ type Metadata struct {
 	Modified    string
 }
 
-// PutParameterOptions contains optional AWS SSM put-parameter fields.
+// PutParameterOptions contains optional AWS SSM PutParameter fields.
 type PutParameterOptions struct {
 	Description string
 	Tier        ParameterTier
@@ -67,7 +102,7 @@ type PutParameterOptions struct {
 	Overwrite   bool
 }
 
-// ParameterDataType is an AWS SSM data type accepted by put-parameter.
+// ParameterDataType is an AWS SSM data type accepted by PutParameter.
 type ParameterDataType string
 
 const (
@@ -109,7 +144,7 @@ func (t ParameterDataType) IsValid() bool {
 	}
 }
 
-// ParameterTier is an AWS SSM parameter tier accepted by put-parameter.
+// ParameterTier is an AWS SSM parameter tier accepted by PutParameter.
 type ParameterTier string
 
 const (
@@ -151,7 +186,7 @@ func (t ParameterTier) IsValid() bool {
 	}
 }
 
-// ParameterType is an AWS SSM parameter type accepted by put-parameter.
+// ParameterType is an AWS SSM parameter type accepted by PutParameter.
 type ParameterType string
 
 const (
@@ -196,81 +231,66 @@ func (t ParameterType) IsValid() bool {
 
 var ErrNotFound = errors.New("parameter not found")
 
-// NewAWSCLI constructs an AWS CLI backed client for one profile/region pair.
-func NewAWSCLI(profile, region string) *AWSCLI {
-	return &AWSCLI{Profile: profile, Region: region, WithDecryption: true}
+// NewAWSClient constructs an AWS SDK backed client for one profile/region pair.
+func NewAWSClient(profile, region string) *AWSClient {
+	return &AWSClient{Profile: profile, Region: region, WithDecryption: true}
 }
 
-// ResolveConfiguredRegion asks the AWS CLI which default region is configured for a profile.
+// ResolveConfiguredRegion asks the AWS SDK config chain which default region is configured for a profile.
 // Errors are swallowed because callers use this only as a fallback before reporting a clearer region error.
-func ResolveConfiguredRegion(profile string) string {
-	args := []string{"configure", "get", "region"}
-	if profile != "" {
-		args = append(args, "--profile", profile)
-	}
-	out, err := runAWS(args...)
+func ResolveConfiguredRegion(ctx context.Context, profile string) string {
+	cfg, err := loadSDKConfig(ctx, profile, "")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(cfg.Region)
 }
 
-// CheckAccess validates credentials/profile by calling sts get-caller-identity.
+// CheckAccess validates credentials/profile by calling STS GetCallerIdentity.
 // It fails early before the UI starts so users do not wait through partial scans with broken credentials.
-func (c *AWSCLI) CheckAccess() error {
-	args := c.args("sts", "get-caller-identity")
-	args = append(args, "--output", "json")
-	if _, err := runAWS(args...); err != nil {
-		return fmt.Errorf("cannot access AWS with current credentials/profile: %w", err)
+func (c *AWSClient) CheckAccess(ctx context.Context) error {
+	if _, err := c.sts(ctx).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
+		return fmt.Errorf("cannot access AWS with current credentials/profile: %w", normalizeAWSError(err))
 	}
 	return nil
 }
 
 // ListRegions returns AWS regions that are available for scanning.
 // Regions with OptInStatus=not-opted-in are excluded because SSM calls there would fail for the account.
-func (c *AWSCLI) ListRegions() ([]string, error) {
-	args := c.args("ec2", "describe-regions")
-	args = append(args, "--all-regions", "--output", "json")
-	out, err := runAWS(args...)
+func (c *AWSClient) ListRegions(ctx context.Context) ([]string, error) {
+	out, err := c.ec2(ctx).DescribeRegions(ctx, &ec2.DescribeRegionsInput{AllRegions: aws.Bool(true)})
 	if err != nil {
-		return nil, err
+		return nil, normalizeAWSError(err)
 	}
-	var response struct {
-		Regions []struct {
-			RegionName  string `json:"RegionName"`
-			OptInStatus string `json:"OptInStatus"`
-		} `json:"Regions"`
-	}
-	if err := json.Unmarshal(out, &response); err != nil {
-		return nil, err
-	}
-	var regions []string
-	for _, region := range response.Regions {
-		if region.RegionName == "" || region.OptInStatus == "not-opted-in" {
+	regions := make([]string, 0, len(out.Regions))
+	for _, region := range out.Regions {
+		name := aws.ToString(region.RegionName)
+		if name == "" || aws.ToString(region.OptInStatus) == "not-opted-in" {
 			continue
 		}
-		regions = append(regions, region.RegionName)
+		regions = append(regions, name)
 	}
+	sort.Strings(regions)
 	return regions, nil
 }
 
 // ForRegion returns a client targeting another region while preserving the selected AWS profile.
 // When the requested region is empty or already current, it reuses the receiver to avoid unnecessary allocations.
-func (c *AWSCLI) ForRegion(region string) Client {
+func (c *AWSClient) ForRegion(region string) Client {
 	if region == "" || region == c.Region {
 		return c
 	}
-	return &AWSCLI{Profile: c.Profile, Region: region, WithDecryption: c.WithDecryption}
+	return &AWSClient{Profile: c.Profile, Region: region, WithDecryption: c.WithDecryption}
 }
 
 // DefaultRegion returns the region associated with this client.
-func (c *AWSCLI) DefaultRegion() string {
+func (c *AWSClient) DefaultRegion() string {
 	return c.Region
 }
 
 // Get loads exactly one parameter by delegating to GetMany and normalizing missing values to ErrNotFound.
-func (c *AWSCLI) Get(path string) (Parameter, error) {
-	values, errs := c.GetMany([]string{path})
+func (c *AWSClient) Get(ctx context.Context, path string) (Parameter, error) {
+	values, errs := c.GetMany(ctx, []string{path})
 	if value, ok := values[path]; ok {
 		return value, nil
 	}
@@ -283,7 +303,7 @@ func (c *AWSCLI) Get(path string) (Parameter, error) {
 // GetMany loads parameters in AWS SSM batches of up to ten names.
 // It initializes every requested path as ErrNotFound, clears successful entries, and preserves per-path errors so
 // callers can distinguish missing parameters from AWS/API failures.
-func (c *AWSCLI) GetMany(paths []string) (map[string]Parameter, map[string]error) {
+func (c *AWSClient) GetMany(ctx context.Context, paths []string) (map[string]Parameter, map[string]error) {
 	values := map[string]Parameter{}
 	errs := map[string]error{}
 	for _, path := range paths {
@@ -296,50 +316,34 @@ func (c *AWSCLI) GetMany(paths []string) (map[string]Parameter, map[string]error
 		if len(chunk) == 0 {
 			continue
 		}
-		args := c.args("ssm", "get-parameters")
-		args = append(args, "--names")
-		args = append(args, chunk...)
-		if c.WithDecryption {
-			args = append(args, "--with-decryption")
-		}
-		args = append(args, "--output", "json")
-		out, err := runAWS(args...)
+		out, err := c.ssm(ctx).GetParameters(ctx, &awsssm.GetParametersInput{
+			Names:          chunk,
+			WithDecryption: aws.Bool(c.WithDecryption),
+		})
 		if err != nil {
+			normalized := normalizeAWSError(err)
 			for _, path := range chunk {
-				errs[path] = err
+				errs[path] = normalized
 			}
 			continue
 		}
 
-		var response struct {
-			Parameters []struct {
-				Name             string `json:"Name"`
-				Type             string `json:"Type"`
-				Value            string `json:"Value"`
-				Version          int64  `json:"Version"`
-				LastModifiedDate any    `json:"LastModifiedDate"`
-			} `json:"Parameters"`
-			InvalidParameters []string `json:"InvalidParameters"`
-		}
-		if err := json.Unmarshal(out, &response); err != nil {
-			for _, path := range chunk {
-				errs[path] = err
+		for _, param := range out.Parameters {
+			name := aws.ToString(param.Name)
+			if name == "" {
+				continue
 			}
-			continue
-		}
-
-		for _, param := range response.Parameters {
-			values[param.Name] = Parameter{
-				Name:     param.Name,
+			values[name] = Parameter{
+				Name:     name,
 				Region:   c.Region,
-				Type:     param.Type,
-				Value:    param.Value,
+				Type:     string(param.Type),
+				Value:    aws.ToString(param.Value),
 				Version:  param.Version,
-				Modified: formatModifiedDate(param.LastModifiedDate),
+				Modified: formatModifiedTime(param.LastModifiedDate),
 			}
-			delete(errs, param.Name)
+			delete(errs, name)
 		}
-		for _, path := range response.InvalidParameters {
+		for _, path := range out.InvalidParameters {
 			errs[path] = ErrNotFound
 		}
 	}
@@ -349,101 +353,55 @@ func (c *AWSCLI) GetMany(paths []string) (map[string]Parameter, map[string]error
 
 // ListParameterMetadata returns metadata for every parameter visible in the client's region.
 // Values are intentionally not included; callers can batch GetMany for the returned names when needed.
-func (c *AWSCLI) ListParameterMetadata() ([]Metadata, error) {
+func (c *AWSClient) ListParameterMetadata(ctx context.Context) ([]Metadata, error) {
 	var result []Metadata
-	nextToken := ""
+	var nextToken *string
 	for {
-		args := c.args("ssm", "describe-parameters")
-		args = append(args, "--max-results", "50", "--output", "json")
-		if nextToken != "" {
-			args = append(args, "--next-token", nextToken)
-		}
-		out, err := runAWS(args...)
+		out, err := c.ssm(ctx).DescribeParameters(ctx, &awsssm.DescribeParametersInput{
+			MaxResults: aws.Int32(50),
+			NextToken:  nextToken,
+		})
 		if err != nil {
-			return nil, err
+			return nil, normalizeAWSError(err)
 		}
-		var response struct {
-			Parameters []struct {
-				Name             string `json:"Name"`
-				Type             string `json:"Type"`
-				Tier             string `json:"Tier"`
-				DataType         string `json:"DataType"`
-				Policies         any    `json:"Policies"`
-				Description      string `json:"Description"`
-				LastModifiedUser string `json:"LastModifiedUser"`
-				LastModifiedDate any    `json:"LastModifiedDate"`
-			} `json:"Parameters"`
-			NextToken string `json:"NextToken"`
-		}
-		if err := json.Unmarshal(out, &response); err != nil {
-			return nil, err
-		}
-		for _, param := range response.Parameters {
-			if param.Name == "" {
+		for _, param := range out.Parameters {
+			if aws.ToString(param.Name) == "" {
 				continue
 			}
-			result = append(result, Metadata{
-				Name:        param.Name,
-				Region:      c.Region,
-				Type:        param.Type,
-				Tier:        param.Tier,
-				DataType:    param.DataType,
-				Policies:    formatPolicies(param.Policies),
-				Description: param.Description,
-				User:        param.LastModifiedUser,
-				Modified:    formatModifiedDate(param.LastModifiedDate),
-			})
+			result = append(result, metadataFromSDK(c.Region, param))
 		}
-		if response.NextToken == "" {
+		if aws.ToString(out.NextToken) == "" {
 			break
 		}
-		nextToken = response.NextToken
+		nextToken = out.NextToken
 	}
 	return result, nil
 }
 
 // DescribeMany loads non-secret metadata for parameter paths in batches.
 // Describe failures are ignored per batch because metadata is supplementary; GetMany still provides the authoritative value status.
-func (c *AWSCLI) DescribeMany(paths []string) map[string]Metadata {
+func (c *AWSClient) DescribeMany(ctx context.Context, paths []string) map[string]Metadata {
 	result := map[string]Metadata{}
 	for _, chunk := range chunkStrings(paths, 10) {
 		if len(chunk) == 0 {
 			continue
 		}
-		args := c.args("ssm", "describe-parameters")
-		args = append(args, "--parameter-filters", fmt.Sprintf("Key=Name,Option=Equals,Values=%s", strings.Join(chunk, ",")), "--output", "json")
-		out, err := runAWS(args...)
+		out, err := c.ssm(ctx).DescribeParameters(ctx, &awsssm.DescribeParametersInput{
+			ParameterFilters: []ssmtypes.ParameterStringFilter{{
+				Key:    aws.String("Name"),
+				Option: aws.String("Equals"),
+				Values: chunk,
+			}},
+		})
 		if err != nil {
 			continue
 		}
-
-		var response struct {
-			Parameters []struct {
-				Name             string `json:"Name"`
-				Type             string `json:"Type"`
-				Tier             string `json:"Tier"`
-				DataType         string `json:"DataType"`
-				Policies         any    `json:"Policies"`
-				Description      string `json:"Description"`
-				LastModifiedUser string `json:"LastModifiedUser"`
-				LastModifiedDate any    `json:"LastModifiedDate"`
-			} `json:"Parameters"`
-		}
-		if err := json.Unmarshal(out, &response); err != nil {
-			continue
-		}
-		for _, param := range response.Parameters {
-			result[param.Name] = Metadata{
-				Name:        param.Name,
-				Region:      c.Region,
-				Type:        param.Type,
-				Tier:        param.Tier,
-				DataType:    param.DataType,
-				Policies:    formatPolicies(param.Policies),
-				Description: param.Description,
-				User:        param.LastModifiedUser,
-				Modified:    formatModifiedDate(param.LastModifiedDate),
+		for _, param := range out.Parameters {
+			name := aws.ToString(param.Name)
+			if name == "" {
+				continue
 			}
+			result[name] = metadataFromSDK(c.Region, param)
 		}
 	}
 	return result
@@ -451,11 +409,11 @@ func (c *AWSCLI) DescribeMany(paths []string) map[string]Metadata {
 
 // PutParameter creates or overwrites one SSM parameter using the requested AWS parameter type.
 // SecureString values are encrypted by AWS SSM/KMS, while String and StringList are stored as plaintext parameters.
-func (c *AWSCLI) PutParameter(path, value string, parameterType ParameterType) error {
-	return c.PutParameterWithOptions(path, value, parameterType, PutParameterOptions{Overwrite: true})
+func (c *AWSClient) PutParameter(ctx context.Context, path, value string, parameterType ParameterType) error {
+	return c.PutParameterWithOptions(ctx, path, value, parameterType, PutParameterOptions{Overwrite: true})
 }
 
-func (c *AWSCLI) PutParameterWithOptions(path, value string, parameterType ParameterType, opts PutParameterOptions) error {
+func (c *AWSClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ParameterType, opts PutParameterOptions) error {
 	if !parameterType.IsValid() {
 		return fmt.Errorf("unsupported parameter type %q; use string, string-list, or secure-string", parameterType)
 	}
@@ -467,79 +425,165 @@ func (c *AWSCLI) PutParameterWithOptions(path, value string, parameterType Param
 	if !dataType.IsValid() {
 		dataType = DefaultParameterDataType
 	}
-	args := c.args("ssm", "put-parameter")
-	args = append(args,
-		"--name", path,
-		"--type", parameterType.String(),
-		"--tier", tier.String(),
-		"--data-type", dataType.String(),
-		"--value", value,
-	)
-	if opts.Overwrite {
-		args = append(args, "--overwrite")
+	input := &awsssm.PutParameterInput{
+		Name:      aws.String(path),
+		Type:      ssmtypes.ParameterType(parameterType.String()),
+		Tier:      ssmtypes.ParameterTier(tier.String()),
+		DataType:  aws.String(dataType.String()),
+		Value:     aws.String(value),
+		Overwrite: aws.Bool(opts.Overwrite),
 	}
 	if strings.TrimSpace(opts.Description) != "" {
-		args = append(args, "--description", opts.Description)
+		input.Description = aws.String(opts.Description)
 	}
 	if strings.TrimSpace(opts.Policies) != "" {
-		args = append(args, "--policies", opts.Policies)
+		input.Policies = aws.String(opts.Policies)
 	}
-	args = append(args, "--output", "json")
-	_, err := runAWS(args...)
-	return err
+	_, err := c.ssm(ctx).PutParameter(ctx, input)
+	return normalizeAWSError(err)
 }
 
-// DeleteMany deletes paths in AWS SSM batches and stops at the first AWS CLI error.
-func (c *AWSCLI) DeleteMany(paths []string) error {
+// DeleteMany deletes paths in AWS SSM batches and stops at the first AWS SDK error.
+func (c *AWSClient) DeleteMany(ctx context.Context, paths []string) error {
 	for _, chunk := range chunkStrings(paths, 10) {
 		if len(chunk) == 0 {
 			continue
 		}
-		args := c.args("ssm", "delete-parameters")
-		args = append(args, "--names")
-		args = append(args, chunk...)
-		args = append(args, "--output", "json")
-		if _, err := runAWS(args...); err != nil {
-			return err
+		if _, err := c.ssm(ctx).DeleteParameters(ctx, &awsssm.DeleteParametersInput{Names: chunk}); err != nil {
+			return normalizeAWSError(err)
 		}
 	}
 	return nil
 }
 
-// args builds the common aws CLI argument prefix for a service operation, profile, and region.
-func (c *AWSCLI) args(service, operation string) []string {
-	args := []string{service, operation}
-	if c.Profile != "" {
-		args = append(args, "--profile", c.Profile)
+func (c *AWSClient) ssm(ctx context.Context) ssmAPI {
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	if c.ssmClient != nil {
+		return c.ssmClient
 	}
-	if c.Region != "" {
-		args = append(args, "--region", c.Region)
-	}
-	return args
-}
-
-// runAWS executes the aws CLI and returns stdout or a cleaned stderr error.
-// AWS ParameterNotFound errors are normalized to ErrNotFound so higher layers can handle missing secrets consistently.
-func runAWS(args ...string) ([]byte, error) {
-	cmd := exec.Command("aws", args...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	cfg, err := c.sdkConfig(ctx)
 	if err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		if strings.Contains(message, "ParameterNotFound") {
-			return nil, ErrNotFound
-		}
-		return nil, errors.New(message)
+		return errorSSM{err: err}
 	}
-	return out, nil
+	c.ssmClient = awsssm.NewFromConfig(cfg)
+	return c.ssmClient
 }
 
-// formatModifiedDate normalizes AWS JSON date shapes into a readable RFC1123 string.
-// AWS CLI output can contain numeric Unix timestamps or RFC3339 strings depending on the command/version.
+func (c *AWSClient) ec2(ctx context.Context) ec2API {
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	if c.ec2Client != nil {
+		return c.ec2Client
+	}
+	cfg, err := c.sdkConfig(ctx)
+	if err != nil {
+		return errorEC2{err: err}
+	}
+	c.ec2Client = ec2.NewFromConfig(cfg)
+	return c.ec2Client
+}
+
+func (c *AWSClient) sts(ctx context.Context) stsAPI {
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	if c.stsClient != nil {
+		return c.stsClient
+	}
+	cfg, err := c.sdkConfig(ctx)
+	if err != nil {
+		return errorSTS{err: err}
+	}
+	c.stsClient = sts.NewFromConfig(cfg)
+	return c.stsClient
+}
+
+func (c *AWSClient) sdkConfig(ctx context.Context) (aws.Config, error) {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	if c.loaded {
+		return c.cfg, c.cfgErr
+	}
+	c.cfg, c.cfgErr = loadSDKConfig(ctx, c.Profile, c.Region)
+	c.loaded = true
+	return c.cfg, c.cfgErr
+}
+
+func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, error) {
+	opts := []func(*config.LoadOptions) error{}
+	if profile != "" {
+		opts = append(opts, config.WithSharedConfigProfile(profile))
+	}
+	if region != "" {
+		opts = append(opts, config.WithRegion(region))
+	}
+	return config.LoadDefaultConfig(ctx, opts...)
+}
+
+func metadataFromSDK(region string, param ssmtypes.ParameterMetadata) Metadata {
+	return Metadata{
+		Name:        aws.ToString(param.Name),
+		Region:      region,
+		Type:        string(param.Type),
+		Tier:        string(param.Tier),
+		DataType:    aws.ToString(param.DataType),
+		Policies:    formatPolicies(param.Policies),
+		Description: aws.ToString(param.Description),
+		User:        aws.ToString(param.LastModifiedUser),
+		Modified:    formatModifiedTime(param.LastModifiedDate),
+	}
+}
+
+func normalizeAWSError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "ParameterNotFound", "ParameterVersionNotFound", "ParameterPatternMismatchException":
+			return ErrNotFound
+		}
+	}
+	return err
+}
+
+type errorSSM struct{ err error }
+
+func (e errorSSM) GetParameters(context.Context, *awsssm.GetParametersInput, ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
+	return nil, e.err
+}
+func (e errorSSM) DescribeParameters(context.Context, *awsssm.DescribeParametersInput, ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
+	return nil, e.err
+}
+func (e errorSSM) PutParameter(context.Context, *awsssm.PutParameterInput, ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
+	return nil, e.err
+}
+func (e errorSSM) DeleteParameters(context.Context, *awsssm.DeleteParametersInput, ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
+	return nil, e.err
+}
+
+type errorEC2 struct{ err error }
+
+func (e errorEC2) DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
+	return nil, e.err
+}
+
+type errorSTS struct{ err error }
+
+func (e errorSTS) GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+	return nil, e.err
+}
+
+func formatModifiedTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC1123)
+}
+
+// formatModifiedDate normalizes legacy JSON date shapes into a readable RFC1123 string.
+// It is kept for tests and import/export compatibility around previously parsed records.
 func formatModifiedDate(value any) string {
 	switch v := value.(type) {
 	case nil:
@@ -571,17 +615,20 @@ func formatPolicies(value any) string {
 		return ""
 	case string:
 		return strings.TrimSpace(v)
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Sprint(v)
-		}
-		trimmed := strings.TrimSpace(string(encoded))
-		if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {
+	case []ssmtypes.ParameterInlinePolicy:
+		if len(v) == 0 {
 			return ""
 		}
-		return trimmed
 	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprint(value)
+	}
+	trimmed := strings.TrimSpace(string(encoded))
+	if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {
+		return ""
+	}
+	return trimmed
 }
 
 // chunkStrings splits a slice into non-empty chunks.

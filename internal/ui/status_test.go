@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -21,9 +22,9 @@ type fakeSSMClient struct {
 	errs           map[string]error
 }
 
-func (f fakeSSMClient) CheckAccess() error { return nil }
+func (f fakeSSMClient) CheckAccess(context.Context) error { return nil }
 
-func (f fakeSSMClient) ListRegions() ([]string, error) {
+func (f fakeSSMClient) ListRegions(context.Context) ([]string, error) {
 	if f.listRegionsErr != nil {
 		return nil, f.listRegionsErr
 	}
@@ -37,8 +38,8 @@ func (f fakeSSMClient) ForRegion(region string) ssm.Client {
 
 func (f fakeSSMClient) DefaultRegion() string { return f.region }
 
-func (f fakeSSMClient) Get(path string) (ssm.Parameter, error) {
-	values, errs := f.GetMany([]string{path})
+func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, error) {
+	values, errs := f.GetMany(ctx, []string{path})
 	if value, ok := values[path]; ok {
 		return value, nil
 	}
@@ -48,7 +49,7 @@ func (f fakeSSMClient) Get(path string) (ssm.Parameter, error) {
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
 
-func (f fakeSSMClient) GetMany(paths []string) (map[string]ssm.Parameter, map[string]error) {
+func (f fakeSSMClient) GetMany(ctx context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
 	values := map[string]ssm.Parameter{}
 	errs := map[string]error{}
 	for _, path := range paths {
@@ -69,7 +70,7 @@ func (f fakeSSMClient) GetMany(paths []string) (map[string]ssm.Parameter, map[st
 	return values, errs
 }
 
-func (f fakeSSMClient) DescribeMany(paths []string) map[string]ssm.Metadata {
+func (f fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[string]ssm.Metadata {
 	result := map[string]ssm.Metadata{}
 	for _, path := range paths {
 		key := itemKey(f.region, path)
@@ -83,7 +84,7 @@ func (f fakeSSMClient) DescribeMany(paths []string) map[string]ssm.Metadata {
 	return result
 }
 
-func (f fakeSSMClient) ListParameterMetadata() ([]ssm.Metadata, error) {
+func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
 	var result []ssm.Metadata
 	for key, meta := range f.metas {
 		region, _ := splitItemKey(key)
@@ -107,11 +108,11 @@ func splitItemKey(key string) (string, string) {
 	return "", key
 }
 
-func (f fakeSSMClient) PutParameter(path, value string, parameterType ssm.ParameterType) error {
-	return f.PutParameterWithOptions(path, value, parameterType, ssm.PutParameterOptions{Overwrite: true})
+func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, parameterType ssm.ParameterType) error {
+	return f.PutParameterWithOptions(ctx, path, value, parameterType, ssm.PutParameterOptions{Overwrite: true})
 }
 
-func (f fakeSSMClient) PutParameterWithOptions(path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+func (f fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
 	if f.putOpts != nil {
 		f.putOpts[itemKey(f.region, path)] = opts
 	}
@@ -139,7 +140,7 @@ func (f fakeSSMClient) PutParameterWithOptions(path, value string, parameterType
 	}
 	return nil
 }
-func (f fakeSSMClient) DeleteMany(paths []string) error { return nil }
+func (f fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error { return nil }
 
 func TestLoadStatusesByItemRegionCombinesValuesMetadataAndMissing(t *testing.T) {
 	client := fakeSSMClient{
@@ -155,7 +156,7 @@ func TestLoadStatusesByItemRegionCombinesValuesMetadataAndMissing(t *testing.T) 
 		{Path: "/app/api/missing", Region: "eu-north-1"},
 	}
 
-	statuses := LoadStatusesForRegions(client, items, true, nil)
+	statuses := LoadStatusesForRegions(context.Background(), client, items, true, nil)
 
 	require.Len(t, statuses, 2)
 	assert.True(t, statuses[0].Exists)
@@ -174,7 +175,7 @@ func TestLoadStatusesRegionsExpandsWildcardItemsAcrossRegions(t *testing.T) {
 	}
 	items := []inventory.Item{{Path: "/app/api/password", Region: "*"}, {Path: "/app/api/missing", Region: "*"}}
 
-	statuses := LoadStatusesForRegions(client, items, false, []string{"eu-north-1", "us-east-1"})
+	statuses := LoadStatusesForRegions(context.Background(), client, items, false, []string{"eu-north-1", "us-east-1"})
 
 	require.Len(t, statuses, 2)
 	assert.True(t, statuses[0].Exists)
@@ -188,7 +189,7 @@ func TestLoadStatusesAllRegionsReturnsInlineErrorsWhenRegionDiscoveryFails(t *te
 	client := fakeSSMClient{listRegionsErr: errors.New("regions unavailable")}
 	items := []inventory.Item{{Path: "/app/api/password", Region: "*"}}
 
-	statuses := LoadStatusesForRegions(client, items, true, nil)
+	statuses := LoadStatusesForRegions(context.Background(), client, items, true, nil)
 
 	require.Len(t, statuses, 1)
 	assert.False(t, statuses[0].Exists)
@@ -226,7 +227,7 @@ func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing
 		},
 	}
 
-	statuses := LoadStatusesForRegions(client, nil, true, []string{"eu-north-1", "us-east-1"})
+	statuses := LoadStatusesForRegions(context.Background(), client, nil, true, []string{"eu-north-1", "us-east-1"})
 
 	require.Len(t, statuses, 2)
 	assert.Equal(t, "eu-north-1", statuses[0].Item.Region)
@@ -245,7 +246,7 @@ func TestLoadStatusesWithoutItemsKeepsMetadataWhenValuesAreNotIncluded(t *testin
 		},
 	}
 
-	statuses := LoadStatusesForRegions(client, nil, false, nil)
+	statuses := LoadStatusesForRegions(context.Background(), client, nil, false, nil)
 
 	require.Len(t, statuses, 1)
 	assert.True(t, statuses[0].Exists)
