@@ -22,6 +22,7 @@ GOLANGCI_LINT ?= golangci-lint
 GOIMPORTS ?= goimports
 GOFUMPT ?= gofumpt
 GOVULNCHECK ?= govulncheck
+GOVULNDB ?=
 
 COVERAGE_FILE ?= coverage.out
 COVERAGE_HTML ?= coverage.html
@@ -291,13 +292,28 @@ coverage-html: coverage
 
 .PHONY: lint
 lint: require-golangci-lint
+	@echo "Checking for forbidden linter suppression directives..."
+	@matches="$$( \
+		$(GO_FILE_FIND) -exec grep -HnEi -- \
+			'(//|/\*)[[:space:]]*(nolint([[:space:]:]|$$)|#nosec([[:space:]]|$$)|gosec:disable([[:space:]]|$$)|revive:disable(-line|-next-line)?([[:space:]:]|$$)|lint:(ignore|file-ignore)([[:space:]]|$$)|exhaustive:ignore(-default-case-required)?([[:space:]]|$$))' \
+			{} + || true \
+	)"; \
+	if [[ -n "$$matches" ]]; then \
+		echo "$$matches"; \
+		echo "Linter suppression directives are forbidden."; \
+		exit 1; \
+	fi
 	@echo "Running golangci-lint..."
 	@$(GOLANGCI_LINT) run $(PKGS)
 
 .PHONY: vuln
 vuln: require-govulncheck
 	@echo "Running govulncheck..."
-	@$(GOVULNCHECK) $(PKGS)
+	@if [[ -n "$(GOVULNDB)" ]]; then \
+		$(GOVULNCHECK) -db "$(GOVULNDB)" $(PKGS); \
+	else \
+		$(GOVULNCHECK) $(PKGS); \
+	fi
 
 .PHONY: check
 check: tools fmt-check mod-check vet build test lint vuln

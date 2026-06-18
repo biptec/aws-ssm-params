@@ -13,6 +13,7 @@ linters:
     - errcheck
     - errorlint
     - exhaustive
+    - forbidigo
     - gocritic
     - gosec
     - govet
@@ -22,6 +23,7 @@ linters:
     - nilerr
     - nilnil
     - noctx
+    - nolintlint
     - prealloc
     - revive
     - rowserrcheck
@@ -32,8 +34,28 @@ linters:
     - wastedassign
     - whitespace
     - wrapcheck
+    - godox
   settings:
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+      allow-unused: false
+      allow-no-explanation: []
+
+    godox:
+      keywords:
+        - nolint
+        - '#nosec'
+        - gosec:disable
+        - revive:disable
+        - lint:ignore
+        - lint:file-ignore
+        - exhaustive:ignore
+        - permit
+
     gosec:
+      global:
+        nosec: true
       excludes:
         - G304 # This CLI intentionally reads user-provided inventory/import/export paths.
     govet:
@@ -54,8 +76,24 @@ linters:
       disabled-checks:
         - hugeParam
 
-    revive:
-      severity: warning
+    importas:
+      no-unaliased: true
+      no-extra-aliases: true
+      alias:
+        - pkg: github.com/cockroachdb/errors
+          alias: crerr
+
+    wrapcheck:
+      extra-ignore-sigs:
+        - crerr.Newf(
+        - crerr.New(
+        - crerr.Errorf(
+        - crerr.NewWithDepthf(
+        - crerr.WithMessagef(
+        - crerr.Wrapf(
+        - crerr.WrapWithDepth(
+        - crerr.Join(
+        - crerr.JoinWithDepth(
 
 issues:
   max-issues-per-linter: 0
