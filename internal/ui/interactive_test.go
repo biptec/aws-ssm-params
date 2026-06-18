@@ -31,6 +31,16 @@ func TestUpdateLoadingIgnoresUnrelatedKeys(t *testing.T) {
 	assert.Nil(t, cmd)
 }
 
+func TestNewModelStoresContextForAsyncLoad(t *testing.T) {
+	type contextKey struct{}
+	ctx := context.WithValue(context.Background(), contextKey{}, "value")
+
+	m := newModel(ctx, nil, nil, Options{})
+
+	require.NotNil(t, m.ctx)
+	assert.Equal(t, "value", m.ctx.Value(contextKey{}))
+}
+
 func TestStartMultilinePreservesExistingParameterType(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{})
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/log-level", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "debug"}}
@@ -247,7 +257,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
-	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0o600))
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetValue("old")
@@ -329,7 +339,7 @@ func TestFileActionPopupReportsMissingFilePathForReadAndWrite(t *testing.T) {
 func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
-	require.NoError(t, os.WriteFile(path, []byte("old"), 0600))
+	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
 	m.editField = editFieldValue
@@ -655,6 +665,7 @@ func hotkeyOffsetFromBottom(view, hotkey string) int {
 	}
 	return -1
 }
+
 func TestOptionNavigationWrapsAround(t *testing.T) {
 	assert.Equal(t, 0, nextCursor(2, 3))
 	assert.Equal(t, 2, previousCursor(0, 3))

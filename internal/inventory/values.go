@@ -97,7 +97,8 @@ func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 				domains = []string{component.BackupDomain}
 			}
 			for _, domain := range domains {
-				items = append(items,
+				items = append(
+					items,
 					Item{Path: joinSSM(prefix, env, "tls", domain, "tls.crt"), Kind: "tls.crt", Source: filepath.ToSlash(path), App: values.AppName, Component: componentName, SecretName: component.TLSSecretName},
 					Item{Path: joinSSM(prefix, env, "tls", domain, "tls.key"), Kind: "tls.key", Source: filepath.ToSlash(path), App: values.AppName, Component: componentName, SecretName: component.TLSSecretName},
 				)

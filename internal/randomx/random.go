@@ -1,3 +1,4 @@
+// Package randomx generates secret-safe random values for parameter editing.
 package randomx
 
 import (

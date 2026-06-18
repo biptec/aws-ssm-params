@@ -55,12 +55,12 @@ func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, 
 
 	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
 		if region != "" {
-			fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
+			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
 		} else {
-			fmt.Fprintf(writer, "Loading parameters %d/%d...\n", done, total)
+			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d...\n", done, total)
 		}
 		for _, item := range chunk {
-			fmt.Fprintf(writer, "%s\n", item.Path)
+			_, _ = fmt.Fprintf(writer, "%s\n", item.Path)
 		}
 	})
 }
@@ -407,7 +407,8 @@ func itemKey(region, path string) string {
 func PrintStatusTable(statuses []Status, noColor bool) {
 	fmt.Printf("%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "NAME")
 	for i, status := range statuses {
-		fmt.Printf("%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
+		fmt.Printf(
+			"%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
 			i+1,
 			colorStatus(statusLabel(status), noColor),
 			valueOrDash(status.Type),
@@ -432,22 +433,6 @@ func statusLabel(status Status) string {
 		return "EMPTY"
 	}
 	return "OK"
-}
-
-// statusDescription expands a Status into a human-readable explanation used by detailed UI views.
-func statusDescription(status Status) string {
-	switch statusLabel(status) {
-	case "OK":
-		return "OK"
-	case "EMPTY":
-		return "EMPTY (parameter exists but value is empty)"
-	case "MISS":
-		return "MISS (parameter does not exist)"
-	case "ERR":
-		return "ERR (AWS/API error)"
-	default:
-		return statusLabel(status)
-	}
 }
 
 // colorStatus applies ANSI color to short status labels unless color output is disabled.

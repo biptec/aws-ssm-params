@@ -1,3 +1,4 @@
+// Package format imports and exports SSM parameters in dotenv and JSON formats.
 package format
 
 import (

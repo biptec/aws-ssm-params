@@ -1,3 +1,4 @@
+// Package inventory discovers and stores SSM parameter inventory items.
 package inventory
 
 import (

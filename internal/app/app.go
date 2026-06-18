@@ -1,3 +1,4 @@
+// Package app contains command implementations and configuration parsing for aws-ssm-params.
 package app
 
 import (
@@ -8,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
@@ -641,6 +641,14 @@ type getArgFlags struct {
 	field string
 }
 
+func commandTailValue(raw []string, index int, flag string) (string, error) {
+	next := index + 1
+	if next >= len(raw) {
+		return "", fmt.Errorf("%s requires a value", flag)
+	}
+	return raw[next], nil
+}
+
 func parseGetArgFlags(raw []string, initialFile string, initialField string) ([]string, getArgFlags, error) {
 	field, err := parseSingleField(initialField, "field", "value")
 	if err != nil {
@@ -652,18 +660,20 @@ func parseGetArgFlags(raw []string, initialFile string, initialField string) ([]
 		arg := raw[i]
 		switch {
 		case arg == "--file":
-			if i+1 >= len(raw) {
-				return nil, getArgFlags{}, errors.New("--file requires a value")
+			value, err := commandTailValue(raw, i, "--file")
+			if err != nil {
+				return nil, getArgFlags{}, err
 			}
-			flags.file = raw[i+1]
+			flags.file = value
 			i++
 		case strings.HasPrefix(arg, "--file="):
 			flags.file = strings.TrimPrefix(arg, "--file=")
 		case arg == "--field":
-			if i+1 >= len(raw) {
-				return nil, getArgFlags{}, errors.New("--field requires a value")
+			value, err := commandTailValue(raw, i, "--field")
+			if err != nil {
+				return nil, getArgFlags{}, err
 			}
-			field, err := parseSingleField(raw[i+1], "field", "value")
+			field, err := parseSingleField(value, "field", "value")
 			if err != nil {
 				return nil, getArgFlags{}, err
 			}
@@ -846,18 +856,20 @@ func parseCommonArgFlags(raw []string, initialFile string, initialOverride bool,
 		case arg == "--override":
 			flags.override = true
 		case arg == "--file":
-			if i+1 >= len(raw) {
-				return nil, commonArgFlags{}, errors.New("--file requires a value")
+			value, err := commandTailValue(raw, i, "--file")
+			if err != nil {
+				return nil, commonArgFlags{}, err
 			}
-			flags.file = raw[i+1]
+			flags.file = value
 			i++
 		case strings.HasPrefix(arg, "--file="):
 			flags.file = strings.TrimPrefix(arg, "--file=")
 		case arg == "--type" || arg == "-t":
-			if i+1 >= len(raw) {
-				return nil, commonArgFlags{}, errors.New("--type requires a value")
+			value, err := commandTailValue(raw, i, "--type")
+			if err != nil {
+				return nil, commonArgFlags{}, err
 			}
-			flags.parameterType = raw[i+1]
+			flags.parameterType = value
 			i++
 		case strings.HasPrefix(arg, "--type="):
 			flags.parameterType = strings.TrimPrefix(arg, "--type=")
@@ -969,7 +981,7 @@ func Import(ctx *cli.Context) error {
 	writer.Start()
 	defer writer.Stop()
 	for i, record := range records {
-		fmt.Fprintf(writer, "Importing %d/%d...\n%s\n", i, len(records), record.Path)
+		_, _ = fmt.Fprintf(writer, "Importing %d/%d...\n%s\n", i, len(records), record.Path)
 		if !importFlags.override {
 			if existing, ok := values[record.Path]; ok && existing.Value != "" {
 				skipped = append(skipped, record.Path)
@@ -1162,28 +1174,4 @@ func outputWriter(file string) (io.Writer, func(), error) {
 		return nil, func() {}, err
 	}
 	return f, func() { _ = f.Close() }, nil
-}
-
-// findRepoRoot walks upward from the current directory looking for the original infra repository layout.
-// It is kept as a small helper for legacy discovery workflows that expect clusters/ and terraform/ directories.
-func findRepoRoot() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		if exists(filepath.Join(dir, "clusters")) && exists(filepath.Join(dir, "terraform")) {
-			return dir, nil
-		}
-		if filepath.Dir(dir) == dir {
-			break
-		}
-	}
-	return "", errors.New("could not find repo root")
-}
-
-// exists reports whether a path exists and is accessible to stat.
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }

@@ -543,30 +543,35 @@ type fakeSSMClient struct {
 
 func (f fakeSSMClient) CheckAccess(context.Context) error             { return nil }
 func (f fakeSSMClient) ListRegions(context.Context) ([]string, error) { return nil, nil }
-func (f fakeSSMClient) ForRegion(region string) ssm.Client            { return f }
+func (f fakeSSMClient) ForRegion(_ string) ssm.Client                 { return f }
 func (f fakeSSMClient) DefaultRegion() string                         { return f.parameter.Region }
-func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, error) {
+func (f fakeSSMClient) Get(_ context.Context, path string) (ssm.Parameter, error) {
 	if f.parameter.Name == path {
 		return f.parameter, nil
 	}
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
-func (f fakeSSMClient) GetMany(ctx context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
+
+func (f fakeSSMClient) GetMany(_ context.Context, _ []string) (map[string]ssm.Parameter, map[string]error) {
 	return nil, nil
 }
-func (f fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[string]ssm.Metadata {
+
+func (f fakeSSMClient) DescribeMany(_ context.Context, _ []string) map[string]ssm.Metadata {
 	if f.metadata.Name == "" {
 		return map[string]ssm.Metadata{}
 	}
 	return map[string]ssm.Metadata{f.metadata.Name: f.metadata}
 }
+
 func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
 	return nil, nil
 }
-func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, parameterType ssm.ParameterType) error {
+
+func (f fakeSSMClient) PutParameter(_ context.Context, _, _ string, _ ssm.ParameterType) error {
 	return nil
 }
-func (f fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+
+func (f fakeSSMClient) PutParameterWithOptions(_ context.Context, _, _ string, _ ssm.ParameterType, _ ssm.PutParameterOptions) error {
 	return nil
 }
-func (f fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error { return nil }
+func (f fakeSSMClient) DeleteMany(_ context.Context, _ []string) error { return nil }

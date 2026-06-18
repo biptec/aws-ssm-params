@@ -49,7 +49,7 @@ func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, err
 	return ssm.Parameter{}, ssm.ErrNotFound
 }
 
-func (f fakeSSMClient) GetMany(ctx context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
+func (f fakeSSMClient) GetMany(_ context.Context, paths []string) (map[string]ssm.Parameter, map[string]error) {
 	values := map[string]ssm.Parameter{}
 	errs := map[string]error{}
 	for _, path := range paths {
@@ -70,7 +70,7 @@ func (f fakeSSMClient) GetMany(ctx context.Context, paths []string) (map[string]
 	return values, errs
 }
 
-func (f fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[string]ssm.Metadata {
+func (f fakeSSMClient) DescribeMany(_ context.Context, paths []string) map[string]ssm.Metadata {
 	result := map[string]ssm.Metadata{}
 	for _, path := range paths {
 		key := itemKey(f.region, path)
@@ -112,7 +112,7 @@ func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, par
 	return f.PutParameterWithOptions(ctx, path, value, parameterType, ssm.PutParameterOptions{Overwrite: true})
 }
 
-func (f fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+func (f fakeSSMClient) PutParameterWithOptions(_ context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
 	if f.putOpts != nil {
 		f.putOpts[itemKey(f.region, path)] = opts
 	}
@@ -140,7 +140,7 @@ func (f fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value 
 	}
 	return nil
 }
-func (f fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error { return nil }
+func (f fakeSSMClient) DeleteMany(_ context.Context, _ []string) error { return nil }
 
 func TestLoadStatusesByItemRegionCombinesValuesMetadataAndMissing(t *testing.T) {
 	client := fakeSSMClient{

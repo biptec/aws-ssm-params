@@ -27,22 +27,22 @@ type fakeSDKSSM struct {
 	deleteErr      error
 }
 
-func (f *fakeSDKSSM) GetParameters(ctx context.Context, input *awsssm.GetParametersInput, optFns ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
+func (f *fakeSDKSSM) GetParameters(_ context.Context, input *awsssm.GetParametersInput, _ ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
 	f.getInputs = append(f.getInputs, input)
 	return f.getOutput, nil
 }
 
-func (f *fakeSDKSSM) DescribeParameters(ctx context.Context, input *awsssm.DescribeParametersInput, optFns ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
+func (f *fakeSDKSSM) DescribeParameters(_ context.Context, input *awsssm.DescribeParametersInput, _ ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
 	f.describeInputs = append(f.describeInputs, input)
 	return f.describeOutput, nil
 }
 
-func (f *fakeSDKSSM) PutParameter(ctx context.Context, input *awsssm.PutParameterInput, optFns ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
+func (f *fakeSDKSSM) PutParameter(_ context.Context, input *awsssm.PutParameterInput, _ ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
 	f.putInputs = append(f.putInputs, input)
 	return &awsssm.PutParameterOutput{}, f.putErr
 }
 
-func (f *fakeSDKSSM) DeleteParameters(ctx context.Context, input *awsssm.DeleteParametersInput, optFns ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
+func (f *fakeSDKSSM) DeleteParameters(_ context.Context, input *awsssm.DeleteParametersInput, _ ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
 	f.deleteInputs = append(f.deleteInputs, input)
 	return &awsssm.DeleteParametersOutput{}, f.deleteErr
 }
@@ -52,13 +52,13 @@ type fakeSDKEC2 struct {
 	err    error
 }
 
-func (f fakeSDKEC2) DescribeRegions(ctx context.Context, input *ec2.DescribeRegionsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
+func (f fakeSDKEC2) DescribeRegions(_ context.Context, _ *ec2.DescribeRegionsInput, _ ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
 	return f.output, f.err
 }
 
 type fakeSDKSTS struct{ err error }
 
-func (f fakeSDKSTS) GetCallerIdentity(ctx context.Context, input *sts.GetCallerIdentityInput, optFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+func (f fakeSDKSTS) GetCallerIdentity(_ context.Context, _ *sts.GetCallerIdentityInput, _ ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
 	return &sts.GetCallerIdentityOutput{}, f.err
 }
 

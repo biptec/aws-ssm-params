@@ -1,0 +1,59 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - copyloopvar
+    - durationcheck
+    - errcheck
+    - errorlint
+    - exhaustive
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - makezero
+    - misspell
+    - nilerr
+    - nilnil
+    - noctx
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - wastedassign
+    - whitespace
+    - wrapcheck
+  settings:
+    gosec:
+      excludes:
+        - G304 # This CLI intentionally reads user-provided inventory/import/export paths.
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+
+    staticcheck:
+      checks:
+        - all
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+
+    revive:
+      severity: warning
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

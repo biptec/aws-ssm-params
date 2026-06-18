@@ -287,19 +287,14 @@ const (
 
 var (
 	frameColor       = lipgloss.Color("24")
-	titleBg          = lipgloss.Color("57")
-	titleFg          = lipgloss.Color("255")
 	labelFg          = lipgloss.Color("214")
 	valueFg          = lipgloss.Color("254")
 	mutedFg          = lipgloss.Color("244")
 	selectedFg       = lipgloss.Color("81")
-	dividerFg        = lipgloss.Color("24")
-	okFg             = lipgloss.Color("78")
 	missFg           = lipgloss.Color("245")
 	emptyFg          = lipgloss.Color("45")
 	errFg            = lipgloss.Color("203")
 	tableHeaderFg    = lipgloss.Color("250")
-	tableHeaderBg    = lipgloss.Color("236")
 	searchPromptFg   = lipgloss.Color("81")
 	statusLineFg     = lipgloss.Color("244")
 	warningFg        = lipgloss.Color("214")
@@ -308,7 +303,6 @@ var (
 	labelStyle       = lipgloss.NewStyle().Foreground(labelFg)
 	valueStyle       = lipgloss.NewStyle().Foreground(valueFg)
 	mutedStyle       = lipgloss.NewStyle().Foreground(mutedFg)
-	dividerStyle     = lipgloss.NewStyle().Foreground(dividerFg)
 	selectedRowStyle = lipgloss.NewStyle().Foreground(selectedFg)
 	tableHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(tableHeaderFg)
 	searchStyle      = lipgloss.NewStyle().Foreground(searchPromptFg)
@@ -368,9 +362,6 @@ func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.It
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
 func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) model {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	sortBy, sortDescending := parseInitialSortOption(opts.Sort)
 	input := textinput.New()
 	input.Prompt = ""
@@ -417,6 +408,7 @@ func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, op
 
 	return model{
 		client:               client,
+		ctx:                  ctx,
 		items:                items,
 		opts:                 opts,
 		loadCh:               make(chan tea.Msg),
@@ -1345,15 +1337,16 @@ func (m model) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.input.Blur()
 		var updated tea.Model
 		var cmd tea.Cmd
-		if m.fileActionMode == "load" {
+		switch m.fileActionMode {
+		case "load":
 			m.editFileInput.SetValue(m.input.Value())
 			updated, cmd = m.loadValueFromFile()
-		} else if m.fileActionMode == "write" {
+		case "write":
 			m.editFileInput.SetValue(m.input.Value())
 			updated, cmd = m.writeValueToFile(false, false)
-		} else if m.fileActionMode == "random-custom" {
+		case "random-custom":
 			updated, cmd = m.generateRandomValueIntoEditor("base64-custom")
-		} else {
+		default:
 			updated = m
 		}
 		return finish(updated, cmd)
@@ -2051,54 +2044,6 @@ func indexOfEditField(fields []editField, field editField) int {
 	return 0
 }
 
-func nextEditField(field editField) editField {
-	switch field {
-	case editFieldValue:
-		return editFieldSSMPath
-	case editFieldSSMPath:
-		return editFieldRegion
-	case editFieldRegion:
-		return editFieldType
-	case editFieldType:
-		return editFieldTier
-	case editFieldTier:
-		return editFieldDataType
-	case editFieldDataType:
-		return editFieldOverwrite
-	case editFieldOverwrite:
-		return editFieldDescription
-	case editFieldDescription:
-		return editFieldPolicies
-	case editFieldPolicies:
-		return editFieldValue
-	default:
-		return editFieldValue
-	}
-}
-
-func previousEditField(field editField) editField {
-	switch field {
-	case editFieldValue:
-		return editFieldPolicies
-	case editFieldPolicies:
-		return editFieldDescription
-	case editFieldDescription:
-		return editFieldOverwrite
-	case editFieldOverwrite:
-		return editFieldDataType
-	case editFieldDataType:
-		return editFieldTier
-	case editFieldTier:
-		return editFieldType
-	case editFieldType:
-		return editFieldRegion
-	case editFieldRegion:
-		return editFieldSSMPath
-	default:
-		return editFieldValue
-	}
-}
-
 // openRegionSelect loads all enabled AWS regions on first use, then opens the region selector.
 func (m model) openRegionSelect() (tea.Model, tea.Cmd) {
 	m = m.ensureRegionSelectOptions()
@@ -2228,7 +2173,7 @@ func (m model) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.M
 		return m, nil
 	}
 	contents := m.fileActionContents()
-	if err := os.WriteFile(expandedPath, []byte(contents), 0600); err != nil {
+	if err := os.WriteFile(expandedPath, []byte(contents), 0o600); err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
 		m.warningMessage = ""
@@ -2751,20 +2696,6 @@ func (m model) multilineContentWidth() int {
 	return max(8, m.boxInnerWidth()-prefixWidth-2)
 }
 
-func (m model) multilineVisualRowCount(value string, width int) int {
-	width = max(1, width)
-	lines := strings.Split(value, "\n")
-	if len(lines) == 0 {
-		return 1
-	}
-	count := 0
-	for _, line := range lines {
-		lineLen := len([]rune(line))
-		count += max(1, (lineLen+width-1)/width)
-	}
-	return max(1, count)
-}
-
 func (m model) withCursorMarker(line string, offset int) string {
 	runes := []rune(line)
 	offset = min(max(0, offset), len(runes))
@@ -2779,6 +2710,7 @@ func (m model) withCursorMarker(line string, offset int) string {
 	}
 	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
 }
+
 func (m model) textAreaBodyHeight() int {
 	if m.height <= 0 {
 		return max(8, m.height-2)
@@ -2888,20 +2820,22 @@ func (m model) renderFileActionPopup() string {
 	}
 	label := "File path:"
 	inputWidth := 48
-	if m.fileActionMode == "write" {
+	switch m.fileActionMode {
+	case "write":
 		title = "Write to file"
 		if m.fileActionField == editFieldPolicies {
 			title = "Write policies to file"
 		}
-	} else if m.fileActionMode == "random-custom" {
+	case "random-custom":
 		title = "Random Value"
 		label = "Byte length:"
 		inputWidth = 12
 	}
 	button := "load"
-	if m.fileActionMode == "write" {
+	switch m.fileActionMode {
+	case "write":
 		button = "write"
-	} else if m.fileActionMode == "random-custom" {
+	case "random-custom":
 		button = "generate"
 	}
 	lines := []string{m.popupInputLine(label, m.input, inputWidth)}
@@ -3112,10 +3046,7 @@ func (m model) renderHelpScreen() string {
 }
 
 func (m model) renderShortcutsPopup() string {
-	lines := []string{}
-	for _, line := range strings.Split(m.shortcutsText(), "\n") {
-		lines = append(lines, line)
-	}
+	lines := strings.Split(m.shortcutsText(), "\n")
 	return m.renderPopupBoxWithActions("Shortcuts", lines, "Esc close")
 }
 
@@ -3491,10 +3422,6 @@ func (m model) renderFieldPairs(fields [][2]string, labelWidth int) []string {
 func (m model) fieldLine(name, renderedValue string, labelWidth int) string {
 	label := m.label(padMin(name+":", labelWidth+1))
 	return label + " " + renderedValue
-}
-
-func (m model) formField(name, value string) string {
-	return m.label(name+":") + " " + m.value(value)
 }
 
 // renderBox draws a bordered box, truncating or padding content so screens keep stable heights.
@@ -3985,13 +3912,6 @@ func (m model) value(s string) string {
 	return valueStyle.Render(s)
 }
 
-func (m model) hotkey(s string) string {
-	if m.opts.NoColor {
-		return s
-	}
-	return hotkeyStyle.Render(s)
-}
-
 func (m model) muted(s string) string {
 	if m.opts.NoColor {
 		return s
@@ -4070,14 +3990,7 @@ func (m model) renderFooterWithStatus(text string) string {
 	return strings.Join([]string{" ", status, " ", footer, " "}, "\n")
 }
 
-func (m model) renderFooterWithFixedStatus(text string) string {
-	status := m.renderStatusMessage()
-	if status == "" {
-		status = " "
-	}
-	return strings.Join([]string{status, " ", m.renderFooter(text), " "}, "\n")
-}
-func quitConfirmationMessage(key string) string {
+func quitConfirmationMessage(_ string) string {
 	return `Are you sure you want to quit? Press "y" to confirm.`
 }
 
@@ -4143,25 +4056,6 @@ func (m model) statusRegion(st Status) string {
 		return st.Item.Region
 	}
 	return valueOrDash(m.opts.Region)
-}
-
-func (m model) statusText(st Status) string {
-	label := statusDisplayLabel(st)
-	if m.opts.NoColor {
-		return label
-	}
-	switch label {
-	case "OK":
-		return lipgloss.NewStyle().Foreground(okFg).Render(label)
-	case "MISSING":
-		return lipgloss.NewStyle().Foreground(missFg).Render(label)
-	case "EMPTY":
-		return lipgloss.NewStyle().Foreground(emptyFg).Render(label)
-	case "ERROR":
-		return lipgloss.NewStyle().Foreground(errFg).Render(label)
-	default:
-		return label
-	}
 }
 
 func (m model) currentStatus() Status {
@@ -4449,15 +4343,6 @@ func sortItems() []sortItem {
 		{hotkey: "u", column: columnUser, label: "User"},
 		{hotkey: "e", column: columnDescription, label: "Description"},
 	}
-}
-
-func sortColumnByLetterHotkey(key string) (columnName, bool) {
-	for _, item := range sortItems() {
-		if item.hotkey == key {
-			return item.column, true
-		}
-	}
-	return "", false
 }
 
 func (m model) popupSortItems() []sortItem {
@@ -4843,6 +4728,7 @@ func ParseColumnOption(value string) ([]string, error) {
 	return out, nil
 }
 
+// ValidColumnNames returns every column name accepted by --show-columns.
 func ValidColumnNames() []string {
 	columns := columnItems()
 	out := make([]string, 0, len(columns))
@@ -5477,7 +5363,7 @@ Editing
 	return ""
 }
 
-func globalShortcuts(forScreen screen) string {
+func globalShortcuts(_ screen) string {
 	return strings.TrimSpace(`Global
   ctrl+/       open shortcuts`)
 }
@@ -5576,17 +5462,6 @@ func countLines(s string) int {
 	return strings.Count(s, "\n") + 1
 }
 
-func firstLines(s string, maxLines int) string {
-	if s == "" || maxLines <= 0 {
-		return ""
-	}
-	lines := strings.Split(s, "\n")
-	if len(lines) <= maxLines {
-		return s
-	}
-	return strings.Join(lines[:maxLines], "\n")
-}
-
 func indentBlock(s string, spaces int) string {
 	if s == "" {
 		return ""
@@ -5672,31 +5547,4 @@ func stripANSI(s string) string {
 }
 
 // sliceForScroll returns a fixed-height window over a larger line list.
-func sliceForScroll(lines []string, scroll, height int) []string {
-	if height <= 0 || len(lines) <= height {
-		return lines
-	}
-	if scroll < 0 {
-		scroll = 0
-	}
-	if scroll > len(lines)-height {
-		scroll = len(lines) - height
-	}
-	return lines[scroll : scroll+height]
-}
-
 func pageSize(h int) int { return max(5, h-4) }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

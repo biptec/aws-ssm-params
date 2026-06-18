@@ -17,7 +17,7 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	seen := map[string]bool{}
 	var items []Item
@@ -74,11 +74,11 @@ func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		prefix = "\n"
 	}
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return false, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(prefix + parameterPath + "\n"); err != nil {
 		return false, err
 	}
@@ -135,7 +135,7 @@ func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error)
 	if removed == 0 {
 		return 0, nil
 	}
-	if err := os.WriteFile(filePath, []byte(strings.Join(remaining, "")), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte(strings.Join(remaining, "")), 0o600); err != nil { // #nosec G703 -- filePath is an explicit user-configured paths file.
 		return 0, err
 	}
 	return removed, nil

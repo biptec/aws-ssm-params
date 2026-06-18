@@ -1,3 +1,4 @@
+// Package ui implements the interactive terminal user interface.
 package ui
 
 import (
@@ -207,7 +208,8 @@ func textAreaCursorLineOffset(area interface {
 	Value() string
 	Line() int
 	LineInfo() textarea.LineInfo
-}) (int, int) {
+},
+) (int, int) {
 	lines := strings.Split(area.Value(), "\n")
 	line := min(max(0, area.Line()), len(lines)-1)
 	lineInfo := area.LineInfo()
@@ -412,7 +414,8 @@ func textAreaCursorAbs(area interface {
 	Value() string
 	Line() int
 	LineInfo() textarea.LineInfo
-}) int {
+},
+) int {
 	lines := strings.Split(area.Value(), "\n")
 	row := min(max(0, area.Line()), len(lines)-1)
 	lineInfo := area.LineInfo()

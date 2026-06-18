@@ -1,6 +1,8 @@
+// Package main wires CLI flags and commands to the internal application layer.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -59,7 +61,7 @@ func newCLIApp(rawArgs []string) *cli.App {
 		UsageText:             "aws-ssm-params [global options] <command> [command options]",
 		EnableBashCompletion:  true,
 		CustomAppHelpTemplate: alignedAppHelpTemplate,
-		Before: func(ctx *cli.Context) error {
+		Before: func(_ *cli.Context) error {
 			return app.RejectRepeatedFlagArgs(rawArgs, "regions")
 		},
 		Flags: []cli.Flag{
@@ -155,12 +157,12 @@ func newCLIApp(rawArgs []string) *cli.App {
 			},
 		},
 	}
-
 }
 
 func main() {
+	ctx := context.Background()
 	cliApp := newCLIApp(os.Args[1:])
-	if err := cliApp.Run(os.Args); err != nil {
+	if err := cliApp.RunContext(ctx, os.Args); err != nil {
 		fmt.Fprintln(os.Stderr, "ERROR:", err)
 		os.Exit(1)
 	}

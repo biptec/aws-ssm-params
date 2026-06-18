@@ -1,3 +1,4 @@
+// Package ssm wraps AWS Systems Manager Parameter Store access behind a testable interface.
 package ssm
 
 import (
@@ -229,6 +230,7 @@ func (t ParameterType) IsValid() bool {
 	}
 }
 
+// ErrNotFound reports that a requested SSM parameter does not exist.
 var ErrNotFound = errors.New("parameter not found")
 
 // NewAWSClient constructs an AWS SDK backed client for one profile/region pair.
@@ -413,6 +415,7 @@ func (c *AWSClient) PutParameter(ctx context.Context, path, value string, parame
 	return c.PutParameterWithOptions(ctx, path, value, parameterType, PutParameterOptions{Overwrite: true})
 }
 
+// PutParameterWithOptions creates or updates one SSM parameter with explicit metadata options.
 func (c *AWSClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ParameterType, opts PutParameterOptions) error {
 	if !parameterType.IsValid() {
 		return fmt.Errorf("unsupported parameter type %q; use string, string-list, or secure-string", parameterType)
@@ -553,12 +556,15 @@ type errorSSM struct{ err error }
 func (e errorSSM) GetParameters(context.Context, *awsssm.GetParametersInput, ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
 	return nil, e.err
 }
+
 func (e errorSSM) DescribeParameters(context.Context, *awsssm.DescribeParametersInput, ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
 	return nil, e.err
 }
+
 func (e errorSSM) PutParameter(context.Context, *awsssm.PutParameterInput, ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
 	return nil, e.err
 }
+
 func (e errorSSM) DeleteParameters(context.Context, *awsssm.DeleteParametersInput, ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
 	return nil, e.err
 }
