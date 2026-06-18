@@ -209,10 +209,17 @@ func TestStatusHelpers(t *testing.T) {
 	assert.Equal(t, 6, status.Length)
 	assert.Equal(t, hashPrefix("secret"), status.SHA256Prefix)
 	assert.Equal(t, "param-date", status.Modified)
-	assert.Equal(t, "OK", statusLabel(status))
-	assert.Equal(t, "MISS", statusLabel(Status{}))
-	assert.Equal(t, "ERR", statusLabel(Status{Error: "boom"}))
-	assert.Equal(t, "EMPTY", statusLabel(Status{Exists: true, Empty: true}))
+	assert.Equal(t, "OK", status.Label())
+	assert.Equal(t, "MISS", Status{}.Label())
+	assert.Equal(t, "ERR", (Status{Error: "boom"}).Label())
+	assert.Equal(t, "EMPTY", (Status{Exists: true, Empty: true}).Label())
+	assert.Equal(t, "MISSING", Status{}.DisplayLabel())
+	assert.Equal(t, "ERROR", (Status{Error: "boom"}).DisplayLabel())
+	assert.Equal(t, "eu-north-1", (Status{Item: inventory.Item{Region: "eu-north-1"}}).RegionLabel("us-east-1"))
+	assert.Equal(t, "-", (Status{Item: inventory.Item{Region: "*"}}).RegionLabel("eu-north-1"))
+	assert.Equal(t, "us-east-1", Status{}.RegionLabel("us-east-1"))
+	assert.True(t, (Status{Type: ssm.ParameterTypeSecureString.String()}).HasSensitiveValue())
+	assert.False(t, (Status{Type: ssm.ParameterTypeString.String()}).HasSensitiveValue())
 }
 
 func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing.T) {

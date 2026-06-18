@@ -35,6 +35,56 @@ type Status struct {
 	Error        string
 }
 
+// Label converts a Status into the short label used by compact status tables.
+func (status Status) Label() string {
+	if status.Error != "" {
+		return "ERR"
+	}
+	if !status.Exists {
+		return "MISS"
+	}
+	if status.Empty {
+		return "EMPTY"
+	}
+	return "OK"
+}
+
+// DisplayLabel converts a Status into the longer labels used in the interactive table.
+func (status Status) DisplayLabel() string {
+	switch status.Label() {
+	case "MISS":
+		return "MISSING"
+	case "ERR":
+		return "ERROR"
+	default:
+		return status.Label()
+	}
+}
+
+// RegionLabel returns the region label shown in UI tables and detail blocks.
+func (status Status) RegionLabel(fallback string) string {
+	if status.Item.Region == "*" {
+		return "-"
+	}
+	if status.Item.Region != "" {
+		return status.Item.Region
+	}
+	return valueOrDash(fallback)
+}
+
+// HasSensitiveValue reports whether the status value should be treated as secret by default.
+func (status Status) HasSensitiveValue() bool {
+	parameterType, err := ssm.ParseParameterType(status.Type)
+	if err != nil {
+		return true
+	}
+	return parameterType == ssm.ParameterTypeSecureString
+}
+
+func (status Status) isMissing() bool {
+	return !status.Exists && status.Error == ""
+}
+
 // LoadProgress reports status-loading progress to either the interactive TUI or the non-interactive live writer.
 // done/total are item counters within the current region scan, region names the region being scanned, and chunk
 // contains the paths currently being requested from SSM.
@@ -238,7 +288,7 @@ func loadAllStatusesRegion(ctx context.Context, client ssm.Client, region string
 	statuses := make([]Status, 0, len(items))
 	for _, item := range items {
 		status := statusFromMaps(item, item.Region, metaByKey, values, errs, includeValues)
-		if !status.Exists && status.Error == "" {
+		if status.isMissing() {
 			meta := metaByKey[itemKey(item.Region, item.Path)]
 			status.Exists = true
 			status.Type = valueOrDefault(meta.Type, ssm.DefaultParameterType.String())
@@ -410,7 +460,7 @@ func PrintStatusTable(statuses []Status, noColor bool) {
 		fmt.Printf(
 			"%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
 			i+1,
-			colorStatus(statusLabel(status), noColor),
+			colorStatus(status.Label(), noColor),
 			valueOrDash(status.Type),
 			valueOrDash(status.Tier),
 			intOrDash(status.Version),
@@ -419,20 +469,6 @@ func PrintStatusTable(statuses []Status, noColor bool) {
 			status.Item.Path,
 		)
 	}
-}
-
-// statusLabel converts a Status into the short label used by the CLI table.
-func statusLabel(status Status) string {
-	if status.Error != "" {
-		return "ERR"
-	}
-	if !status.Exists {
-		return "MISS"
-	}
-	if status.Empty {
-		return "EMPTY"
-	}
-	return "OK"
 }
 
 // colorStatus applies ANSI color to short status labels unless color output is disabled.

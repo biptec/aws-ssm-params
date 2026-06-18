@@ -3077,7 +3077,7 @@ func (m model) renderSelectedParameterBlock(full bool) string {
 }
 
 func (m model) selectedParameterFields(st Status, full bool) [][2]string {
-	if !st.Exists && st.Error == "" {
+	if st.isMissing() {
 		if full {
 			return m.filterSelectedParameterFields([][2]string{{"Name", st.Item.Path}, {"Region", "-"}, {"Type", "-"}, {"Tier", "-"}, {"DataType", "-"}, {"Policies", "-"}, {"Version", "-"}, {"Len", "-"}, {"SHA256", "-"}, {"Description", "-"}, {"User", "-"}, {"Date", "-"}, {"Value", "-"}})
 		}
@@ -3085,9 +3085,9 @@ func (m model) selectedParameterFields(st Status, full bool) [][2]string {
 	}
 
 	value := m.displayValue(st, full)
-	fields := [][2]string{{"Name", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
+	fields := [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 	if full {
-		fields = [][2]string{{"Name", st.Item.Path}, {"Region", m.statusRegion(st)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, max(20, m.boxInnerWidth()-18))}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
+		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, max(20, m.boxInnerWidth()-18))}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 		if st.Error != "" {
 			fields = append(fields, [2]string{"Error", st.Error})
 		}
@@ -3144,7 +3144,7 @@ func (m model) detailFieldAllowed(label string) bool {
 // displayValue returns the user-facing value for selected blocks and VALUE table cells.
 // SecureString values are treated as sensitive and hidden until the user presses v; String/StringList are shown by default.
 func (m model) displayValue(st Status, full bool) string {
-	if st.Item.Path != "" && !st.Exists && st.Error == "" {
+	if st.Item.Path != "" && st.isMissing() {
 		return "-"
 	}
 	if m.shouldHideValue(st) {
@@ -3187,11 +3187,7 @@ func (m model) shouldHideValue(st Status) bool {
 	if m.revealValues {
 		return false
 	}
-	parameterType, err := ssm.ParseParameterType(st.Type)
-	if err != nil {
-		return true
-	}
-	return parameterType == ssm.ParameterTypeSecureString
+	return st.HasSensitiveValue()
 }
 
 // renderListBlock renders the main table, including dynamic columns, scrolling, search/filter status, and messages.
@@ -3351,7 +3347,7 @@ func (m model) rowText(st Status, row string, selected bool) string {
 	if selected {
 		return m.selectedRow(row)
 	}
-	label := statusDisplayLabel(st)
+	label := st.DisplayLabel()
 	if label == "ERROR" {
 		if m.opts.NoColor {
 			return row
@@ -3379,7 +3375,7 @@ func (m model) tableCellValue(key columnName, index int, st Status) string {
 	case columnIndex:
 		return strconv.Itoa(index)
 	case columnRegion:
-		return m.statusRegion(st)
+		return st.RegionLabel(m.opts.Region)
 	case columnDate:
 		return valueOrDash(st.Modified)
 	case columnType:
@@ -4046,16 +4042,6 @@ func expandLocalPath(path string) (string, error) {
 		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
 	}
 	return path, nil
-}
-
-func (m model) statusRegion(st Status) string {
-	if st.Item.Region == "*" {
-		return "-"
-	}
-	if st.Item.Region != "" {
-		return st.Item.Region
-	}
-	return valueOrDash(m.opts.Region)
 }
 
 func (m model) currentStatus() Status {
@@ -5441,18 +5427,6 @@ func promptLineCount(value string) int {
 		return 1
 	}
 	return len(strings.Split(value, "\n"))
-}
-
-// statusDisplayLabel converts Status to the longer labels used in the interactive table.
-func statusDisplayLabel(st Status) string {
-	switch statusLabel(st) {
-	case "MISS":
-		return "MISSING"
-	case "ERR":
-		return "ERROR"
-	default:
-		return statusLabel(st)
-	}
 }
 
 func countLines(s string) int {

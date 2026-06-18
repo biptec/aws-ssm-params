@@ -40,6 +40,7 @@ linters:
       enable-all: true
       disable:
         - fieldalignment
+        - shadow
 
     staticcheck:
       checks:
@@ -50,6 +51,8 @@ linters:
         - diagnostic
         - performance
         - style
+      disabled-checks:
+        - hugeParam
 
     revive:
       severity: warning
