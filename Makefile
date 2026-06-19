@@ -4,7 +4,8 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 GO ?= go
-PKGS ?= ./...
+PKG_DIRS ?= $(shell $(GO) list -f '{{.Dir}}' ./...)
+PKGS ?= $(patsubst $(CURDIR)/%,./%,$(filter-out $(CURDIR)/vendor/%,$(PKG_DIRS)))
 
 # Keep checks offline-safe by default: Go will not auto-download another toolchain.
 # Override when you explicitly want Go toolchain auto-downloads:
@@ -16,6 +17,7 @@ BIN_DIR := $(CURDIR)/bin
 export PATH := $(BIN_DIR):$(PATH)
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
+GOLANGCI_MODULES_DOWNLOAD_MODE ?= mod
 FORCE_LOCAL_TOOLS ?= false
 
 GOLANGCI_LINT ?= golangci-lint
@@ -62,6 +64,7 @@ help:
 	@echo "  GOTOOLCHAIN=$(GOTOOLCHAIN)"
 	@echo "  COVERAGE_MIN=$(COVERAGE_MIN)"
 	@echo "  FORCE_LOCAL_TOOLS=$(FORCE_LOCAL_TOOLS)"
+	@echo "  GOLANGCI_MODULES_DOWNLOAD_MODE=$(GOLANGCI_MODULES_DOWNLOAD_MODE)"
 
 .PHONY: require-go
 require-go:
@@ -304,7 +307,7 @@ lint: require-golangci-lint
 		exit 1; \
 	fi
 	@echo "Running golangci-lint..."
-	@$(GOLANGCI_LINT) run $(PKGS)
+	@$(GOLANGCI_LINT) run --modules-download-mode=$(GOLANGCI_MODULES_DOWNLOAD_MODE) $(PKGS)
 
 .PHONY: vuln
 vuln: require-govulncheck

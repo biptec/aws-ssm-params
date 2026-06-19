@@ -98,15 +98,32 @@ func TestReplaceStatusPrefersMatchingRegion(t *testing.T) {
 	assert.Equal(t, ssm.ParameterTypeString.String(), m.statuses[1].Type)
 }
 
-func TestDisplayValueOnlyHidesSecureStringByDefault(t *testing.T) {
+func TestDisplayValueShowsSecureStringWhenDecrypted(t *testing.T) {
 	m := model{width: 100}
 
-	assert.Equal(t, "(hidden)", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
+	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
 	assert.Equal(t, "plain", m.displayValue(Status{Type: ssm.ParameterTypeString.String(), Value: "plain"}, false))
 	assert.Equal(t, "a,b", m.displayValue(Status{Type: ssm.ParameterTypeStringList.String(), Value: "a,b"}, false))
+}
 
-	m.revealValues = true
-	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
+func TestDisplayValueShowsEncryptedPlaceholderWithoutDecryption(t *testing.T) {
+	m := model{width: 100}
+
+	assert.Equal(t, "(encrypted)", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String()}, false))
+}
+
+func TestEncryptedPlaceholderUsesMutedValueStyleOnly(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	m := newModel(context.Background(), nil, nil, Options{NoColor: false, ShowColumns: []string{"value"}})
+	m.screen = screenMain
+	m.width = 100
+	m.height = 20
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+
+	row := m.renderListRow(1, m.statuses[0], false, m.tableColumns([]int{0}))
+
+	assert.Contains(t, row, m.encryptedPlaceholder())
+	assert.NotContains(t, row, "\x1b[38;5;45m")
 }
 
 func TestDisplayValueRendersMultilineAsSingleLinePreview(t *testing.T) {
@@ -139,6 +156,20 @@ func TestStartMultilineInitializesEditableFields(t *testing.T) {
 	assert.Equal(t, "", actual.editFileInput.Value())
 	assert.Equal(t, "", actual.editFileInput.Placeholder)
 	assert.Equal(t, "hello", actual.textArea.Value())
+}
+
+func TestStartMultilineSkipsEncryptedSecureStringValueWithoutDecryption(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{})
+	m.width = 80
+	m.height = 24
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+
+	updated, _ := m.startMultiline(screenMain)
+	actual := updated.(model)
+
+	assert.Equal(t, screenTextArea, actual.screen)
+	assert.NotEqual(t, editFieldValue, actual.editField)
+	assert.Contains(t, actual.renderTextAreaScreen(), "(encrypted)")
 }
 
 func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
@@ -258,7 +289,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{})
 	path := t.TempDir() + "/value.txt"
-	require.NoError(t, os.WriteFile(path, []byte("from-file\nsecond-line"), 0o600))
+	require.NoError(t, os.WriteFile(path, []byte("loaded-from-disk\nsecond-line"), 0o600))
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetValue("old")
@@ -266,7 +297,7 @@ func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
 	actual, cmd := submitFileActionPopup(t, m, "load", path)
 
 	assert.Nil(t, cmd)
-	assert.Equal(t, "from-file\nsecond-line", actual.textArea.Value())
+	assert.Equal(t, "loaded-from-disk\nsecond-line", actual.textArea.Value())
 	assert.Equal(t, "Loaded value from "+path, actual.message)
 	assert.Empty(t, actual.errMessage)
 	assert.Equal(t, editFieldValue, actual.editField)
@@ -894,7 +925,7 @@ func TestMainColumnsHotkeyOpensPopupWithoutChangingScreen(t *testing.T) {
 	assert.Contains(t, m.View(), "# and NAME are always visible.")
 }
 
-func TestColumnsPopupTogglesDraftAppliesAndCancels(t *testing.T) {
+func TestColumnsPopupAppliesImmediatelyAndEscCloses(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupColumns
@@ -902,20 +933,9 @@ func TestColumnsPopupTogglesDraftAppliesAndCancels(t *testing.T) {
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
-	assert.False(t, m.columns[columnValue])
-	assert.True(t, m.columnsDraft[columnValue])
+	assert.True(t, m.columns[columnValue])
 	assert.Equal(t, popupColumns, m.activePopup)
 
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(model)
-	assert.True(t, m.columns[columnValue])
-	assert.Equal(t, popupNone, m.activePopup)
-
-	m.activePopup = popupColumns
-	m.columnCursor = 0
-	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
-	m = updated.(model)
-	assert.False(t, m.columnsDraft[columnValue])
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 	assert.True(t, m.columns[columnValue])
@@ -933,7 +953,7 @@ func TestColumnsPopupFooterReplacesMainFooter(t *testing.T) {
 
 	view := m.View()
 
-	assert.Contains(t, view, "enter apply")
+	assert.False(t, strings.Contains(view, "enter apply"))
 	assert.Contains(t, view, "space toggle")
 	assert.Contains(t, view, "x none")
 	assert.Contains(t, view, "ctrl+/ help")
@@ -1769,13 +1789,13 @@ func TestParseColumnOptionAcceptsOnlyAWSBackedOptionalColumns(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"region", "type", "value", "sha256"}, columns)
 
-	unsupported := []string{"source", "app", "component", "secret", "kind", "index", "path"}
+	unsupported := []string{"source", "app", "component", "secret", "kind", "index"}
 	for _, name := range unsupported {
 		t.Run(name, func(t *testing.T) {
 			columns, err := ParseColumnOption(name)
 			assert.Nil(t, columns)
 			require.Error(t, err)
-			assert.ErrorContains(t, err, "unsupported --show-columns value")
+			assert.ErrorContains(t, err, "unsupported --show-column value")
 		})
 	}
 }
@@ -2140,12 +2160,12 @@ func TestPopupShowsInternalActionsAndBottomHotkeys(t *testing.T) {
 
 	view := m.View()
 
-	assert.Contains(t, view, "Enter sort   Esc cancel")
-	assert.Contains(t, view, "enter sort/toggle")
+	assert.Contains(t, view, "Esc close")
+	assert.False(t, strings.Contains(view, "enter sort/toggle"))
 	assert.Contains(t, view, "d direction")
 }
 
-func TestColumnsPopupLivePreviewAndEscRollback(t *testing.T) {
+func TestColumnsPopupAppliesLiveAndEscKeepsChanges(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
@@ -2157,12 +2177,12 @@ func TestColumnsPopupLivePreviewAndEscRollback(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
 	m = updated.(model)
 	assert.True(t, strings.Contains(m.View(), "VALUE"))
-	assert.False(t, m.columns[columnValue])
+	assert.True(t, m.columns[columnValue])
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
-	assert.False(t, strings.Contains(m.View(), "VALUE"))
-	assert.False(t, m.columns[columnValue])
+	assert.True(t, strings.Contains(m.View(), "VALUE"))
+	assert.True(t, m.columns[columnValue])
 }
 
 func TestDefaultSortArrowIsShownForName(t *testing.T) {
@@ -2358,6 +2378,25 @@ func TestSortPopupSelectsSingleColumnWithLetter(t *testing.T) {
 	assert.Equal(t, "/a", m.statuses[1].Item.Path)
 }
 
+func TestSortPopupNavigationAppliesImmediately(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m.screen = screenMain
+	m.activePopup = popupSort
+	m.sortBy = columnPath
+	m.sortCursor = 0
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/b", Region: "eu-north-1"}, Exists: true, Value: "2"},
+		{Item: inventory.Item{Path: "/a", Region: "eu-north-1"}, Exists: true, Value: "1"},
+	}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+
+	assert.Equal(t, columnValue, m.sortBy)
+	assert.Equal(t, "/a", m.statuses[0].Item.Path)
+	assert.Equal(t, popupSort, m.activePopup)
+}
+
 func TestSortPopupRendersRadioSelectionWithoutInlineHotkeys(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "user"}})
 	m.screen = screenMain
@@ -2375,10 +2414,10 @@ func TestSortPopupRendersRadioSelectionWithoutInlineHotkeys(t *testing.T) {
 	assert.Contains(t, view, "( ) User")
 	assert.False(t, strings.Contains(view, "( ) Type"))
 	assert.False(t, strings.Contains(view, "v  Value"))
-	assert.Contains(t, view, "enter sort/toggle")
+	assert.False(t, strings.Contains(view, "enter sort/toggle"))
 	assert.Contains(t, view, "d direction")
 	assert.Contains(t, view, "n name")
-	assert.Contains(t, view, "esc cancel")
+	assert.Contains(t, view, "esc close")
 }
 
 func TestBulkDeleteConfirmRendersInlinePhraseInputAndButtons(t *testing.T) {

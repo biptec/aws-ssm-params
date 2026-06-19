@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/stretchr/testify/assert"
@@ -107,6 +108,10 @@ func splitItemKey(key string) (region, path string) {
 		}
 	}
 	return "", key
+}
+
+func (f fakeSSMClient) ListParameterMetadataWithFilters(ctx context.Context, _ []ssm.ParameterFilter) ([]ssm.Metadata, error) {
+	return f.ListParameterMetadata(ctx)
 }
 
 func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, parameterType ssm.ParameterType) error {
@@ -221,6 +226,48 @@ func TestStatusHelpers(t *testing.T) {
 	assert.Equal(t, "us-east-1", Status{}.RegionLabel("us-east-1"))
 	assert.True(t, (Status{Type: ssm.ParameterTypeSecureString.String()}).HasSensitiveValue())
 	assert.False(t, (Status{Type: ssm.ParameterTypeString.String()}).HasSensitiveValue())
+}
+
+func TestSecureStringWithoutIncludedValueIsNotEmpty(t *testing.T) {
+	status := statusFromValue(
+		inventory.Item{Path: "/secret", Region: "eu-north-1"},
+		ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), Value: "encrypted-ciphertext"},
+		ssm.Metadata{},
+		false,
+	)
+
+	assert.True(t, status.Exists)
+	assert.Empty(t, status.Value)
+	assert.False(t, status.Empty)
+	assert.Equal(t, "OK", status.Label())
+}
+
+func TestHiddenSecureStringValueIsNotEmpty(t *testing.T) {
+	status := statusFromValue(
+		inventory.Item{Path: "/secret", Region: "eu-north-1"},
+		ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), ValueHidden: true},
+		ssm.Metadata{},
+		true,
+	)
+
+	assert.True(t, status.Exists)
+	assert.Empty(t, status.Value)
+	assert.False(t, status.Empty)
+	assert.Equal(t, "OK", status.Label())
+}
+
+func TestFilterStatusesByGroupsKeepsMatchingStatuses(t *testing.T) {
+	groups, err := filter.ParseGroups([]string{"name:/app/a"})
+	require.NoError(t, err)
+	statuses := []Status{
+		{Item: inventory.Item{Path: "/app/a"}, Exists: true},
+		{Item: inventory.Item{Path: "/app/b"}, Exists: true},
+	}
+
+	filtered := FilterStatusesByGroups(statuses, groups)
+
+	require.Len(t, filtered, 1)
+	assert.Equal(t, "/app/a", filtered[0].Item.Path)
 }
 
 func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing.T) {

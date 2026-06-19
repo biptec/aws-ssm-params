@@ -15,6 +15,7 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
+	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/randomx"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -32,6 +33,7 @@ type Options struct {
 	Regions                   []string
 	Profile                   string
 	NamesFile                 string
+	FilterGroups              []filter.Group
 	NoColor                   bool
 	Keymap                    string
 	ShowColumns               []string
@@ -62,6 +64,8 @@ const (
 )
 
 const rawLeftLinePrefix = "\x00raw-left\x00"
+
+const encryptedPlaceholderText = "(encrypted)"
 
 type popupKind int
 
@@ -185,8 +189,6 @@ type model struct {
 	query          string
 	effectiveQuery string
 	searchInvalid  bool
-
-	revealValues bool
 
 	message        string
 	warningMessage string
@@ -322,7 +324,7 @@ func parseInitialSortOption(value string) (columnName, bool) {
 	if value == "" {
 		return columnPath, false
 	}
-	parts := strings.Split(value, ",")
+	parts := strings.Split(value, ":")
 	field := strings.TrimSpace(parts[0])
 	column, ok := columnByFieldName(field)
 	if !ok {
@@ -426,7 +428,6 @@ func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, op
 		editDescriptionInput: editDescriptionInput,
 		editFileInput:        editFileInput,
 		columns:              defaultColumnVisibility(opts.ShowColumns),
-		revealValues:         opts.ShowSecureValues,
 		sortBy:               sortBy,
 		sortDescending:       sortDescending,
 		expandedFields:       map[editField]bool{},
@@ -445,17 +446,24 @@ func configureTextInputStyles(input *textinput.Model, opts Options) {
 
 // Init starts the initial background status load and registers a command that waits for loader messages.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh))
+	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh))
 }
 
 // startLoadCmd launches the initial SSM status scan in a goroutine.
 // Progress and final results are sent through loadCh so the Bubble Tea event loop can render loading updates.
-func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
+func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item, groups []filter.Group, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			statuses := LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
+			loader := func(done, total int, region string, chunk []inventory.Item) {
 				ch <- progressMsg{done: done, total: total, region: region, items: append([]inventory.Item(nil), chunk...)}
-			})
+			}
+			var statuses []Status
+			if len(groups) > 0 && len(items) == 0 {
+				statuses = LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, loader)
+			} else {
+				statuses = LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, loader)
+				statuses = FilterStatusesByGroups(statuses, groups)
+			}
 			ch <- loadedMsg(statuses)
 		}()
 		return nil
@@ -741,8 +749,6 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.searchMode = true
 		m.query = m.effectiveQuery
 		m.searchInvalid = false
-	case "v":
-		m.revealValues = !m.revealValues
 	case "d":
 		m.selectedExpanded = !m.selectedExpanded
 	case "c":
@@ -815,7 +821,7 @@ func (m *model) openPopupShortcuts(from screen, popup popupKind) {
 
 func (m *model) openColumnsPopup() {
 	m.columnCursor = 0
-	m.columnsDraft = cloneColumnVisibility(m.columns)
+	m.columnsDraft = nil
 	m.pushPopup(popupColumns)
 }
 
@@ -1088,7 +1094,6 @@ func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	cols := m.allowedColumnItems()
-	m = m.ensureColumnsDraft()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
@@ -1107,25 +1112,20 @@ func (m model) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenColumns, popupColumns)
-	case "q", "esc", "ctrl+g":
-		m.columnsDraft = nil
+	case "q", "esc", "ctrl+g", "enter", "ctrl+j":
 		m.popPopup()
 	case " ":
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
-			m.columnsDraft[key] = !m.columnsDraft[key]
+			m.columns[key] = !m.columns[key]
 		}
-	case "enter", "ctrl+j":
-		m.columns = cloneColumnVisibility(m.columnsDraft)
-		m.columnsDraft = nil
-		m.popPopup()
 	case "a":
 		for _, c := range cols {
-			m.columnsDraft[c] = true
+			m.columns[c] = true
 		}
 	case "x":
 		for _, c := range cols {
-			m.columnsDraft[c] = false
+			m.columns[c] = false
 		}
 	}
 	return m, nil
@@ -1136,7 +1136,7 @@ func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key != "d" {
 		if col, ok := m.popupSortColumnByLetterHotkey(key); ok {
-			m.applySort(col)
+			m.applySortSelection(col)
 			m.popPopup()
 			return m, nil
 		}
@@ -1144,11 +1144,13 @@ func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
+			m.applySortCursor(items)
 		}
 		return m, nil
 	}
 	if action, ok := m.navigationAction(key); ok {
 		m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
+		m.applySortCursor(items)
 		return m, nil
 	}
 	if m.keymapStyle() == keymapVi && key == "g" {
@@ -1158,19 +1160,13 @@ func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenMain, popupSort)
-	case "q", "esc", "ctrl+g":
+	case "q", "esc", "ctrl+g", "enter", "ctrl+j":
 		m.popPopup()
 	case "d":
 		if len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
 			m.toggleSortDirection(items[m.sortCursor].column)
 		}
-	case "enter", "ctrl+j":
-		if len(items) > 0 {
-			m.sortCursor = min(m.sortCursor, len(items)-1)
-			m.applySort(items[m.sortCursor].column)
-		}
-		m.popPopup()
 	}
 	return m, nil
 }
@@ -1888,13 +1884,17 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editField = editFieldValue
 	m.editDirection = editDirectionNext
 	m.viInsertMode = m.keymapStyle() != keymapVi
-	m.textArea.Focus()
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
 	m.editInitialSnapshot = m.currentEditSnapshot()
 	m.screen = screenTextArea
+	if m.encryptedValueLocked() {
+		m = m.focusEditField(m.editFieldOrder()[0])
+	} else {
+		m.textArea.Focus()
+	}
 	return m, nil
 }
 
@@ -1935,7 +1935,12 @@ func (m model) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
 // focusEditField moves the edit-screen focus to one field and focuses/blurs the underlying input widgets.
 func (m model) focusEditField(field editField) model {
 	if !m.editFieldAllowed(field) || (field == editFieldPolicies && !m.shouldShowPoliciesField()) || (field == editFieldOverwrite && !m.shouldShowOverwriteField()) {
-		field = m.editFieldOrder()[0]
+		fields := m.editFieldOrder()
+		if len(fields) == 0 {
+			field = editFieldSSMPath
+		} else {
+			field = fields[0]
+		}
 	}
 	m.blurEditFields()
 	m.editField = field
@@ -2337,6 +2342,12 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 		}
 		item.Path = newPath
 	}
+	if m.encryptedValueLocked() {
+		m.errMessage = "SecureString value is encrypted. Reopen with --with-decryption to edit or save it."
+		m.message = ""
+		m.warningMessage = ""
+		return m, nil
+	}
 	if value == "" {
 		m.errMessage = "Value cannot be empty."
 		m.message = ""
@@ -2499,7 +2510,9 @@ func (m model) renderTextAreaScreen() string {
 		remaining = max(1, innerHeight-len(lines))
 	}
 
-	if m.editFieldAllowed(editFieldValue) {
+	if m.encryptedValueLocked() {
+		lines = append(lines, m.editFieldLine(editFieldValue, "Value", m.encryptedPlaceholder(), labelWidth))
+	} else if m.editFieldAllowed(editFieldValue) {
 		valueLines := m.renderExpandableField(editFieldValue, "Value", m.textArea, labelWidth, max(1, remaining-1), false)
 		lines = append(lines, valueLines...)
 	}
@@ -2829,11 +2842,11 @@ func (m model) renderColumnsScreen() string {
 }
 
 func (m model) renderColumnsPopup() string {
-	return m.renderPopupBoxWithActions("Columns", m.columnOptionLines(), "Enter apply   Esc cancel")
+	return m.renderPopupBoxWithActions("Columns", m.columnOptionLines(), "Esc close")
 }
 
 func (m model) renderSortPopup() string {
-	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Enter sort   Esc cancel")
+	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Esc close")
 }
 
 func (m model) renderValueActionsPopup() string {
@@ -3182,13 +3195,13 @@ func (m model) detailFieldAllowed(label string) bool {
 }
 
 // displayValue returns the user-facing value for selected blocks and VALUE table cells.
-// SecureString values are treated as sensitive and hidden until the user presses v; String/StringList are shown by default.
+// SecureString values are shown when decrypted; otherwise the UI renders an encrypted placeholder.
 func (m model) displayValue(st Status, full bool) string {
 	if st.Item.Path != "" && st.isMissing() {
 		return "-"
 	}
-	if m.shouldHideValue(st) {
-		return "(hidden)"
+	if m.shouldDisplayEncryptedValue(st) {
+		return encryptedPlaceholderText
 	}
 	width := max(20, m.boxInnerWidth()-22)
 	if full {
@@ -3223,11 +3236,12 @@ func oneLineValuePreview(value string, width int) string {
 	return preview + suffix
 }
 
-func (m model) shouldHideValue(st Status) bool {
-	if m.revealValues {
-		return false
-	}
-	return st.HasSensitiveValue()
+func (m model) shouldDisplayEncryptedValue(st Status) bool {
+	return st.HasSensitiveValue() && st.Value == "" && !m.opts.ShowSecureValues
+}
+
+func (m model) encryptedValueLocked() bool {
+	return !m.editNewParameter && m.currentStatus().Exists && m.normalizedEditType() == ssm.ParameterTypeSecureString && !m.opts.ShowSecureValues
 }
 
 // renderListBlock renders the main table, including dynamic columns, scrolling, search/filter status, and messages.
@@ -3370,8 +3384,7 @@ func (m model) renderListHeader(cols []tableColumn) string {
 func (m model) renderListRow(index int, st Status, selected bool, cols []tableColumn) string {
 	parts := make([]string, 0, len(cols))
 	for _, col := range cols {
-		value := m.tableCellValue(col.key, index, st)
-		parts = append(parts, pad(truncateInline(value, col.width), col.width))
+		parts = append(parts, m.renderListCell(col, index, st))
 	}
 	row := strings.Join(parts, "  ")
 	plain := stripANSI(row)
@@ -3382,6 +3395,14 @@ func (m model) renderListRow(index int, st Status, selected bool, cols []tableCo
 		return "  " + styled
 	}
 	return "  " + row
+}
+
+func (m model) renderListCell(col tableColumn, index int, st Status) string {
+	value := truncateInline(m.tableCellValue(col.key, index, st), col.width)
+	if col.key == columnValue && m.shouldDisplayEncryptedValue(st) {
+		value = m.encryptedPlaceholder()
+	}
+	return pad(value, col.width)
 }
 
 // rowText applies row-level styling based on selection and status severity.
@@ -3452,7 +3473,11 @@ func (m model) renderFieldPairs(fields [][2]string, labelWidth int) []string {
 			lines = append(lines, "  "+m.fieldLine(f[0], value, labelWidth))
 			continue
 		}
-		lines = append(lines, "  "+m.fieldLine(f[0], m.value(value), labelWidth))
+		renderedValue := m.value(value)
+		if f[0] == "Value" && value == encryptedPlaceholderText {
+			renderedValue = m.encryptedPlaceholder()
+		}
+		lines = append(lines, "  "+m.fieldLine(f[0], renderedValue, labelWidth))
 	}
 	return lines
 }
@@ -3960,6 +3985,10 @@ func (m model) muted(s string) string {
 	return mutedStyle.Render(s)
 }
 
+func (m model) encryptedPlaceholder() string {
+	return m.muted(encryptedPlaceholderText)
+}
+
 func (m model) divider(s string) string {
 	return strings.Repeat(" ", lipgloss.Width(s))
 }
@@ -4453,6 +4482,25 @@ func (m *model) applySort(column columnName) {
 	m.applySortWithDirection(column, descending)
 }
 
+func (m *model) applySortSelection(column columnName) {
+	if column == "" {
+		return
+	}
+	descending := false
+	if column == m.sortBy {
+		descending = m.sortDescending
+	}
+	m.applySortWithDirection(column, descending)
+}
+
+func (m *model) applySortCursor(items []sortItem) {
+	if len(items) == 0 {
+		return
+	}
+	m.sortCursor = min(m.sortCursor, len(items)-1)
+	m.applySortSelection(items[m.sortCursor].column)
+}
+
 func (m *model) toggleSortDirection(column columnName) {
 	if column == "" {
 		return
@@ -4666,7 +4714,7 @@ func (m model) editFieldAllowed(field editField) bool {
 	case editFieldPolicies:
 		return m.fieldAllowed("policies")
 	case editFieldValue:
-		return m.fieldAllowed("value")
+		return m.fieldAllowed("value") && !m.encryptedValueLocked()
 	case editFieldOverwrite:
 		return m.fieldAllowed("value")
 	default:
@@ -4705,25 +4753,7 @@ func columnLabel(c columnName) string {
 	}
 }
 
-func cloneColumnVisibility(columns map[columnName]bool) map[columnName]bool {
-	clone := map[columnName]bool{}
-	for _, column := range columnItems() {
-		clone[column] = columns[column]
-	}
-	return clone
-}
-
-func (m model) ensureColumnsDraft() model {
-	if m.columnsDraft == nil {
-		m.columnsDraft = cloneColumnVisibility(m.columns)
-	}
-	return m
-}
-
 func (m model) columnsForRendering() map[columnName]bool {
-	if m.activePopup == popupColumns && m.columnsDraft != nil {
-		return m.columnsDraft
-	}
 	return m.columns
 }
 
@@ -4752,7 +4782,7 @@ func ParseColumnOption(value string) ([]string, error) {
 	for _, name := range names {
 		column, ok := optionalColumnByName(name)
 		if !ok {
-			return nil, fmt.Errorf("unsupported --show-columns value %q; supported columns: %s", name, strings.Join(ValidColumnNames(), ","))
+			return nil, fmt.Errorf("unsupported --show-column value %q; supported columns: %s", name, strings.Join(ValidColumnNames(), ","))
 		}
 		canonical := string(column)
 		if !seen[canonical] {
@@ -4763,9 +4793,9 @@ func ParseColumnOption(value string) ([]string, error) {
 	return out, nil
 }
 
-// ValidColumnNames returns every column name accepted by --show-columns.
+// ValidColumnNames returns every column name accepted by --show-column.
 func ValidColumnNames() []string {
-	columns := columnItems()
+	columns := append([]columnName{columnPath}, columnItems()...)
 	out := make([]string, 0, len(columns))
 	for _, column := range columns {
 		out = append(out, string(column))
@@ -4787,6 +4817,9 @@ func compactColumnNames(value string) []string {
 
 func optionalColumnByName(name string) (columnName, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "name" || name == "path" {
+		return columnPath, true
+	}
 	for _, column := range columnItems() {
 		if name == string(column) {
 			return column, true
@@ -5060,7 +5093,7 @@ func mainFooterText(detailsShown bool) string {
 }
 
 func searchFooterText() string {
-	return "ctrl+/ help • enter apply • esc cancel"
+	return "ctrl+/ help • esc close"
 }
 
 func (m model) popupFooterText(kind popupKind) string {
@@ -5072,7 +5105,7 @@ func (m model) popupFooterText(kind popupKind) string {
 	case popupSort:
 		return m.sortPopupScreenFooter()
 	case popupColumns:
-		return "ctrl+/ help • space toggle • enter apply • a all • x none • esc cancel"
+		return "ctrl+/ help • space toggle • a all • x none • esc close"
 	case popupValueActions:
 		return "ctrl+/ help • enter select • c clear • r random • l load • w write • esc cancel"
 	case popupPoliciesActions:
@@ -5113,12 +5146,12 @@ func (m model) popupFooterText(kind popupKind) string {
 
 func (m model) sortPopupScreenFooter() string {
 	sortItems := m.popupSortItems()
-	parts := make([]string, 0, 3+len(sortItems)+1)
-	parts = append(parts, "ctrl+/ help", "enter sort/toggle", "d direction")
+	parts := make([]string, 0, 2+len(sortItems)+1)
+	parts = append(parts, "ctrl+/ help", "d direction")
 	for _, item := range sortItems {
 		parts = append(parts, item.hotkey+" "+strings.ToLower(item.label))
 	}
-	parts = append(parts, "esc cancel")
+	parts = append(parts, "esc close")
 	return strings.Join(parts, " • ")
 }
 
@@ -5168,16 +5201,14 @@ func (m model) popupActionsShortcuts(kind popupKind) string {
 		return ""
 	case popupSort:
 		return strings.TrimSpace(`Actions
-  enter        sort selected column / toggle active direction
   d            toggle selected direction
-  esc / q / ctrl+g  cancel`)
+  esc / q / ctrl+g  close`)
 	case popupColumns:
 		return strings.TrimSpace(`Actions
   space        toggle focused column
-  enter        apply columns
   a            show all columns
   x            hide all optional columns
-  esc / q / ctrl+g  cancel`)
+  esc / q / ctrl+g  close`)
 	case popupValueActions:
 		return strings.TrimSpace(`Actions
   enter        select focused action
@@ -5288,7 +5319,6 @@ func (m model) actionsShortcuts(forScreen screen) string {
   s            sort popup
   x            delete selected value
   X            delete visible/filtered values
-  v            reveal/hide values
   esc / q      quit`)
 	case screenTextArea:
 		if m.keymapStyle() == keymapVi {

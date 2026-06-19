@@ -15,6 +15,12 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 )
 
+// FieldMapping maps an AWS field name to a file field name.
+type FieldMapping struct {
+	AWSName  string
+	FileName string
+}
+
 // Record is the import/export representation of one SSM parameter.
 // Path is the canonical SSM name, Alias is the human-friendly dotenv variable name, Value is the parameter value,
 // and Type optionally carries the AWS SSM parameter type when an import/export format preserves it.
@@ -417,4 +423,234 @@ func normalizeAlias(value string) string {
 		return "VALUE"
 	}
 	return strings.ToUpper(value)
+}
+
+// ExportJSONMapped writes records as either an array of objects or an object keyed by a selected AWS field.
+func ExportJSONMapped(w io.Writer, records []Record, mappings []FieldMapping, keyField string) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if len(mappings) == 0 && keyField == "" {
+		return crerr.Wrap(encoder.Encode(recordsToObjects(records, defaultJSONMappings(), "")), "encode mapped JSON export")
+	}
+	if len(mappings) == 0 {
+		mappings = defaultJSONMappings()
+	}
+	if keyField == "" {
+		return crerr.Wrap(encoder.Encode(recordsToObjects(records, mappings, "")), "encode mapped JSON export")
+	}
+	data := map[string]map[string]any{}
+	for i := range records {
+		key := records[i].fieldValue(keyField)
+		if key == "" {
+			continue
+		}
+		data[key] = recordObject(records[i], mappings, keyField)
+	}
+	return crerr.Wrap(encoder.Encode(data), "encode keyed JSON export")
+}
+
+// ImportJSONMapped reads either JSON array records or a JSON object keyed by json-key-field.
+func ImportJSONMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]Record, error) {
+	if len(mappings) == 0 {
+		mappings = defaultJSONMappings()
+	}
+	var raw json.RawMessage
+	if err := json.NewDecoder(r).Decode(&raw); err != nil {
+		return nil, crerr.Wrap(err, "decode JSON import")
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(trimmed, "[") {
+		var objects []map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &objects); err != nil {
+			return nil, crerr.Wrap(err, "decode JSON array import")
+		}
+		return recordsFromObjects(objects, mappings, ""), nil
+	}
+	var keyed map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &keyed); err != nil {
+		return nil, crerr.Wrap(err, "decode keyed JSON import")
+	}
+	keys := make([]string, 0, len(keyed))
+	for key := range keyed {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	records := make([]Record, 0, len(keys))
+	for _, key := range keys {
+		record := recordFromObject(keyed[key], mappings)
+		if keyField != "" {
+			record.setFieldValue(keyField, key)
+		} else if record.Path == "" {
+			record.Path = key
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+func recordsToObjects(records []Record, mappings []FieldMapping, keyField string) []map[string]any {
+	objects := make([]map[string]any, 0, len(records))
+	for i := range records {
+		objects = append(objects, recordObject(records[i], mappings, keyField))
+	}
+	return objects
+}
+
+func recordObject(record Record, mappings []FieldMapping, keyField string) map[string]any {
+	object := map[string]any{}
+	for _, mapping := range mappings {
+		if mapping.AWSName == keyField {
+			continue
+		}
+		value := record.fieldAny(mapping.AWSName)
+		if value == nil || value == "" {
+			continue
+		}
+		object[mapping.FileName] = value
+	}
+	return object
+}
+
+func recordsFromObjects(objects []map[string]json.RawMessage, mappings []FieldMapping, keyField string) []Record {
+	records := make([]Record, 0, len(objects))
+	for _, object := range objects {
+		record := recordFromObject(object, mappings)
+		if keyField != "" && record.fieldValue(keyField) == "" {
+			continue
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func recordFromObject(object map[string]json.RawMessage, mappings []FieldMapping) Record {
+	record := Record{}
+	fields := make([]string, 0, len(mappings))
+	for _, mapping := range mappings {
+		raw, ok := object[mapping.FileName]
+		if !ok {
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(raw, &value); err == nil {
+			record.setFieldValue(mapping.AWSName, value)
+			fields = append(fields, mapping.AWSName)
+			continue
+		}
+		var number int64
+		if err := json.Unmarshal(raw, &number); err == nil {
+			record.setFieldValue(mapping.AWSName, strconv.FormatInt(number, 10))
+			fields = append(fields, mapping.AWSName)
+		}
+	}
+	record.Fields = fields
+	if record.Alias == "" && record.Path != "" {
+		record.Alias = AliasForPath(record.Path, inventory.Item{})
+	}
+	return record
+}
+
+func defaultJSONMappings() []FieldMapping {
+	return []FieldMapping{
+		{AWSName: "name", FileName: "name"},
+		{AWSName: "region", FileName: "region"},
+		{AWSName: "type", FileName: "type"},
+		{AWSName: "tier", FileName: "tier"},
+		{AWSName: "data-type", FileName: "dataType"},
+		{AWSName: "policies", FileName: "policies"},
+		{AWSName: "description", FileName: "description"},
+		{AWSName: "value", FileName: "value"},
+		{AWSName: "date", FileName: "date"},
+		{AWSName: "version", FileName: "version"},
+		{AWSName: "len", FileName: "len"},
+		{AWSName: "sha256", FileName: "sha256"},
+		{AWSName: "user", FileName: "user"},
+	}
+}
+
+func (r Record) fieldAny(field string) any {
+	switch field {
+	case "name":
+		return r.Path
+	case "region":
+		return r.Region
+	case "type":
+		return r.Type
+	case "tier":
+		return r.Tier
+	case "data-type":
+		return r.DataType
+	case "policies":
+		return r.Policies
+	case "description":
+		return r.Description
+	case "value":
+		return r.Value
+	case "date":
+		return r.Date
+	case "version":
+		if r.Version == 0 {
+			return ""
+		}
+		return r.Version
+	case "len":
+		if r.Len == 0 {
+			return ""
+		}
+		return r.Len
+	case "sha256":
+		return r.SHA256
+	case "user":
+		return r.User
+	default:
+		return ""
+	}
+}
+
+func (r Record) fieldValue(field string) string {
+	value := r.fieldAny(field)
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	default:
+		return ""
+	}
+}
+
+func (r *Record) setFieldValue(field, value string) {
+	switch field {
+	case "name":
+		r.Path = value
+		if r.Alias == "" && value != "" {
+			r.Alias = AliasForPath(value, inventory.Item{})
+		}
+	case "region":
+		r.Region = value
+	case "type":
+		r.Type = value
+	case "tier":
+		r.Tier = value
+	case "data-type":
+		r.DataType = value
+	case "policies":
+		r.Policies = value
+	case "description":
+		r.Description = value
+	case "value":
+		r.Value = value
+	case "date":
+		r.Date = value
+	case "version":
+		r.Version, _ = strconv.ParseInt(value, 10, 64)
+	case "len":
+		r.Len, _ = strconv.Atoi(value)
+	case "sha256":
+		r.SHA256 = value
+	case "user":
+		r.User = value
+	}
 }

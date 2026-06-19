@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCLIHelpShowsTUIAliasAndShowColumnsFlag(t *testing.T) {
+func TestCLIHelpShowsInteractiveCommand(t *testing.T) {
 	cliApp := newCLIApp([]string{"--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
@@ -17,10 +17,13 @@ func TestCLIHelpShowsTUIAliasAndShowColumnsFlag(t *testing.T) {
 	err := cliApp.Run([]string{"aws-ssm-params", "--help"})
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "interactive, tui")
+	assert.Contains(t, out.String(), "interactive")
+	assert.Contains(t, out.String(), "tui")
+	assert.Contains(t, out.String(), "--name")
+	assert.Contains(t, out.String(), "--names-file")
 }
 
-func TestInteractiveHelpUsesShowColumnsFlag(t *testing.T) {
+func TestInteractiveHelpUsesShowColumnFlag(t *testing.T) {
 	cliApp := newCLIApp([]string{"interactive", "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
@@ -28,11 +31,11 @@ func TestInteractiveHelpUsesShowColumnsFlag(t *testing.T) {
 	err := cliApp.Run([]string{"aws-ssm-params", "interactive", "--help"})
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "--show-columns")
+	assert.Contains(t, out.String(), "--show-column")
 	assert.False(t, strings.Contains(out.String(), "--columns"))
 }
 
-func TestTUIAliasUsesInteractiveCommandHelp(t *testing.T) {
+func TestTUIAliasShowsInteractiveHelp(t *testing.T) {
 	cliApp := newCLIApp([]string{"tui", "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
@@ -40,15 +43,35 @@ func TestTUIAliasUsesInteractiveCommandHelp(t *testing.T) {
 	err := cliApp.Run([]string{"aws-ssm-params", "tui", "--help"})
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "Open the interactive TUI")
-	assert.Contains(t, out.String(), "--show-columns")
+	assert.Contains(t, out.String(), "interactive")
+	assert.Contains(t, out.String(), "--show-column")
 }
 
-func TestCLIRejectsRepeatedRegionsFlag(t *testing.T) {
-	cliApp := newCLIApp([]string{"--regions", "eu-north-1", "--regions=eu-central-1", "interactive"})
+func TestUnknownCommandReturnsError(t *testing.T) {
+	cliApp := newCLIApp([]string{"unknown"})
+	var out bytes.Buffer
+	cliApp.Writer = &out
 
-	err := cliApp.Run([]string{"aws-ssm-params", "--regions", "eu-north-1", "--regions=eu-central-1", "interactive", "--help"})
+	err := cliApp.Run([]string{"aws-ssm-params", "unknown"})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--regions can only be specified once")
+	assert.Contains(t, err.Error(), "unknown command: unknown")
+}
+
+func TestCLIRejectsCommaSeparatedRegionFlag(t *testing.T) {
+	cliApp := newCLIApp([]string{"--region", "eu-north-1,eu-central-1", "interactive"})
+
+	err := cliApp.Run([]string{"aws-ssm-params", "--region", "eu-north-1,eu-central-1", "interactive", "--help"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repeat the flag")
+}
+
+func TestCLIRejectsCommaSeparatedNameFlag(t *testing.T) {
+	cliApp := newCLIApp([]string{"--name", "/app/a,/app/b", "interactive"})
+
+	err := cliApp.Run([]string{"aws-ssm-params", "--name", "/app/a,/app/b", "interactive", "--help"})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "repeat the flag")
 }

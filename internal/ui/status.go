@@ -12,6 +12,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/gosuri/uilive"
@@ -35,6 +36,35 @@ type Status struct {
 	User         string
 	Value        string
 	Error        string
+}
+
+// FilterRecord converts a status into the normalized shape used by CLI filters.
+func (status Status) FilterRecord() filter.Record {
+	return filter.Record{
+		Name:        status.Item.Path,
+		Region:      status.Item.Region,
+		Type:        status.Type,
+		Tier:        status.Tier,
+		DataType:    status.DataType,
+		Description: status.Description,
+		Policies:    status.Policies,
+		Value:       status.Value,
+	}
+}
+
+// FilterStatusesByGroups returns statuses that match at least one configured filter group.
+// Empty group configuration means no filtering.
+func FilterStatusesByGroups(statuses []Status, groups []filter.Group) []Status {
+	if len(groups) == 0 {
+		return statuses
+	}
+	out := make([]Status, 0, len(statuses))
+	for i := range statuses {
+		if filter.MatchAny(groups, statuses[i].FilterRecord()) {
+			out = append(out, statuses[i])
+		}
+	}
+	return out
 }
 
 // Label converts a Status into the short label used by compact status tables.
@@ -146,6 +176,145 @@ func LoadStatusesBatchForRegions(ctx context.Context, client ssm.Client, items [
 		return loadStatusesAllRegions(ctx, client, items, includeValues, progress)
 	}
 	return loadStatusesByItemRegion(ctx, client, items, includeValues, progress)
+}
+
+// LoadFilteredStatusesWithProgressForRegions discovers parameters with filter groups and prints progress.
+func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, groups []filter.Group, includeValues bool, regions []string) []Status {
+	writer := uilive.New()
+	writer.Start()
+	defer writer.Stop()
+
+	return LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
+		if region != "" {
+			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
+		} else {
+			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d...\n", done, total)
+		}
+		for _, item := range chunk {
+			_, _ = fmt.Fprintf(writer, "%s\n", item.Path)
+		}
+	})
+}
+
+// LoadFilteredStatusesBatchForRegions discovers parameter metadata with DescribeParameters prefilters,
+// enriches matching rows with GetParameters values, then applies exact local filter matching.
+func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssm.Client, groups []filter.Group, includeValues bool, regions []string, progress LoadProgress) []Status {
+	if len(groups) == 0 {
+		return LoadStatusesBatchForRegions(ctx, client, nil, includeValues, regions, progress)
+	}
+	if len(regions) == 0 {
+		if region := client.DefaultRegion(); region != "" {
+			regions = []string{region}
+		} else {
+			regions = []string{""}
+		}
+	}
+
+	statuses := make([]Status, 0, len(regions)*64)
+	seen := map[string]bool{}
+	for _, region := range regions {
+		regionalClient := client.ForRegion(region)
+		for _, group := range groups {
+			groupStatuses := loadFilteredStatusesRegion(ctx, regionalClient, region, group, includeValues, progress)
+			for i := range groupStatuses {
+				key := itemKey(groupStatuses[i].Item.Region, groupStatuses[i].Item.Path)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				statuses = append(statuses, groupStatuses[i])
+			}
+		}
+	}
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Item.Region != statuses[j].Item.Region {
+			return statuses[i].Item.Region < statuses[j].Item.Region
+		}
+		return statuses[i].Item.Path < statuses[j].Item.Path
+	})
+	return statuses
+}
+
+func loadFilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, group filter.Group, includeValues bool, progress LoadProgress) []Status {
+	if progress != nil {
+		progress(0, 0, region, nil)
+	}
+	metas, err := client.ListParameterMetadataWithFilters(ctx, ssmFiltersFromGroup(group))
+	if err != nil {
+		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
+	}
+	items := make([]inventory.Item, 0, len(metas))
+	metaByKey := map[string]ssm.Metadata{}
+	for i := range metas {
+		meta := metas[i]
+		if meta.Name == "" {
+			continue
+		}
+		if meta.Region == "" {
+			meta.Region = region
+		}
+		item := inventory.Item{Path: meta.Name, Region: meta.Region, Kind: "ssm", Source: "aws:ssm", SecretName: pathBase(meta.Name)}
+		items = append(items, item)
+		metaByKey[itemKey(item.Region, item.Path)] = meta
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+
+	values := map[string]ssm.Parameter{}
+	errs := map[string]error{}
+	fetchValues := includeValues || group.HasField(filter.FieldValue)
+	if fetchValues {
+		for start := 0; start < len(items); start += 10 {
+			end := start + 10
+			if end > len(items) {
+				end = len(items)
+			}
+			chunkItems := items[start:end]
+			if progress != nil {
+				progress(start, len(items), region, chunkItems)
+			}
+			paths := make([]string, 0, len(chunkItems))
+			for _, item := range chunkItems {
+				paths = append(paths, item.Path)
+			}
+			chunkValues, chunkErrs := client.GetMany(ctx, paths)
+			for path, value := range chunkValues {
+				if value.Region == "" {
+					value.Region = region
+				}
+				values[itemKey(region, path)] = value
+			}
+			for path, err := range chunkErrs {
+				errs[itemKey(region, path)] = err
+			}
+		}
+	}
+	if progress != nil {
+		progress(len(items), len(items), region, nil)
+	}
+
+	statuses := make([]Status, 0, len(items))
+	for _, item := range items {
+		status := statusFromMaps(item, item.Region, metaByKey, values, errs, fetchValues)
+		if !includeValues {
+			status.Value = ""
+			status.Length = 0
+			status.SHA256Prefix = ""
+		}
+		matchStatus := statusFromMaps(item, item.Region, metaByKey, values, errs, fetchValues)
+		if group.Match(matchStatus.FilterRecord()) {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
+}
+
+func ssmFiltersFromGroup(group filter.Group) []ssm.ParameterFilter {
+	awsFilters := group.AWSFilters()
+	filters := make([]ssm.ParameterFilter, 0, len(awsFilters))
+	for _, awsFilter := range awsFilters {
+		filters = append(filters, ssm.ParameterFilter{Key: awsFilter.Key, Option: awsFilter.Option, Values: append([]string(nil), awsFilter.Values...)})
+	}
+	return filters
 }
 
 // containsAllRegionItems reports whether at least one inventory item needs wildcard region expansion.
@@ -429,12 +598,22 @@ func statusFromValue(item inventory.Item, param ssm.Parameter, meta ssm.Metadata
 	if parameterType == "" {
 		parameterType = ssm.DefaultParameterType.String()
 	}
-	status := Status{Item: item, Exists: true, Type: parameterType, Tier: meta.Tier, DataType: meta.DataType, Policies: meta.Policies, Description: meta.Description, User: meta.User, Modified: meta.Modified, Version: param.Version, Value: param.Value, Length: len(param.Value), Empty: param.Value == "", SHA256Prefix: hashPrefix(param.Value)}
+	valueKnown := includeValues && !param.ValueHidden
+	if parameterType != ssm.ParameterTypeSecureString.String() {
+		valueKnown = true
+	}
+	value := param.Value
+	length := len(value)
+	sha256Prefix := hashPrefix(value)
+	empty := valueKnown && value == ""
+	if !valueKnown {
+		value = ""
+		length = 0
+		sha256Prefix = ""
+	}
+	status := Status{Item: item, Exists: true, Type: parameterType, Tier: meta.Tier, DataType: meta.DataType, Policies: meta.Policies, Description: meta.Description, User: meta.User, Modified: meta.Modified, Version: param.Version, Value: value, Length: length, Empty: empty, SHA256Prefix: sha256Prefix}
 	if status.Modified == "" {
 		status.Modified = param.Modified
-	}
-	if !includeValues {
-		status.Value = ""
 	}
 	return status
 }
