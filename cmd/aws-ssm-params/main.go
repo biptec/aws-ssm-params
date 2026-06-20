@@ -66,8 +66,6 @@ func newCLIApp(rawArgs []string) *cli.App {
 		},
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{Name: "region", EnvVars: []string{"AWS_SSM_PARAMS_REGIONS", "AWS_SSM_PARAMS_REGION"}, Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
-			&cli.StringSliceFlag{Name: "name", EnvVars: []string{"AWS_SSM_PARAMS_NAME"}, Usage: "SSM parameter name to load; repeat the flag for multiple names; env accepts comma-separated values"},
-			&cli.StringFlag{Name: "names-file", EnvVars: []string{"AWS_SSM_PARAMS_NAMES_FILE"}, Usage: "file with SSM parameter names to load"},
 			&cli.BoolFlag{Name: "all-regions", EnvVars: []string{"AWS_SSM_PARAMS_ALL_REGIONS"}, Usage: "search parameters across all enabled AWS regions"},
 			&cli.StringFlag{Name: "profile", EnvVars: []string{"AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"}, Usage: "AWS profile"},
 			&cli.BoolFlag{Name: "no-color", EnvVars: []string{"AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR"}, Usage: "disable colored output"},
@@ -95,6 +93,8 @@ func newCLIApp(rawArgs []string) *cli.App {
 					return app.RejectCommaSeparatedFlagArgs(ctx.Args().Slice(), "filter", "show-column")
 				},
 				Flags: []cli.Flag{
+					&cli.StringSliceFlag{Name: "name", EnvVars: []string{"AWS_SSM_PARAMS_NAME"}, Usage: "SSM parameter name to load; repeat the flag for multiple names; env accepts comma-separated values"},
+					&cli.StringFlag{Name: "names-file", EnvVars: []string{"AWS_SSM_PARAMS_NAMES_FILE"}, Usage: "file with SSM parameter names to load"},
 					&cli.StringFlag{Name: "filters-file", EnvVars: []string{"AWS_SSM_PARAMS_FILTERS_FILE"}, Usage: "file with filter groups; one OR group per line"},
 					&cli.StringSliceFlag{Name: "filter", EnvVars: []string{"AWS_SSM_PARAMS_FILTERS", "AWS_SSM_PARAMS_FILTER"}, Usage: "filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values"},
 					&cli.BoolFlag{Name: "with-decryption", EnvVars: []string{"AWS_SSM_PARAMS_WITH_DECRYPTION"}, Usage: "decrypt SecureString values"},

@@ -19,8 +19,8 @@ func TestCLIHelpShowsInteractiveCommand(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), "interactive")
 	assert.Contains(t, out.String(), "tui")
-	assert.Contains(t, out.String(), "--name")
-	assert.Contains(t, out.String(), "--names-file")
+	assert.NotContains(t, out.String(), "--name")
+	assert.NotContains(t, out.String(), "--names-file")
 }
 
 func TestInteractiveHelpUsesShowColumnFlag(t *testing.T) {
@@ -31,6 +31,8 @@ func TestInteractiveHelpUsesShowColumnFlag(t *testing.T) {
 	err := cliApp.Run([]string{"aws-ssm-params", "interactive", "--help"})
 
 	require.NoError(t, err)
+	assert.Contains(t, out.String(), "--name")
+	assert.Contains(t, out.String(), "--names-file")
 	assert.Contains(t, out.String(), "--show-column")
 	assert.False(t, strings.Contains(out.String(), "--columns"))
 }
@@ -44,6 +46,8 @@ func TestTUIAliasShowsInteractiveHelp(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), "interactive")
+	assert.Contains(t, out.String(), "--name")
+	assert.Contains(t, out.String(), "--names-file")
 	assert.Contains(t, out.String(), "--show-column")
 }
 
@@ -68,10 +72,34 @@ func TestCLIRejectsCommaSeparatedRegionFlag(t *testing.T) {
 }
 
 func TestCLIRejectsCommaSeparatedNameFlag(t *testing.T) {
-	cliApp := newCLIApp([]string{"--name", "/app/a,/app/b", "interactive"})
+	cliApp := newCLIApp([]string{"interactive", "--name", "/app/a,/app/b"})
 
-	err := cliApp.Run([]string{"aws-ssm-params", "--name", "/app/a,/app/b", "interactive", "--help"})
+	err := cliApp.Run([]string{"aws-ssm-params", "interactive", "--name", "/app/a,/app/b", "--help"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "repeat the flag")
+}
+
+func TestExportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
+	cliApp := newCLIApp([]string{"export", "--help"})
+	var out bytes.Buffer
+	cliApp.Writer = &out
+
+	err := cliApp.Run([]string{"aws-ssm-params", "export", "--help"})
+
+	require.NoError(t, err)
+	assert.NotContains(t, out.String(), "--name")
+	assert.NotContains(t, out.String(), "--names-file")
+}
+
+func TestImportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
+	cliApp := newCLIApp([]string{"import", "--help"})
+	var out bytes.Buffer
+	cliApp.Writer = &out
+
+	err := cliApp.Run([]string{"aws-ssm-params", "import", "--help"})
+
+	require.NoError(t, err)
+	assert.NotContains(t, out.String(), "--name")
+	assert.NotContains(t, out.String(), "--names-file")
 }

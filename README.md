@@ -21,8 +21,6 @@ Commands:
 
 ```text
 --region value       AWS region; repeat the flag for multiple regions
---name value         Explicit SSM parameter name to include; repeat for multiple names
---names-file path    File with explicit SSM parameter names to include
 --all-regions        Search parameters across all enabled AWS regions
 --profile value      AWS profile
 --no-color           Disable colored output
@@ -37,7 +35,7 @@ Logging is disabled by default (`--log-level=off`). API errors and requests are 
 CLI list values are passed by repeating flags:
 
 ```bash
-aws-ssm-params --region eu-north-1 --region eu-central-1 --name /stage/prod/test interactive
+aws-ssm-params --region eu-north-1 --region eu-central-1 interactive --name /stage/prod/test
 ```
 
 Comma-separated lists are allowed only in environment variables:
@@ -49,19 +47,19 @@ AWS_SSM_PARAMS_REGIONS=eu-north-1,eu-central-1 AWS_SSM_PARAMS_NAME=/stage/prod/t
 
 ## Explicit parameter inventory
 
-Use `--name` or `--names-file` when you already know which infrastructure parameters should exist. These options are not filters: they build the desired inventory. Names that are not found in AWS are still shown in the TUI as missing rows so they can be created.
+Use interactive `--name` or `--names-file` when you already know which infrastructure parameters should exist. These options are TUI inventory inputs, not global filters: they build the desired inventory. Names that are not found in AWS are still shown in the TUI as missing rows so they can be created.
 
 ```bash
 aws-ssm-params \
   --region eu-north-1 \
+  interactive \
   --name /stage/prod/test \
-  --name /stage/dev/test \
-  interactive
+  --name /stage/dev/test
 
 aws-ssm-params \
   --region eu-north-1 \
-  --names-file path/to/names.txt \
-  tui
+  tui \
+  --names-file path/to/names.txt
 ```
 
 `--names-file` is newline-based. Empty lines and `#` comments are ignored.
@@ -71,7 +69,7 @@ aws-ssm-params \
 /stage/dev/test
 ```
 
-Environment variables use comma-separated values for repeated flags:
+Interactive environment variables use comma-separated values for repeated flags:
 
 ```bash
 AWS_SSM_PARAMS_NAME=/stage/prod/test,/stage/dev/test
@@ -162,6 +160,8 @@ aws-ssm-params interactive \
 Options:
 
 ```text
+--name value             repeat for multiple explicit TUI inventory names
+--names-file path        file with explicit TUI inventory names
 --filters-file path
 --filter filter-group
 --with-decryption

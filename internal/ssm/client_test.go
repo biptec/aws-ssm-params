@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
-	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -47,13 +45,13 @@ func (f *fakeSDKSSM) DeleteParameters(_ context.Context, input *awsssm.DeletePar
 	return &awsssm.DeleteParametersOutput{}, f.deleteErr
 }
 
-type fakeSDKEC2 struct {
-	output *ec2.DescribeRegionsOutput
-	err    error
+type fakeRegionAPI struct {
+	regions []awsRegion
+	err     error
 }
 
-func (f fakeSDKEC2) DescribeRegions(_ context.Context, _ *ec2.DescribeRegionsInput, _ ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
-	return f.output, f.err
+func (f fakeRegionAPI) DescribeRegions(context.Context, *AWSClient) ([]awsRegion, error) {
+	return f.regions, f.err
 }
 
 type fakeSDKSTS struct{ err error }
@@ -117,11 +115,11 @@ func TestDescribeManyMapsMetadata(t *testing.T) {
 }
 
 func TestListRegionsFiltersDisabledRegionsAndSorts(t *testing.T) {
-	client := &AWSClient{ec2Client: fakeSDKEC2{output: &ec2.DescribeRegionsOutput{Regions: []ec2types.Region{
-		{RegionName: aws.String("us-east-1"), OptInStatus: aws.String("opt-in-not-required")},
-		{RegionName: aws.String("ap-south-2"), OptInStatus: aws.String("not-opted-in")},
-		{RegionName: aws.String("eu-north-1"), OptInStatus: aws.String("opted-in")},
-	}}}}
+	client := &AWSClient{regionClient: fakeRegionAPI{regions: []awsRegion{
+		{Name: "us-east-1", OptInStatus: "opt-in-not-required"},
+		{Name: "ap-south-2", OptInStatus: "not-opted-in"},
+		{Name: "eu-north-1", OptInStatus: "opted-in"},
+	}}}
 
 	regions, err := client.ListRegions(context.Background())
 

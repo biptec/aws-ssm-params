@@ -3,10 +3,15 @@ package ssm
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,8 +19,8 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	awsssm "github.com/aws/aws-sdk-go-v2/service/ssm"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -56,10 +61,10 @@ type AWSClient struct {
 	cfgErr error
 	loaded bool
 
-	clientMu  sync.Mutex
-	ssmClient ssmAPI
-	ec2Client ec2API
-	stsClient stsAPI
+	clientMu     sync.Mutex
+	ssmClient    ssmAPI
+	regionClient regionAPI
+	stsClient    stsAPI
 }
 
 type ssmAPI interface {
@@ -69,8 +74,13 @@ type ssmAPI interface {
 	DeleteParameters(context.Context, *awsssm.DeleteParametersInput, ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error)
 }
 
-type ec2API interface {
-	DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
+type regionAPI interface {
+	DescribeRegions(ctx context.Context, client *AWSClient) ([]awsRegion, error)
+}
+
+type awsRegion struct {
+	Name        string
+	OptInStatus string
 }
 
 type stsAPI interface {
@@ -279,17 +289,16 @@ func (c *AWSClient) CheckAccess(ctx context.Context) error {
 func (c *AWSClient) ListRegions(ctx context.Context) ([]string, error) {
 	operation := "ec2.DescribeRegions"
 	c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region), slog.Bool("all_regions", true))
-	out, err := c.ec2(ctx).DescribeRegions(ctx, &ec2.DescribeRegionsInput{AllRegions: aws.Bool(true)})
+	out, err := c.region(ctx).DescribeRegions(ctx, c)
 	if err != nil {
 		return nil, c.logAPIError(ctx, operation, err)
 	}
-	regions := make([]string, 0, len(out.Regions))
-	for _, region := range out.Regions {
-		name := aws.ToString(region.RegionName)
-		if name == "" || aws.ToString(region.OptInStatus) == "not-opted-in" {
+	regions := make([]string, 0, len(out))
+	for _, region := range out {
+		if region.Name == "" || region.OptInStatus == "not-opted-in" {
 			continue
 		}
-		regions = append(regions, name)
+		regions = append(regions, region.Name)
 	}
 	sort.Strings(regions)
 	c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region), slog.Int("count", len(regions)))
@@ -528,18 +537,14 @@ func (c *AWSClient) ssm(ctx context.Context) ssmAPI {
 	return c.ssmClient
 }
 
-func (c *AWSClient) ec2(ctx context.Context) ec2API {
+func (c *AWSClient) region(context.Context) regionAPI {
 	c.clientMu.Lock()
 	defer c.clientMu.Unlock()
-	if c.ec2Client != nil {
-		return c.ec2Client
+	if c.regionClient != nil {
+		return c.regionClient
 	}
-	cfg, err := c.sdkConfig(ctx)
-	if err != nil {
-		return errorEC2{err: err}
-	}
-	c.ec2Client = ec2.NewFromConfig(cfg)
-	return c.ec2Client
+	c.regionClient = signedEC2RegionAPI{}
+	return c.regionClient
 }
 
 func (c *AWSClient) sts(ctx context.Context) stsAPI {
@@ -595,6 +600,72 @@ func (c *AWSClient) logAPIError(ctx context.Context, operation string, err error
 	allAttrs = append(allAttrs, attrs...)
 	c.logger(ctx).LogAttrs(ctx, level, message, allAttrs...)
 	return normalized
+}
+
+type signedEC2RegionAPI struct{}
+
+type describeRegionsResponse struct {
+	Regions []describeRegionsItem `xml:"regionInfo>item"`
+}
+
+type describeRegionsItem struct {
+	Name        string `xml:"regionName"`
+	OptInStatus string `xml:"optInStatus"`
+}
+
+func (signedEC2RegionAPI) DescribeRegions(ctx context.Context, client *AWSClient) ([]awsRegion, error) {
+	cfg, err := client.sdkConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	region := strings.TrimSpace(client.Region)
+	if region == "" {
+		region = strings.TrimSpace(cfg.Region)
+	}
+	if region == "" {
+		region = "us-east-1"
+	}
+	credentials, err := cfg.Credentials.Retrieve(ctx)
+	if err != nil {
+		return nil, crerr.Wrap(err, "retrieve AWS credentials")
+	}
+	body := "Action=DescribeRegions&Version=2016-11-15&AllRegions=true"
+	endpoint := fmt.Sprintf("https://ec2.%s.amazonaws.com/", region)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return nil, crerr.Wrap(err, "create EC2 DescribeRegions request")
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	sum := sha256.Sum256([]byte(body))
+	payloadHash := hex.EncodeToString(sum[:])
+	if err := v4.NewSigner().SignHTTP(ctx, credentials, req, payloadHash, "ec2", region, time.Now()); err != nil {
+		return nil, crerr.Wrap(err, "sign EC2 DescribeRegions request")
+	}
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, crerr.Wrap(err, "call EC2 DescribeRegions")
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, crerr.Wrap(err, "read EC2 DescribeRegions response")
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("EC2 DescribeRegions failed with HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+	}
+	var out describeRegionsResponse
+	if err := xml.Unmarshal(responseBody, &out); err != nil {
+		return nil, crerr.Wrap(err, "parse EC2 DescribeRegions response")
+	}
+	regions := make([]awsRegion, 0, len(out.Regions))
+	for _, region := range out.Regions {
+		regions = append(regions, awsRegion{Name: region.Name, OptInStatus: region.OptInStatus})
+	}
+	return regions, nil
 }
 
 func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, error) {
@@ -722,12 +793,6 @@ func (e errorSSM) PutParameter(context.Context, *awsssm.PutParameterInput, ...fu
 }
 
 func (e errorSSM) DeleteParameters(context.Context, *awsssm.DeleteParametersInput, ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
-	return nil, e.err
-}
-
-type errorEC2 struct{ err error }
-
-func (e errorEC2) DescribeRegions(context.Context, *ec2.DescribeRegionsInput, ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
 	return nil, e.err
 }
 

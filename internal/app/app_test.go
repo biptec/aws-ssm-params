@@ -85,6 +85,19 @@ func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
 	assert.Equal(t, "/tmp/params.txt", cfg.NamesFile)
 }
 
+func TestConfigFromCLIUsesInventoryEnvironmentOnlyForInteractive(t *testing.T) {
+	t.Setenv("AWS_SSM_PARAMS_NAME", "/app/a,/app/b")
+	t.Setenv("AWS_SSM_PARAMS_NAMES_FILE", "/tmp/params.txt")
+
+	ctx := testCLIContext(t, nil)
+	ctx.Command = &cli.Command{Name: "export"}
+	cfg, err := ConfigFromCLI(ctx)
+
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Names)
+	assert.Empty(t, cfg.NamesFile)
+}
+
 func TestPrepareItemsLoadsExplicitNamesAndNamesFile(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "names.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/from-file\n"), 0o600))

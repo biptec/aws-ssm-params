@@ -266,11 +266,16 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	names, err := parseNames(stringSliceFlagValue(ctx, "name", "AWS_SSM_PARAMS_NAME"))
-	if err != nil {
-		return Config{}, err
+	var names []string
+	namesFile := ""
+	if interactiveInventoryFlagsEnabled(ctx) {
+		var err error
+		names, err = parseNames(stringSliceFlagValue(ctx, "name", "AWS_SSM_PARAMS_NAME"))
+		if err != nil {
+			return Config{}, err
+		}
+		namesFile = strings.TrimSpace(stringFlagValueAny(ctx, "names-file", "", "AWS_SSM_PARAMS_NAMES_FILE"))
 	}
-	namesFile := strings.TrimSpace(stringFlagValueAny(ctx, "names-file", "", "AWS_SSM_PARAMS_NAMES_FILE"))
 	showColumns, err := ui.ParseColumnOption(strings.Join(stringSliceFlagValue(ctx, "show-column", "AWS_SSM_PARAMS_SHOW_COLUMNS"), ","))
 	if err != nil {
 		return Config{}, crerr.Wrap(err, "parse show columns")
@@ -380,6 +385,13 @@ func applyInventoryRegion(items []inventory.Item, region string) []inventory.Ite
 		}
 	}
 	return out
+}
+
+func interactiveInventoryFlagsEnabled(ctx *cli.Context) bool {
+	if ctx == nil || ctx.Command == nil || ctx.Command.Name == "" {
+		return true
+	}
+	return ctx.Command.Name == "interactive"
 }
 
 func parseNames(values []string) ([]string, error) {
