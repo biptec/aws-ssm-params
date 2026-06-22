@@ -3,10 +3,11 @@ package ui
 import (
 	"bytes"
 	"context"
-	"github.com/cockroachdb/errors"
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
