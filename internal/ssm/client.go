@@ -6,16 +6,13 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptrace"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -113,177 +110,6 @@ type awsRegion struct {
 type stsAPI interface {
 	GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error)
 }
-
-// Parameter is the normalized subset of AWS SSM GetParameters output needed by the app.
-type Parameter struct {
-	Name        string
-	Region      string
-	Type        string
-	Value       string
-	ValueHidden bool
-	Version     int64
-	Modified    string
-}
-
-// Metadata is the normalized subset of AWS SSM DescribeParameters output shown in the UI/export status.
-type Metadata struct {
-	Name        string
-	Region      string
-	Type        string
-	Tier        string
-	DataType    string
-	Policies    string
-	Description string
-	User        string
-	Modified    string
-}
-
-// ParameterFilter is a safe AWS SSM DescribeParameters string filter.
-type ParameterFilter struct {
-	Key    string
-	Option string
-	Values []string
-}
-
-// PutParameterOptions contains optional AWS SSM PutParameter fields.
-type PutParameterOptions struct {
-	Description string
-	Tier        ParameterTier
-	DataType    ParameterDataType
-	Policies    string
-	PoliciesSet bool
-	Overwrite   bool
-}
-
-// ParameterDataType is an AWS SSM data type accepted by PutParameter.
-type ParameterDataType string
-
-const (
-	// ParameterDataTypeText stores an ordinary text value without additional service-side validation.
-	ParameterDataTypeText ParameterDataType = "text"
-	// ParameterDataTypeEC2Image validates that the value is an EC2 AMI id.
-	ParameterDataTypeEC2Image ParameterDataType = "aws:ec2:image"
-	// ParameterDataTypeSSMIntegration is used by AWS SSM service integrations.
-	ParameterDataTypeSSMIntegration ParameterDataType = "aws:ssm:integration"
-)
-
-// DefaultParameterDataType is used when AWS does not report a data type.
-const DefaultParameterDataType = ParameterDataTypeText
-
-// ParseParameterDataType normalizes user-facing data type names into AWS SSM data types.
-func ParseParameterDataType(value string) (ParameterDataType, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "text":
-		return ParameterDataTypeText, nil
-	case "aws:ec2:image", "ec2:image", "ami", "image":
-		return ParameterDataTypeEC2Image, nil
-	case "aws:ssm:integration", "ssm:integration", "integration":
-		return ParameterDataTypeSSMIntegration, nil
-	default:
-		return "", fmt.Errorf("unsupported parameter data type %q; use text, aws:ec2:image, or aws:ssm:integration", value)
-	}
-}
-
-// String returns the AWS API spelling of the parameter data type.
-func (t ParameterDataType) String() string { return string(t) }
-
-// IsValid reports whether the data type is supported by AWS SSM Parameter Store.
-func (t ParameterDataType) IsValid() bool {
-	switch t {
-	case ParameterDataTypeText, ParameterDataTypeEC2Image, ParameterDataTypeSSMIntegration:
-		return true
-	default:
-		return false
-	}
-}
-
-// ParameterTier is an AWS SSM parameter tier accepted by PutParameter.
-type ParameterTier string
-
-const (
-	// ParameterTierStandard stores parameters in the AWS Standard tier.
-	ParameterTierStandard ParameterTier = "Standard"
-	// ParameterTierAdvanced stores parameters in the AWS Advanced tier.
-	ParameterTierAdvanced ParameterTier = "Advanced"
-	// ParameterTierIntelligentTiering lets AWS choose Standard or Advanced as needed.
-	ParameterTierIntelligentTiering ParameterTier = "Intelligent-Tiering"
-)
-
-// DefaultParameterTier is used for new parameters and non-interactive writes.
-const DefaultParameterTier = ParameterTierIntelligentTiering
-
-// ParseParameterTier normalizes user-facing tier names into AWS SSM tier names.
-func ParseParameterTier(value string) (ParameterTier, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "intelligent-tiering", "intelligent_tiering", "intelligenttiering":
-		return ParameterTierIntelligentTiering, nil
-	case "standard":
-		return ParameterTierStandard, nil
-	case "advanced":
-		return ParameterTierAdvanced, nil
-	default:
-		return "", fmt.Errorf("unsupported parameter tier %q; use standard, advanced, or intelligent-tiering", value)
-	}
-}
-
-// String returns the AWS API spelling of the parameter tier.
-func (t ParameterTier) String() string { return string(t) }
-
-// IsValid reports whether the tier is one of the AWS SSM supported parameter tiers.
-func (t ParameterTier) IsValid() bool {
-	switch t {
-	case ParameterTierStandard, ParameterTierAdvanced, ParameterTierIntelligentTiering:
-		return true
-	default:
-		return false
-	}
-}
-
-// ParameterType is an AWS SSM parameter type accepted by PutParameter.
-type ParameterType string
-
-const (
-	// ParameterTypeString stores plaintext scalar values.
-	ParameterTypeString ParameterType = "String"
-	// ParameterTypeStringList stores comma-separated plaintext lists.
-	ParameterTypeStringList ParameterType = "StringList"
-	// ParameterTypeSecureString stores encrypted values using AWS KMS.
-	ParameterTypeSecureString ParameterType = "SecureString"
-)
-
-// DefaultParameterType is used when creating a new parameter and no type was supplied by the user or import file.
-const DefaultParameterType = ParameterTypeSecureString
-
-// ParseParameterType normalizes user-facing type names into AWS SSM type names.
-// It accepts AWS spelling and CLI-friendly aliases such as secure-string and string-list.
-func ParseParameterType(value string) (ParameterType, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "securestring", "secure-string", "secure_string":
-		return ParameterTypeSecureString, nil
-	case "string":
-		return ParameterTypeString, nil
-	case "stringlist", "string-list", "string_list":
-		return ParameterTypeStringList, nil
-	default:
-		return "", fmt.Errorf("unsupported parameter type %q; use string, string-list, or secure-string", value)
-	}
-}
-
-// String returns the AWS API spelling of the parameter type.
-func (t ParameterType) String() string { return string(t) }
-
-// IsValid reports whether the type is one of the AWS SSM supported parameter types.
-func (t ParameterType) IsValid() bool {
-	switch t {
-	case ParameterTypeString, ParameterTypeStringList, ParameterTypeSecureString:
-		return true
-	default:
-		return false
-	}
-}
-
-// ErrNotFound reports that a requested SSM parameter does not exist.
-var ErrNotFound = errors.New("parameter not found")
 
 // NewAWSClient constructs an AWS SDK backed client for one profile/region pair.
 func NewAWSClient(profile, region string) *AWSClient {
@@ -911,20 +737,6 @@ func parameterValueHidden(withDecryption bool, param ssmtypes.Parameter) bool {
 	return !withDecryption && param.Type == ssmtypes.ParameterTypeSecureString
 }
 
-func metadataFromSDK(region string, param ssmtypes.ParameterMetadata) Metadata {
-	return Metadata{
-		Name:        aws.ToString(param.Name),
-		Region:      region,
-		Type:        string(param.Type),
-		Tier:        string(param.Tier),
-		DataType:    aws.ToString(param.DataType),
-		Policies:    formatPolicies(param.Policies),
-		Description: aws.ToString(param.Description),
-		User:        aws.ToString(param.LastModifiedUser),
-		Modified:    formatModifiedTime(param.LastModifiedDate),
-	}
-}
-
 func normalizeAWSError(err error) error {
 	if err == nil {
 		return nil
@@ -961,128 +773,6 @@ type errorSTS struct{ err error }
 
 func (e errorSTS) GetCallerIdentity(context.Context, *sts.GetCallerIdentityInput, ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
 	return nil, e.err
-}
-
-func formatModifiedTime(value *time.Time) string {
-	if value == nil || value.IsZero() {
-		return ""
-	}
-	return value.Format(time.RFC1123)
-}
-
-// formatModifiedDate normalizes legacy JSON date shapes into a readable RFC1123 string.
-// It is kept for tests and import/export compatibility around previously parsed records.
-func formatModifiedDate(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case float64:
-		if v <= 0 {
-			return ""
-		}
-		return time.Unix(int64(v), 0).Format(time.RFC1123)
-	case string:
-		if v == "" {
-			return ""
-		}
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			return time.Unix(int64(f), 0).Format(time.RFC1123)
-		}
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			return t.Format(time.RFC1123)
-		}
-		return v
-	default:
-		return fmt.Sprint(v)
-	}
-}
-
-func formatPolicies(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return ""
-	case string:
-		return normalizePolicyJSON(v)
-	case []ssmtypes.ParameterInlinePolicy:
-		return policiesFromInlinePolicies(v)
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return normalizePolicyJSON(string(encoded))
-}
-
-func policiesFromInlinePolicies(policies []ssmtypes.ParameterInlinePolicy) string {
-	if len(policies) == 0 {
-		return ""
-	}
-	items := make([]any, 0, len(policies))
-	for _, policy := range policies {
-		items = appendPolicyJSON(items, aws.ToString(policy.PolicyText))
-	}
-	return marshalPolicyItems(items)
-}
-
-func normalizePolicyJSON(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || raw == "null" || raw == "{}" {
-		return ""
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return raw
-	}
-	items := appendPolicyValue(nil, decoded)
-	return marshalPolicyItems(items)
-}
-
-func appendPolicyJSON(items []any, raw string) []any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return items
-	}
-	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return append(items, raw)
-	}
-	return appendPolicyValue(items, decoded)
-}
-
-func appendPolicyValue(items []any, value any) []any {
-	switch typed := value.(type) {
-	case nil:
-		return items
-	case []any:
-		for _, item := range typed {
-			items = appendPolicyValue(items, item)
-		}
-		return items
-	case map[string]any:
-		if policyText, ok := typed["PolicyText"]; ok {
-			return appendPolicyValue(items, policyText)
-		}
-		return append(items, typed)
-	case string:
-		return appendPolicyJSON(items, typed)
-	default:
-		return append(items, typed)
-	}
-}
-
-func marshalPolicyItems(items []any) string {
-	if len(items) == 0 {
-		return ""
-	}
-	encoded, err := json.Marshal(items)
-	if err != nil {
-		return fmt.Sprint(items)
-	}
-	trimmed := strings.TrimSpace(string(encoded))
-	if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {
-		return ""
-	}
-	return trimmed
 }
 
 // chunkStrings splits a slice into non-empty chunks.

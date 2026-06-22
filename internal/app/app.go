@@ -949,142 +949,11 @@ func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, r
 
 // Import reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
 func Import(ctx *CLIContext) error {
-	cfg, err := ConfigFromCLI(ctx)
+	command, err := newImportCommand(ctx, nil, os.Stderr)
 	if err != nil {
 		return err
 	}
-	if defaultRegion := strings.TrimSpace(ctx.String("default-region")); defaultRegion != "" && cfg.Region == "" {
-		cfg.Region = defaultRegion
-		cfg.Regions = []string{defaultRegion}
-	}
-	if cfg.AllRegions {
-		return errors.New("--all-regions is not supported for import; specify --region")
-	}
-	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for tui and export")
-	}
-	format := ctx.String("format")
-	items, err := PrepareImportItems(ctx.Context, &cfg, format)
-	if err != nil {
-		return err
-	}
-
-	reader, err := stdinReader()
-	if err != nil {
-		return err
-	}
-
-	records, err := parseImport(format, reader, items, effectiveFieldMappings(cfg.FieldMappings), strings.TrimSpace(ctx.String("key-field")))
-	if err != nil {
-		return err
-	}
-	records, err = applyRootPathToRecords(records, ctx.String("root-path"))
-	if err != nil {
-		return err
-	}
-	records = filterRecordsByGroups(records, cfg.FilterGroups)
-	if err := requireFieldForCommand(cfg, "value", "import"); err != nil {
-		return err
-	}
-	defaultOpts, err := importDefaultOptions(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	policy, err := parseWritePolicy(ctx)
-	if err != nil {
-		return err
-	}
-	continueOnError := ctx.Bool("continue-on-error")
-	summaryEnabled := ctx.Bool("summary")
-
-	client := NewClient(cfg)
-	metadata, metadataErrs := metadataForImportRecords(ctx.Context, client, records, cfg)
-	summary := importSummary{}
-	var recordErrors []string
-	handleRecordError := func(operation writeOperation, region, name string, err error) error {
-		wrapped := crerr.Wrap(err, name)
-		logRecordError(cfg.Logger, "import", operation, region, name, wrapped)
-		summary.Failed++
-		recordErrors = append(recordErrors, wrapped.Error())
-		if continueOnError {
-			logContinueOnError(cfg.Logger, "import", region, name)
-			return nil
-		}
-		return wrapped
-	}
-
-	for i := range records {
-		record := &records[i]
-		region := recordRegion(*record, cfg)
-		key := recordKey(region, record.Path)
-		existingMeta, exists := metadata[key]
-		if err, ok := metadataErrs[key]; ok {
-			if !crerr.Is(err, ssm.ErrNotFound) {
-				if err := handleRecordError(writeOperationUpdate, region, record.Path, err); err != nil {
-					return err
-				}
-				continue
-			}
-			exists = false
-		}
-		operation := writeOperationCreate
-		policyAction := policy.OnCreate
-		if exists {
-			operation = writeOperationUpdate
-			policyAction = policy.OnUpdate
-		}
-		if strings.TrimSpace(record.Value) == "" {
-			if err := handleRecordError(operation, region, record.Path, errors.New("import record value is required")); err != nil {
-				return err
-			}
-			continue
-		}
-		shouldWrite, err := resolveWritePolicy(policyAction, operation, region, record.Path)
-		if err != nil {
-			if err := handleRecordError(operation, region, record.Path, err); err != nil {
-				return err
-			}
-			continue
-		}
-		if !shouldWrite {
-			logSkipped(cfg.Logger, "import", operation, policyAction, region, record.Path)
-			summary.Skipped++
-			continue
-		}
-		parameterType, err := resolveImportType(ctx.String("default-type"), existingMeta, exists, *record, cfg)
-		if err != nil {
-			if err := handleRecordError(operation, region, record.Path, err); err != nil {
-				return err
-			}
-			continue
-		}
-		opts, err := importOptionsForRecord(*record, existingMeta, exists, defaultOpts, cfg)
-		if err != nil {
-			if err := handleRecordError(operation, region, record.Path, err); err != nil {
-				return err
-			}
-			continue
-		}
-		opts.Overwrite = exists
-		if err := client.ForRegion(region).PutParameterWithOptions(ctx.Context, record.Path, record.Value, parameterType, opts); err != nil {
-			if err := handleRecordError(operation, region, record.Path, err); err != nil {
-				return err
-			}
-			continue
-		}
-		if exists {
-			summary.Updated++
-		} else {
-			summary.Created++
-		}
-	}
-	if summaryEnabled {
-		_, _ = fmt.Fprintf(os.Stderr, "Import summary:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n", summary.Created, summary.Updated, summary.Skipped, summary.Failed)
-	}
-	if len(recordErrors) > 0 {
-		return fmt.Errorf("import completed with %d error(s):\n%s", len(recordErrors), strings.Join(recordErrors, "\n"))
-	}
-	return nil
+	return command.run()
 }
 
 type exportSortRule struct {
@@ -1407,86 +1276,11 @@ func exportRecordFromStatus(status ui.Status, fields []string) secretfmt.Record 
 
 // Export loads statuses for the requested inventory and writes existing parameter values to stdout.
 func Export(ctx *CLIContext) error {
-	cfg, err := ConfigFromCLI(ctx)
+	command, err := newExportCommand(ctx, os.Stdout)
 	if err != nil {
 		return err
 	}
-	items, err := PrepareItems(ctx.Context, &cfg)
-	if err != nil {
-		return err
-	}
-	client := NewClient(cfg)
-	regions := append([]string(nil), cfg.Regions...)
-	if cfg.AllRegions {
-		var err error
-		regions, err = client.ListRegions(ctx.Context)
-		if err != nil {
-			return crerr.Wrap(err, "list AWS regions")
-		}
-	}
-
-	scalarField, err := scalarExportField(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	keyField := strings.TrimSpace(ctx.String("key-field"))
-	if err := validateKeyFieldOutputFields(keyField, cfg.Fields); err != nil {
-		return err
-	}
-	fields := exportFields(cfg)
-	recordFields := exportRecordFields(fields, scalarField, keyField)
-	includeValues := cfg.WithDecryption || includeValuesForFields(recordFields) || includeValuesForFilterGroups(cfg.FilterGroups) || includeValuesForSortColumns(cfg.SortColumns)
-	showProgress := false
-	var statuses []ui.Status
-	switch {
-	case len(cfg.FilterGroups) > 0 && len(items) == 0 && showProgress:
-		statuses = ui.LoadFilteredStatusesWithProgressForRegions(ctx.Context, client, cfg.FilterGroups, includeValues, regions)
-	case len(cfg.FilterGroups) > 0 && len(items) == 0:
-		statuses = ui.LoadFilteredStatusesBatchForRegions(ctx.Context, client, cfg.FilterGroups, includeValues, regions, nil)
-	case showProgress:
-		statuses = ui.LoadStatusesWithProgressForRegions(ctx.Context, client, items, includeValues, regions)
-	default:
-		statuses = ui.LoadStatusesForRegions(ctx.Context, client, items, includeValues, regions)
-	}
-	if len(items) > 0 {
-		statuses = ui.FilterStatusesByGroups(statuses, cfg.FilterGroups)
-	}
-
-	sortStatusesForExport(statuses, cfg.SortColumns)
-
-	var records []secretfmt.Record
-	for i := range statuses {
-		if !statuses[i].Exists {
-			continue
-		}
-		records = append(records, exportRecordFromStatus(statuses[i], recordFields))
-	}
-
-	writer := os.Stdout
-	format := ctx.String("format")
-	if scalarField != "" {
-		switch format {
-		case "dotenv":
-			return crerr.Wrap(secretfmt.ExportScalarLines(writer, records, scalarField), "export scalar")
-		case "json":
-			return crerr.Wrap(secretfmt.ExportJSONScalar(writer, records, scalarField, keyField), "export scalar JSON")
-		case "yaml", "yml":
-			return crerr.Wrap(secretfmt.ExportYAMLScalar(writer, records, scalarField, keyField), "export scalar YAML")
-		default:
-			return fmt.Errorf("unsupported format: %s", format)
-		}
-	}
-
-	switch format {
-	case "dotenv":
-		return crerr.Wrap(secretfmt.ExportDotenv(writer, records), "export dotenv")
-	case "json":
-		return crerr.Wrap(secretfmt.ExportJSONMapped(writer, records, exportFieldMappings(recordFields, cfg.FieldMappings), keyField), "export JSON")
-	case "yaml", "yml":
-		return crerr.Wrap(secretfmt.ExportYAMLMapped(writer, records, exportFieldMappings(recordFields, cfg.FieldMappings), keyField), "export YAML")
-	default:
-		return fmt.Errorf("unsupported format: %s", format)
-	}
+	return command.run()
 }
 
 // parseImport dispatches import parsing by format while keeping the Import command handler format-agnostic.
