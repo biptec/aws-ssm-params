@@ -35,7 +35,17 @@ linters:
     - whitespace
     - wrapcheck
     - godox
+    - depguard
   settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          files:
+            - "$all"
+          deny:
+            - pkg: "errors$"
+              desc: "Use github.com/cockroachdb/errors instead of standard library errors"
     nolintlint:
       require-specific: true
       require-explanation: true

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -191,7 +191,7 @@ func statusFromMaps(item inventory.Item, region string, metas map[string]ssm.Met
 	}
 	if param, ok := values[key]; ok {
 		status = statusFromValue(item, param, metas[key], includeValues)
-	} else if err, ok := errs[key]; ok && !crerr.Is(err, ssm.ErrNotFound) {
+	} else if err, ok := errs[key]; ok && !errors.Is(err, ssm.ErrNotFound) {
 		status.Error = err.Error()
 	}
 	if !includeValues {

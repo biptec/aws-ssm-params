@@ -2,13 +2,12 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
@@ -208,19 +207,19 @@ func parseMapFields(values []string) (textio.FieldMappings, error) {
 func parseFilterGroups(values []string, filtersFile string) (filter.Groups, error) {
 	groups, err := filter.ParseGroups(compactStrings(values))
 	if err != nil {
-		return nil, crerr.Wrap(err, "parse filters")
+		return nil, errors.Wrap(err, "parse filters")
 	}
 	if filtersFile == "" {
 		return groups, nil
 	}
 	file, err := fileio.Open(filtersFile)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "open filters file %s", filtersFile)
+		return nil, errors.Wrapf(err, "open filters file %s", filtersFile)
 	}
 	defer func() { _ = file.Close() }()
 	fileGroups, err := filter.ParseFile(file)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "parse filters file %s", filtersFile)
+		return nil, errors.Wrapf(err, "parse filters file %s", filtersFile)
 	}
 	return append(groups, fileGroups...), nil
 }
@@ -292,7 +291,7 @@ func (builder configBuilder) build() (Config, error) {
 	}
 	showColumns, err := ui.ParseColumnOption(strings.Join(stringSliceFlagValue(ctx, "show-column", "AWS_SSM_PARAMS_SHOW_COLUMN"), ","))
 	if err != nil {
-		return Config{}, crerr.Wrap(err, "parse show columns")
+		return Config{}, errors.Wrap(err, "parse show columns")
 	}
 	filtersFile := strings.TrimSpace(stringFlagValueAny(ctx, "filters-file", "", "AWS_SSM_PARAMS_FILTER_FILE"))
 	filterGroups, err := parseFilterGroups(stringSliceFlagValue(ctx, "filter", "AWS_SSM_PARAMS_FILTER"), filtersFile)

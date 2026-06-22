@@ -2,13 +2,12 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -292,14 +291,14 @@ func expandLocalPath(path string) (string, error) {
 	if path == "~" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", crerr.Wrap(err, "resolve user home directory")
+			return "", errors.Wrap(err, "resolve user home directory")
 		}
 		return home, nil
 	}
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return "", crerr.Wrap(err, "resolve user home directory")
+			return "", errors.Wrap(err, "resolve user home directory")
 		}
 		return filepath.Join(home, strings.TrimPrefix(path, "~/")), nil
 	}

@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -53,7 +53,7 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 	if cfg.AllRegions {
 		regions, err = client.ListRegions(ctx.Context)
 		if err != nil {
-			return nil, crerr.Wrap(err, "list AWS regions")
+			return nil, errors.Wrap(err, "list AWS regions")
 		}
 	}
 
@@ -86,13 +86,13 @@ func (command *exportCommand) run() error {
 	command.sortRules.sort(statuses)
 	records := command.records(statuses)
 	if command.scalarField != "" {
-		return crerr.Wrap(
+		return errors.Wrap(
 			command.writer.ExportScalar(records, command.scalarField, command.keyField),
 			"write scalar export",
 		)
 	}
 	mappings := command.cfg.FieldMappings.WithDefaults().ForFields(command.recordFields)
-	return crerr.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
+	return errors.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
 }
 
 func (command *exportCommand) loadStatuses() ui.Statuses {

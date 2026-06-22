@@ -2,14 +2,13 @@ package app
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 type writePolicyAction string
@@ -85,7 +84,7 @@ func askWriteConfirmation(action writeOperation, region, name string) (bool, err
 	}
 	answer, err := bufio.NewReader(tty).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
-		return false, crerr.Wrap(err, "read write confirmation")
+		return false, errors.Wrap(err, "read write confirmation")
 	}
 	answer = strings.ToLower(strings.TrimSpace(answer))
 	return answer == "y" || answer == "yes", nil

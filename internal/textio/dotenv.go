@@ -1,14 +1,13 @@
 package textio
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
 	"strconv"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // DotEnv imports and exports dotenv documents using streams supplied by the factories.
@@ -29,19 +28,19 @@ func (format *DotEnv) Export(records Records, _ FieldMappings, _ string) error {
 		record := &records[i]
 		if i > 0 {
 			if _, err := fmt.Fprintln(format.writer); err != nil {
-				return crerr.Wrap(err, "write dotenv separator")
+				return errors.Wrap(err, "write dotenv separator")
 			}
 		}
 		if _, err := fmt.Fprintf(format.writer, "# ssm: %s\n", record.Path); err != nil {
-			return crerr.Wrap(err, "write dotenv path comment")
+			return errors.Wrap(err, "write dotenv path comment")
 		}
 		if record.Type != "" {
 			if _, err := fmt.Fprintf(format.writer, "# type: %s\n", record.Type); err != nil {
-				return crerr.Wrap(err, "write dotenv type comment")
+				return errors.Wrap(err, "write dotenv type comment")
 			}
 		}
 		if _, err := fmt.Fprintf(format.writer, "%s=%s\n", format.key(record.Path), format.quote(record.Value)); err != nil {
-			return crerr.Wrap(err, "write dotenv value")
+			return errors.Wrap(err, "write dotenv value")
 		}
 	}
 	return nil
@@ -54,7 +53,7 @@ func (format *DotEnv) ExportScalar(records Records, field, _ string) error {
 	}
 	for i := range records {
 		if _, err := fmt.Fprintln(format.writer, records[i].fieldValue(field)); err != nil {
-			return crerr.Wrap(err, "write scalar export")
+			return errors.Wrap(err, "write scalar export")
 		}
 	}
 	return nil
@@ -69,7 +68,7 @@ func (format *DotEnv) Import(_ FieldMappings, _ string) (Records, error) {
 	}
 	data, err := io.ReadAll(format.reader)
 	if err != nil {
-		return nil, crerr.Wrap(err, "read dotenv input")
+		return nil, errors.Wrap(err, "read dotenv input")
 	}
 
 	var records Records
@@ -97,7 +96,7 @@ func (format *DotEnv) Import(_ FieldMappings, _ string) (Records, error) {
 		alias := strings.TrimSpace(key)
 		value, err := format.parseValue(strings.TrimSpace(rawValue))
 		if err != nil {
-			return nil, crerr.Wrapf(err, "invalid dotenv value for %s on line %d", alias, lineNumber+1)
+			return nil, errors.Wrapf(err, "invalid dotenv value for %s on line %d", alias, lineNumber+1)
 		}
 
 		path := pendingPath
@@ -135,7 +134,7 @@ func (*DotEnv) parseValue(value string) (string, error) {
 	if strings.HasPrefix(value, "\"") {
 		unquoted, err := strconv.Unquote(value)
 		if err != nil {
-			return "", crerr.Wrap(err, "unquote dotenv value")
+			return "", errors.Wrap(err, "unquote dotenv value")
 		}
 		return unquoted, nil
 	}

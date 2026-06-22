@@ -2,7 +2,6 @@ package inventory
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
@@ -27,7 +26,7 @@ type PathsFile struct {
 func (pathsFile PathsFile) Load() (Items, error) {
 	file, err := fileio.Open(pathsFile.Path)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "open paths file %s", pathsFile.Path)
+		return nil, errors.Wrapf(err, "open paths file %s", pathsFile.Path)
 	}
 	defer func() { _ = file.Close() }()
 
@@ -62,7 +61,7 @@ func LoadPaths(reader io.Reader, source string) (Items, error) {
 		items = append(items, Item{Path: raw, Kind: "path-file", Source: source, SecretName: path.Base(raw)})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, crerr.Wrapf(err, "scan paths from %s", source)
+		return nil, errors.Wrapf(err, "scan paths from %s", source)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil
@@ -82,7 +81,7 @@ func (pathsFile PathsFile) Append(parameterPath string) (bool, error) {
 	cleanPath := filepath.Clean(pathsFile.Path)
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil && !os.IsNotExist(err) {
-		return false, crerr.Wrapf(err, "read paths file %s", pathsFile.Path)
+		return false, errors.Wrapf(err, "read paths file %s", pathsFile.Path)
 	}
 	if pathFileContainsPath(string(data), parameterPath) {
 		return false, nil
@@ -94,11 +93,11 @@ func (pathsFile PathsFile) Append(parameterPath string) (bool, error) {
 	}
 	file, err := fileio.OpenFile(pathsFile.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return false, crerr.Wrapf(err, "open paths file %s", pathsFile.Path)
+		return false, errors.Wrapf(err, "open paths file %s", pathsFile.Path)
 	}
 	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(prefix + parameterPath + "\n"); err != nil {
-		return false, crerr.Wrapf(err, "append path to %s", pathsFile.Path)
+		return false, errors.Wrapf(err, "append path to %s", pathsFile.Path)
 	}
 	return true, nil
 }
@@ -129,7 +128,7 @@ func (pathsFile PathsFile) Remove(parameterPaths []string) (int, error) {
 	cleanPath := filepath.Clean(pathsFile.Path)
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil {
-		return 0, crerr.Wrapf(err, "read paths file %s", cleanPath)
+		return 0, errors.Wrapf(err, "read paths file %s", cleanPath)
 	}
 	parts := strings.SplitAfter(string(data), "\n")
 	remaining := make([]string, 0, len(parts))
@@ -149,14 +148,14 @@ func (pathsFile PathsFile) Remove(parameterPaths []string) (int, error) {
 	}
 	file, err := fileio.OpenFile(cleanPath, os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return 0, crerr.Wrapf(err, "open paths file %s", cleanPath)
+		return 0, errors.Wrapf(err, "open paths file %s", cleanPath)
 	}
 	if _, err := file.WriteString(strings.Join(remaining, "")); err != nil {
 		_ = file.Close()
-		return 0, crerr.Wrapf(err, "write paths file %s", cleanPath)
+		return 0, errors.Wrapf(err, "write paths file %s", cleanPath)
 	}
 	if err := file.Close(); err != nil {
-		return 0, crerr.Wrapf(err, "close paths file %s", cleanPath)
+		return 0, errors.Wrapf(err, "close paths file %s", cleanPath)
 	}
 	return removed, nil
 }

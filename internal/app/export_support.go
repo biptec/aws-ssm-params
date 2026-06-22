@@ -1,10 +1,11 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/textio"

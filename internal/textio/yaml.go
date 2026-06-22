@@ -1,13 +1,12 @@
 package textio
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"sort"
 	"strconv"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -42,9 +41,9 @@ func (format *YAML) Export(records Records, mappings FieldMappings, keyField str
 	encoder := yaml.NewEncoder(format.writer)
 	encoder.SetIndent(2)
 	if err := encoder.Encode(data); err != nil {
-		return crerr.Wrap(err, "encode mapped YAML export")
+		return errors.Wrap(err, "encode mapped YAML export")
 	}
-	return crerr.Wrap(encoder.Close(), "close mapped YAML export")
+	return errors.Wrap(encoder.Close(), "close mapped YAML export")
 }
 
 // Import accepts a YAML sequence of records or a mapping keyed by keyField.
@@ -57,11 +56,11 @@ func (format *YAML) Import(mappings FieldMappings, keyField string) (Records, er
 	}
 	data, err := io.ReadAll(format.reader)
 	if err != nil {
-		return nil, crerr.Wrap(err, "read YAML import")
+		return nil, errors.Wrap(err, "read YAML import")
 	}
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, crerr.Wrap(err, "decode YAML import")
+		return nil, errors.Wrap(err, "decode YAML import")
 	}
 	if len(root.Content) == 0 {
 		return nil, errors.New("empty YAML import")
@@ -72,13 +71,13 @@ func (format *YAML) Import(mappings FieldMappings, keyField string) (Records, er
 	case yaml.SequenceNode:
 		var objects []map[string]any
 		if err := yaml.Unmarshal(data, &objects); err != nil {
-			return nil, crerr.Wrap(err, "decode YAML array import")
+			return nil, errors.Wrap(err, "decode YAML array import")
 		}
 		return format.recordsFromObjects(objects, mappings, keyField), nil
 	case yaml.MappingNode:
 		var keyed map[string]map[string]any
 		if err := yaml.Unmarshal(data, &keyed); err != nil {
-			return nil, crerr.Wrap(err, "decode keyed YAML import")
+			return nil, errors.Wrap(err, "decode keyed YAML import")
 		}
 		keys := make([]string, 0, len(keyed))
 		for key := range keyed {
@@ -174,5 +173,5 @@ func (format *YAML) ExportScalar(records Records, field, keyField string) error 
 	encoder := yaml.NewEncoder(format.writer)
 	encoder.SetIndent(2)
 	defer func() { _ = encoder.Close() }()
-	return crerr.Wrap(encoder.Encode(data), "encode scalar YAML export")
+	return errors.Wrap(encoder.Encode(data), "encode scalar YAML export")
 }

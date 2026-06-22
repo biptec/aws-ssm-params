@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
@@ -46,7 +46,7 @@ type componentData struct {
 func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "read values file %s", path)
+		return nil, errors.Wrapf(err, "read values file %s", path)
 	}
 
 	values := parseValues(string(data))

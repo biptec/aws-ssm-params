@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // Base64 returns a cryptographically random base64 string based on the requested byte count.
@@ -45,7 +45,7 @@ func randomBytes(n int) ([]byte, error) {
 	data := make([]byte, n)
 	_, err := rand.Read(data)
 	if err != nil {
-		return nil, crerr.Wrap(err, "read random bytes")
+		return nil, errors.Wrap(err, "read random bytes")
 	}
 	return data, nil
 }

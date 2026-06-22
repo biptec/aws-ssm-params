@@ -3,7 +3,7 @@ package ui
 import (
 	"bytes"
 	"context"
-	"errors"
+	"github.com/cockroachdb/errors"
 	"fmt"
 	"strings"
 	"testing"

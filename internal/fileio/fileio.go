@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // Open opens a local file path after anchoring the operation to the file's parent directory.
@@ -20,13 +20,13 @@ func OpenFile(path string, flag int, perm fs.FileMode) (*os.File, error) {
 	cleanPath := filepath.Clean(path)
 	root, err := os.OpenRoot(filepath.Dir(cleanPath))
 	if err != nil {
-		return nil, crerr.Wrapf(err, "open parent directory for %s", path)
+		return nil, errors.Wrapf(err, "open parent directory for %s", path)
 	}
 	defer func() { _ = root.Close() }()
 
 	file, err := root.OpenFile(filepath.Base(cleanPath), flag, perm)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "open file %s", path)
+		return nil, errors.Wrapf(err, "open file %s", path)
 	}
 	return file, nil
 }
@@ -41,7 +41,7 @@ func ReadFile(path string) ([]byte, error) {
 
 	data, err := io.ReadAll(file)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "read file %s", path)
+		return nil, errors.Wrapf(err, "read file %s", path)
 	}
 	return data, nil
 }
@@ -54,10 +54,10 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 	}
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
-		return crerr.Wrapf(err, "write file %s", path)
+		return errors.Wrapf(err, "write file %s", path)
 	}
 	if err := file.Close(); err != nil {
-		return crerr.Wrapf(err, "close file %s", path)
+		return errors.Wrapf(err, "close file %s", path)
 	}
 	return nil
 }

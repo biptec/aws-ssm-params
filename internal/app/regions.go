@@ -2,7 +2,8 @@ package app
 
 import (
 	"context"
-	"errors"
+
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )

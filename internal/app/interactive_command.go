@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -30,13 +30,13 @@ func (command *interactiveCommand) run() error {
 	}
 	client := NewClient(command.cfg)
 	if err := client.CheckAccess(command.ctx.Context); err != nil {
-		return crerr.Wrap(err, "check AWS access")
+		return errors.Wrap(err, "check AWS access")
 	}
 	regionLabel, regions, err := command.regionSelection(client)
 	if err != nil {
 		return err
 	}
-	return crerr.Wrap(ui.RunInteractive(command.ctx.Context, client, command.cfg.InventoryItems, command.options(regionLabel, regions)), "run interactive")
+	return errors.Wrap(ui.RunInteractive(command.ctx.Context, client, command.cfg.InventoryItems, command.options(regionLabel, regions)), "run interactive")
 }
 
 func (command *interactiveCommand) prepare() error {
@@ -66,7 +66,7 @@ func (command interactiveCommand) regionSelection(client ssm.Client) (regionLabe
 		regionLabel = "all regions"
 		regions, err = client.ListRegions(command.ctx.Context)
 		if err != nil {
-			return "", nil, crerr.Wrap(err, "list AWS regions")
+			return "", nil, errors.Wrap(err, "list AWS regions")
 		}
 	} else if len(regions) > 1 {
 		regionLabel = strings.Join(regions, ", ")
@@ -99,7 +99,7 @@ func (command interactiveCommand) options(regionLabel string, regions []string) 
 func loadInteractiveInventoryFromStdin() (inventory.Items, bool, error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
-		return nil, false, crerr.Wrap(err, "stat stdin")
+		return nil, false, errors.Wrap(err, "stat stdin")
 	}
 	if info.Mode()&os.ModeCharDevice != 0 {
 		return nil, false, nil
@@ -107,7 +107,7 @@ func loadInteractiveInventoryFromStdin() (inventory.Items, bool, error) {
 
 	items, err := inventory.LoadPaths(os.Stdin, "stdin")
 	if err != nil {
-		return nil, true, crerr.Wrap(err, "load TUI inventory from stdin")
+		return nil, true, errors.Wrap(err, "load TUI inventory from stdin")
 	}
 	return items, true, nil
 }

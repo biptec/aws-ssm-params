@@ -14,7 +14,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/biptec/aws-ssm-params/internal/logging"
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // Client is the small SSM capability surface used by commands and the TUI.
@@ -429,7 +429,7 @@ func (c *AWSClient) CheckAccess(ctx context.Context) error {
 	operation := "sts.GetCallerIdentity"
 	c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region))
 	if _, err := c.sts(ctx).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
-		return crerr.Wrap(c.logAPIError(ctx, operation, err), "cannot access AWS with current credentials/profile")
+		return errors.Wrap(c.logAPIError(ctx, operation, err), "cannot access AWS with current credentials/profile")
 	}
 	c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region))
 	return nil

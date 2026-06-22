@@ -3,7 +3,7 @@ package app
 import (
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -18,17 +18,17 @@ type importOptionsResolver struct {
 func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions, error) {
 	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default tier")
+		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default tier")
 	}
 	dataType, err := ssm.ParseParameterDataType(ctx.String("default-data-type"))
 	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default data type")
+		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default data type")
 	}
 	policies := ctx.String("default-policies")
 	if policiesFile := strings.TrimSpace(ctx.String("default-policies-file")); policiesFile != "" {
 		data, err := fileio.ReadFile(policiesFile)
 		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrapf(err, "read default policies file %s", policiesFile)
+			return ssm.PutParameterOptions{}, errors.Wrapf(err, "read default policies file %s", policiesFile)
 		}
 		policies = string(data)
 	}
@@ -55,14 +55,14 @@ func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.
 		if cfg.Fields.Allows(textio.FieldTier) && strings.TrimSpace(cloud.Tier) != "" {
 			tier, err := ssm.ParseParameterTier(cloud.Tier)
 			if err != nil {
-				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud tier")
+				return ssm.PutParameterOptions{}, errors.Wrap(err, "parse cloud tier")
 			}
 			opts.Tier = tier
 		}
 		if cfg.Fields.Allows(textio.FieldDataType) && strings.TrimSpace(cloud.DataType) != "" {
 			dataType, err := ssm.ParseParameterDataType(cloud.DataType)
 			if err != nil {
-				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud data type")
+				return ssm.PutParameterOptions{}, errors.Wrap(err, "parse cloud data type")
 			}
 			opts.DataType = dataType
 		}
@@ -76,7 +76,7 @@ func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.
 	if cfg.Fields.Allows(textio.FieldTier) && record.HasField(textio.FieldTier) && strings.TrimSpace(record.Tier) != "" {
 		tier, err := ssm.ParseParameterTier(record.Tier)
 		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
+			return ssm.PutParameterOptions{}, errors.Wrap(err, "parse record tier")
 		}
 		opts.Tier = tier
 	}
@@ -85,7 +85,7 @@ func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.
 		strings.TrimSpace(record.DataType) != "" {
 		dataType, err := ssm.ParseParameterDataType(record.DataType)
 		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
+			return ssm.PutParameterOptions{}, errors.Wrap(err, "parse record data type")
 		}
 		opts.DataType = dataType
 	}

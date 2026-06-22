@@ -1,7 +1,7 @@
 package app
 
 import (
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/logging"
 )
@@ -11,7 +11,7 @@ func RunWithLogging(ctx *CLIContext, bufferTerminal bool, action func(*CLIContex
 	logCfg := loggingConfigFromCLI(ctx)
 	logger, flush, err := logging.New(logCfg, bufferTerminal)
 	if err != nil {
-		return crerr.Wrap(err, "configure logging")
+		return errors.Wrap(err, "configure logging")
 	}
 	ctx.Context = logging.WithLogger(ctx.Context, logger)
 	err = action(ctx)

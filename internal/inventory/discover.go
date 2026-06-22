@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
@@ -33,12 +33,12 @@ func (discoverer Discoverer) Discover() (Items, error) {
 
 	enabledApps, err := discoverer.enabledApps()
 	if err != nil {
-		return nil, crerr.Wrap(err, "discover enabled apps")
+		return nil, errors.Wrap(err, "discover enabled apps")
 	}
 
 	entries, err := os.ReadDir(appsDir)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "read apps directory %s", appsDir)
+		return nil, errors.Wrapf(err, "read apps directory %s", appsDir)
 	}
 
 	var items Items
@@ -56,20 +56,20 @@ func (discoverer Discoverer) Discover() (Items, error) {
 		}
 		appItems, err := scanValuesFile(valuesPath, appName)
 		if err != nil {
-			return nil, crerr.Wrapf(err, "scan values file %s", valuesPath)
+			return nil, errors.Wrapf(err, "scan values file %s", valuesPath)
 		}
 		items = append(items, appItems...)
 	}
 
 	kItems, err := discoverer.scanKustomizationForSecrets()
 	if err != nil {
-		return nil, crerr.Wrap(err, "scan kustomization secrets")
+		return nil, errors.Wrap(err, "scan kustomization secrets")
 	}
 	items = append(items, kItems...)
 
 	fItems, err := discoverer.scanTerraformFluxToken()
 	if err != nil {
-		return nil, crerr.Wrap(err, "scan Terraform Flux token")
+		return nil, errors.Wrap(err, "scan Terraform Flux token")
 	}
 	items = append(items, fItems...)
 
@@ -89,7 +89,7 @@ func (discoverer Discoverer) enabledApps() (map[string]bool, error) {
 	path := filepath.Join(discoverer.environmentDir(), "kustomization.yaml")
 	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return result, crerr.Wrapf(err, "read kustomization %s", path)
+		return result, errors.Wrapf(err, "read kustomization %s", path)
 	}
 	re := regexp.MustCompile(`apps/([^/]+)/helmrelease\.yaml`)
 	for _, raw := range strings.Split(string(data), "\n") {
@@ -111,7 +111,7 @@ func (discoverer Discoverer) scanKustomizationForSecrets() (Items, error) {
 	path := filepath.Join(discoverer.environmentDir(), "kustomization.yaml")
 	data, err := fileio.ReadFile(path)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "read kustomization %s", path)
+		return nil, errors.Wrapf(err, "read kustomization %s", path)
 	}
 	seen := map[string]bool{}
 	var items []Item

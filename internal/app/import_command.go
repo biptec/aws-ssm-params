@@ -1,13 +1,12 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
@@ -76,7 +75,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 		strings.TrimSpace(ctx.String("key-field")),
 	)
 	if err != nil {
-		return nil, crerr.Wrap(err, "read import")
+		return nil, errors.Wrap(err, "read import")
 	}
 	records, err := importRecords(parsedRecords).withRootPath(ctx.String("root-path"))
 	if err != nil {
@@ -136,7 +135,7 @@ func (command *importCommand) processRecord(record textio.Record) error {
 	key := recordKey(region, record.Path)
 	existing, exists := command.metadata[key]
 	if err, ok := command.metadataErrors[key]; ok {
-		if !crerr.Is(err, ssm.ErrNotFound) {
+		if !errors.Is(err, ssm.ErrNotFound) {
 			return command.handleRecordError(writeOperationUpdate, region, record.Path, err)
 		}
 		exists = false
@@ -184,7 +183,7 @@ func (command *importCommand) processRecord(record textio.Record) error {
 }
 
 func (command *importCommand) handleRecordError(operation writeOperation, region, name string, err error) error {
-	wrapped := crerr.Wrap(err, name)
+	wrapped := errors.Wrap(err, name)
 	logRecordError(command.cfg.Logger, "import", operation, region, name, wrapped)
 	command.summary.Failed++
 	command.recordErrors = append(command.recordErrors, wrapped.Error())

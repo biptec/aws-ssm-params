@@ -6,7 +6,7 @@ import (
 	"sort"
 	"time"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/logging"
@@ -370,7 +370,7 @@ func (loader statusLoader) loadOneRegion(items inventory.Items, region string) (
 				chunkStatuses = append(chunkStatuses, status)
 				continue
 			}
-			if err := errs[item.Path]; err != nil && !crerr.Is(err, ssm.ErrNotFound) {
+			if err := errs[item.Path]; err != nil && !errors.Is(err, ssm.ErrNotFound) {
 				status := Status{Item: item, Type: ssm.DefaultParameterType.String(), Error: err.Error()}
 				statuses = append(statuses, status)
 				chunkStatuses = append(chunkStatuses, status)

@@ -7,7 +7,7 @@ import (
 	"net/http/httptrace"
 	"time"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/logging"
 )
@@ -79,7 +79,7 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	}
 	logger.LogAttrs(ctx, logging.LevelTrace, "aws http request completed", append(attrs, slog.Int("status", statusCode), slog.Int64("duration_ms", elapsedMillis(started)), slog.Any("error", err))...)
 	if err != nil {
-		return resp, crerr.Wrap(err, "aws http request")
+		return resp, errors.Wrap(err, "aws http request")
 	}
 	return resp, nil
 }

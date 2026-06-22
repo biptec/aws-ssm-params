@@ -1,9 +1,10 @@
 package ssm
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/cockroachdb/errors"
 )
 
 // Parameter is the normalized subset of AWS SSM GetParameters output needed by the app.

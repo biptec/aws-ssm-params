@@ -9,7 +9,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/aws/smithy-go"
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 func parameterFiltersToSDK(filters []ParameterFilter) []ssmtypes.ParameterStringFilter {
@@ -57,7 +57,7 @@ func valueForLog(parameterType ParameterType, value string) string {
 // IsThrottlingError reports whether an AWS API error is a throttling/rate-limit failure.
 func IsThrottlingError(err error) bool {
 	var apiErr smithy.APIError
-	if !crerr.As(err, &apiErr) {
+	if !errors.As(err, &apiErr) {
 		return false
 	}
 	code := strings.ToLower(apiErr.ErrorCode())
@@ -84,7 +84,7 @@ func normalizeAWSError(err error) error {
 		return nil
 	}
 	var apiErr smithy.APIError
-	if crerr.As(err, &apiErr) {
+	if errors.As(err, &apiErr) {
 		switch apiErr.ErrorCode() {
 		case "ParameterNotFound", "ParameterVersionNotFound", "ParameterPatternMismatchException":
 			return ErrNotFound

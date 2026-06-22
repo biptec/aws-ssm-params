@@ -2,11 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -104,7 +103,7 @@ func metadataForPaths(ctx context.Context, client ssm.Client, paths []string) (m
 
 func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.ParameterType, error) {
 	if err != nil {
-		return "", crerr.Wrap(err, "parse parameter type")
+		return "", errors.Wrap(err, "parse parameter type")
 	}
 	return parameterType, nil
 }

@@ -2,14 +2,13 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"strconv"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
@@ -108,20 +107,20 @@ func (defaultBackend) randomValue(kind, customLength string) (string, error) {
 	switch kind {
 	case "base64-32":
 		value, err := randomx.Base64(32)
-		return value, crerr.Wrap(err, "generate base64 random value")
+		return value, errors.Wrap(err, "generate base64 random value")
 	case "hex-32":
 		value, err := randomx.Hex(32)
-		return value, crerr.Wrap(err, "generate hex random value")
+		return value, errors.Wrap(err, "generate hex random value")
 	case "uuid":
 		value, err := randomx.UUID()
-		return value, crerr.Wrap(err, "generate UUID random value")
+		return value, errors.Wrap(err, "generate UUID random value")
 	case "base64-custom":
 		n, err := strconv.Atoi(strings.TrimSpace(customLength))
 		if err != nil || n <= 0 {
 			return "", errors.New("invalid byte length")
 		}
 		value, err := randomx.Base64(n)
-		return value, crerr.Wrap(err, "generate custom base64 random value")
+		return value, errors.Wrap(err, "generate custom base64 random value")
 	default:
 		return "", errors.New("unknown random value generator")
 	}

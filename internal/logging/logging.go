@@ -4,13 +4,14 @@ package logging
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/cockroachdb/errors"
 )
 
 const (

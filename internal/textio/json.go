@@ -2,13 +2,12 @@ package textio
 
 import (
 	"encoding/json"
-	"errors"
 	"io"
 	"sort"
 	"strconv"
 	"strings"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 )
 
 // JSON imports and exports JSON documents using streams supplied by the factories.
@@ -29,7 +28,7 @@ func (format *JSON) Export(records Records, mappings FieldMappings, keyField str
 		mappings = defaultFieldMappings()
 	}
 	if keyField == "" {
-		return crerr.Wrap(encoder.Encode(mappings.objects(records, "")), "encode mapped JSON export")
+		return errors.Wrap(encoder.Encode(mappings.objects(records, "")), "encode mapped JSON export")
 	}
 	data := map[string]map[string]any{}
 	for i := range records {
@@ -39,7 +38,7 @@ func (format *JSON) Export(records Records, mappings FieldMappings, keyField str
 		}
 		data[key] = mappings.object(records[i], keyField)
 	}
-	return crerr.Wrap(encoder.Encode(data), "encode keyed JSON export")
+	return errors.Wrap(encoder.Encode(data), "encode keyed JSON export")
 }
 
 // Import accepts both arrays of objects and objects keyed by keyField.
@@ -52,19 +51,19 @@ func (format *JSON) Import(mappings FieldMappings, keyField string) (Records, er
 	}
 	var raw json.RawMessage
 	if err := json.NewDecoder(format.reader).Decode(&raw); err != nil {
-		return nil, crerr.Wrap(err, "decode JSON import")
+		return nil, errors.Wrap(err, "decode JSON import")
 	}
 	trimmed := strings.TrimSpace(string(raw))
 	if strings.HasPrefix(trimmed, "[") {
 		var objects []map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &objects); err != nil {
-			return nil, crerr.Wrap(err, "decode JSON array import")
+			return nil, errors.Wrap(err, "decode JSON array import")
 		}
 		return format.recordsFromObjects(objects, mappings, ""), nil
 	}
 	var keyed map[string]map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &keyed); err != nil {
-		return nil, crerr.Wrap(err, "decode keyed JSON import")
+		return nil, errors.Wrap(err, "decode keyed JSON import")
 	}
 	keys := make([]string, 0, len(keyed))
 	for key := range keyed {
@@ -134,7 +133,7 @@ func (format *JSON) ExportScalar(records Records, field, keyField string) error 
 		for i := range records {
 			values = append(values, records[i].fieldAny(field))
 		}
-		return crerr.Wrap(encoder.Encode(values), "encode scalar JSON export")
+		return errors.Wrap(encoder.Encode(values), "encode scalar JSON export")
 	}
 	values := map[string]any{}
 	for i := range records {
@@ -144,14 +143,14 @@ func (format *JSON) ExportScalar(records Records, field, keyField string) error 
 		}
 		values[key] = records[i].fieldAny(field)
 	}
-	return crerr.Wrap(encoder.Encode(values), "encode keyed scalar JSON export")
+	return errors.Wrap(encoder.Encode(values), "encode keyed scalar JSON export")
 }
 
 // importLegacyRecords parses legacy path-to-value or path-to-object JSON.
 func (format *JSON) importLegacyRecords() (Records, error) {
 	data := map[string]json.RawMessage{}
 	if err := json.NewDecoder(format.reader).Decode(&data); err != nil {
-		return nil, crerr.Wrap(err, "decode JSON import")
+		return nil, errors.Wrap(err, "decode JSON import")
 	}
 	paths := make([]string, 0, len(data))
 	for path := range data {
@@ -176,11 +175,11 @@ func (format *JSON) parseRecord(path string, raw json.RawMessage) (Record, error
 	}
 	var typed jsonRecord
 	if err := json.Unmarshal(raw, &typed); err != nil {
-		return Record{}, crerr.Wrapf(err, "invalid JSON record for %s", path)
+		return Record{}, errors.Wrapf(err, "invalid JSON record for %s", path)
 	}
 	fields, err := format.recordFields(raw)
 	if err != nil {
-		return Record{}, crerr.Wrapf(err, "invalid JSON record for %s", path)
+		return Record{}, errors.Wrapf(err, "invalid JSON record for %s", path)
 	}
 	return Record{
 		Path: path, Fields: fields, Region: typed.Region, Value: typed.Value, Type: typed.Type,
@@ -192,7 +191,7 @@ func (format *JSON) parseRecord(path string, raw json.RawMessage) (Record, error
 func (*JSON) recordFields(raw json.RawMessage) (Fields, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
-		return nil, crerr.Wrap(err, "decode JSON record fields")
+		return nil, errors.Wrap(err, "decode JSON record fields")
 	}
 	fields := Fields{FieldName}
 	for _, field := range []struct {
@@ -230,7 +229,7 @@ func (format *JSON) exportLegacyRecords(records Records) error {
 	for i := range records {
 		data[records[i].Path] = format.exportRecord(records[i])
 	}
-	return crerr.Wrap(encoder.Encode(data), "encode JSON export")
+	return errors.Wrap(encoder.Encode(data), "encode JSON export")
 }
 
 func (*JSON) exportRecord(record Record) exportJSONRecord {

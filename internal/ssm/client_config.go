@@ -7,7 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/logging"
 )
@@ -59,7 +59,7 @@ func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, err
 	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
-		return aws.Config{}, crerr.Wrap(err, "load AWS SDK config")
+		return aws.Config{}, errors.Wrap(err, "load AWS SDK config")
 	}
 	return cfg, nil
 }

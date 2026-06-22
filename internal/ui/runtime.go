@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	crerr "github.com/cockroachdb/errors"
+	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
@@ -48,7 +48,7 @@ func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Item
 	}
 	p := tea.NewProgram(m, programOptions...)
 	_, err := p.Run()
-	return crerr.Wrap(err, "run interactive TUI")
+	return errors.Wrap(err, "run interactive TUI")
 }
 
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
