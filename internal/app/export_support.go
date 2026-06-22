@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
@@ -165,9 +165,9 @@ func validateKeyFieldOutputFields(keyField string, outputFields []string) error 
 	return nil
 }
 
-func exportFieldMappings(fields []string, overrides []secretfmt.FieldMapping) []secretfmt.FieldMapping {
+func exportFieldMappings(fields []string, overrides []outputfmt.FieldMapping) []outputfmt.FieldMapping {
 	effective := effectiveFieldMappings(overrides)
-	out := make([]secretfmt.FieldMapping, 0, len(fields))
+	out := make([]outputfmt.FieldMapping, 0, len(fields))
 	for _, field := range fields {
 		for _, mapping := range effective {
 			if mapping.AWSName == field {
@@ -200,8 +200,8 @@ func hasExportField(fields []string, field string) bool {
 	return false
 }
 
-func exportRecordFromStatus(status ui.Status, fields []string) secretfmt.Record {
-	record := secretfmt.Record{Path: status.Item.Path, Alias: secretfmt.AliasForItem(status.Item), Fields: fields}
+func exportRecordFromStatus(status ui.Status, fields []string) outputfmt.Record {
+	record := outputfmt.Record{Path: status.Item.Path, Alias: outputfmt.AliasForItem(status.Item), Fields: fields}
 	if hasExportField(fields, "region") {
 		record.Region = status.Item.Region
 	}

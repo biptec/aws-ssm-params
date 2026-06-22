@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -57,7 +57,7 @@ func TestConfigFromCLIParsesRepeatedRegionsFiltersAndFields(t *testing.T) {
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
 	assert.Equal(t, []string{"name", "value"}, cfg.Fields)
-	assert.Equal(t, []secretfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	require.Len(t, cfg.FilterGroups, 1)
 	assert.True(t, cfg.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
 }
@@ -78,7 +78,7 @@ func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
 	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
 	assert.True(t, cfg.WithDecryption)
 	assert.Equal(t, []string{"name", "value"}, cfg.Fields)
-	assert.Equal(t, []secretfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	assert.Equal(t, []string{"path", "value"}, cfg.ShowColumns)
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
@@ -192,7 +192,7 @@ func TestRejectCommaSeparatedFlagArgsIgnoresArgsAfterDoubleDash(t *testing.T) {
 func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a", "name:/app/c"})
 	require.NoError(t, err)
-	records := []secretfmt.Record{
+	records := []outputfmt.Record{
 		{Path: "/app/a", Value: "a"},
 		{Path: "/app/b", Value: "b"},
 		{Path: "/app/c", Value: "c"},
@@ -214,7 +214,7 @@ func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
-	records := []secretfmt.Record{{Path: "DATABASE_URL", Alias: "DATABASE_URL", Value: "postgres://localhost/app"}}
+	records := []outputfmt.Record{{Path: "DATABASE_URL", Alias: "DATABASE_URL", Value: "postgres://localhost/app"}}
 
 	resolved, err := applyRootPathToRecords(records, "/app/prod/api/")
 
@@ -225,7 +225,7 @@ func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
-	records := []secretfmt.Record{{Path: "/explicit/path", Alias: "EXPLICIT_PATH"}}
+	records := []outputfmt.Record{{Path: "/explicit/path", Alias: "EXPLICIT_PATH"}}
 
 	resolved, err := applyRootPathToRecords(records, "/app/prod")
 
@@ -236,7 +236,7 @@ func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsRejectsRelativeNamesWithoutRoot(t *testing.T) {
-	records := []secretfmt.Record{{Path: "DATABASE_URL"}}
+	records := []outputfmt.Record{{Path: "DATABASE_URL"}}
 
 	_, err := applyRootPathToRecords(records, "")
 
@@ -245,7 +245,7 @@ func TestApplyRootPathToRecordsRejectsRelativeNamesWithoutRoot(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsRejectsRelativeRootPath(t *testing.T) {
-	records := []secretfmt.Record{{Path: "DATABASE_URL"}}
+	records := []outputfmt.Record{{Path: "DATABASE_URL"}}
 
 	_, err := applyRootPathToRecords(records, "app/prod")
 
@@ -324,9 +324,9 @@ func TestValidateKeyFieldOutputFieldsAllowsImplicitAllFields(t *testing.T) {
 }
 
 func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
-	mappings := exportFieldMappings([]string{"name", "value", "type"}, []secretfmt.FieldMapping{{AWSName: "name", FileName: "title"}})
+	mappings := exportFieldMappings([]string{"name", "value", "type"}, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}})
 
-	assert.Equal(t, []secretfmt.FieldMapping{
+	assert.Equal(t, []outputfmt.FieldMapping{
 		{AWSName: "name", FileName: "title"},
 		{AWSName: "value", FileName: "value"},
 		{AWSName: "type", FileName: "type"},
@@ -396,7 +396,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 }
 
 func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T) {
-	record := secretfmt.Record{Path: "/app/value", Fields: []string{"name", "value"}, Value: "secret"}
+	record := outputfmt.Record{Path: "/app/value", Fields: []string{"name", "value"}, Value: "secret"}
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
@@ -407,7 +407,7 @@ func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T
 }
 
 func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
-	record := secretfmt.Record{Path: "/app/value", Fields: []string{"name", "value", "policies"}, Value: "secret", Policies: ""}
+	record := outputfmt.Record{Path: "/app/value", Fields: []string{"name", "value", "policies"}, Value: "secret", Policies: ""}
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierAdvanced.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: `[{"Type":"Expiration"}]`}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
@@ -419,7 +419,7 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 }
 
 func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
-	record := secretfmt.Record{
+	record := outputfmt.Record{
 		Fields:      []string{"name", "tier", "data-type", "description", "policies"},
 		Tier:        "Advanced",
 		DataType:    "aws:ec2:image",

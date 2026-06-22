@@ -8,7 +8,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
@@ -57,7 +57,7 @@ func PrepareImportItems(ctx context.Context, cfg *Config, _ string) ([]inventory
 	return applyInventoryRegion(items, cfg.Region), nil
 }
 
-func applyRootPathToRecords(records []secretfmt.Record, rootPath string) ([]secretfmt.Record, error) {
+func applyRootPathToRecords(records []outputfmt.Record, rootPath string) ([]outputfmt.Record, error) {
 	rootPath = strings.TrimSpace(rootPath)
 	if rootPath != "" {
 		if !strings.HasPrefix(rootPath, "/") {
@@ -68,7 +68,7 @@ func applyRootPathToRecords(records []secretfmt.Record, rootPath string) ([]secr
 			rootPath = "/"
 		}
 	}
-	resolved := make([]secretfmt.Record, 0, len(records))
+	resolved := make([]outputfmt.Record, 0, len(records))
 	for idx := range records {
 		record := records[idx]
 		path := strings.TrimSpace(record.Path)
@@ -89,21 +89,21 @@ func applyRootPathToRecords(records []secretfmt.Record, rootPath string) ([]secr
 			record.Path = rootPath + "/" + strings.TrimLeft(path, "/")
 		}
 		if record.Alias == "" {
-			record.Alias = secretfmt.AliasForPath(record.Path, inventory.Item{})
+			record.Alias = outputfmt.AliasForPath(record.Path, inventory.Item{})
 		}
 		resolved = append(resolved, record)
 	}
 	return resolved, nil
 }
 
-func recordRegion(record secretfmt.Record, cfg Config) string {
+func recordRegion(record outputfmt.Record, cfg Config) string {
 	if fieldAllowed(cfg.Fields, "region") && recordHasField(record, "region") && strings.TrimSpace(record.Region) != "" {
 		return strings.TrimSpace(record.Region)
 	}
 	return cfg.Region
 }
 
-func metadataForImportRecords(ctx context.Context, client ssm.Client, records []secretfmt.Record, cfg Config) (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
+func metadataForImportRecords(ctx context.Context, client ssm.Client, records []outputfmt.Record, cfg Config) (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
 	pathsByRegion := map[string][]string{}
 	seen := map[string]bool{}
 	for i := range records {
@@ -134,7 +134,7 @@ func metadataForImportRecords(ctx context.Context, client ssm.Client, records []
 	return metadata, errs
 }
 
-func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record secretfmt.Record, cfg Config) (ssm.ParameterType, error) {
+func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record outputfmt.Record, cfg Config) (ssm.ParameterType, error) {
 	recordType := ""
 	if fieldAllowed(cfg.Fields, "type") && recordHasField(record, "type") && strings.TrimSpace(record.Type) != "" {
 		recordType = record.Type

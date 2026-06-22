@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 )
 
 func fieldAllowed(fields []string, field string) bool {
@@ -41,11 +41,11 @@ func includeValuesForFilterGroups(groups []filter.Group) bool {
 	return false
 }
 
-func filterRecordsByGroups(records []secretfmt.Record, groups []filter.Group) []secretfmt.Record {
+func filterRecordsByGroups(records []outputfmt.Record, groups []filter.Group) []outputfmt.Record {
 	if len(groups) == 0 {
 		return records
 	}
-	out := make([]secretfmt.Record, 0, len(records))
+	out := make([]outputfmt.Record, 0, len(records))
 	for i := range records {
 		if filter.MatchAny(groups, filter.Record{
 			Name:        records[i].Path,
@@ -70,7 +70,7 @@ func requireFieldForCommand(cfg Config, field, command string) error {
 	return nil
 }
 
-func recordHasField(record secretfmt.Record, field string) bool {
+func recordHasField(record outputfmt.Record, field string) bool {
 	for _, candidate := range record.Fields {
 		if candidate == field {
 			return true
@@ -79,8 +79,8 @@ func recordHasField(record secretfmt.Record, field string) bool {
 	return len(record.Fields) == 0
 }
 
-func effectiveFieldMappings(overrides []secretfmt.FieldMapping) []secretfmt.FieldMapping {
-	base := secretfmt.DefaultFieldMappings()
+func effectiveFieldMappings(overrides []outputfmt.FieldMapping) []outputfmt.FieldMapping {
+	base := outputfmt.DefaultFieldMappings()
 	if len(overrides) == 0 {
 		return base
 	}

@@ -9,7 +9,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
@@ -28,7 +28,7 @@ type importCommand struct {
 	ctx             *CLIContext
 	cfg             Config
 	client          ssm.Client
-	records         []secretfmt.Record
+	records         []outputfmt.Record
 	metadata        map[string]ssm.Metadata
 	metadataErrors  map[string]error
 	defaultOptions  ssm.PutParameterOptions
@@ -137,7 +137,7 @@ func (command *importCommand) run() error {
 	return nil
 }
 
-func (command *importCommand) processRecord(record secretfmt.Record) error {
+func (command *importCommand) processRecord(record outputfmt.Record) error {
 	region := recordRegion(record, command.cfg)
 	key := recordKey(region, record.Path)
 	existing, exists := command.metadata[key]
@@ -220,16 +220,16 @@ func (command *importCommand) writeSummary() {
 }
 
 // parseImport dispatches import parsing by format while keeping the Import command handler format-agnostic.
-func parseImport(format string, reader io.Reader, items []inventory.Item, mappings []secretfmt.FieldMapping, jsonKeyField string) ([]secretfmt.Record, error) {
+func parseImport(format string, reader io.Reader, items []inventory.Item, mappings []outputfmt.FieldMapping, jsonKeyField string) ([]outputfmt.Record, error) {
 	switch format {
 	case "dotenv":
-		records, err := secretfmt.ImportDotenv(reader, items)
+		records, err := outputfmt.ImportDotenv(reader, items)
 		return records, crerr.Wrap(err, "import dotenv")
 	case "json":
-		records, err := secretfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
+		records, err := outputfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
 		return records, crerr.Wrap(err, "import JSON")
 	case "yaml", "yml":
-		records, err := secretfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
+		records, err := outputfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
 		return records, crerr.Wrap(err, "import YAML")
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)

@@ -6,7 +6,7 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
@@ -43,7 +43,7 @@ func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions,
 	return opts, nil
 }
 
-func importOptionsForRecord(record secretfmt.Record, cloud ssm.Metadata, exists bool, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
+func importOptionsForRecord(record outputfmt.Record, cloud ssm.Metadata, exists bool, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
 	opts := defaults
 	if exists {
 		if fieldAllowed(cfg.Fields, "tier") && strings.TrimSpace(cloud.Tier) != "" {

@@ -8,7 +8,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -120,8 +120,8 @@ func (command *exportCommand) loadStatuses() []ui.Status {
 	return statuses
 }
 
-func (command *exportCommand) records(statuses []ui.Status) []secretfmt.Record {
-	records := make([]secretfmt.Record, 0, len(statuses))
+func (command *exportCommand) records(statuses []ui.Status) []outputfmt.Record {
+	records := make([]outputfmt.Record, 0, len(statuses))
 	for i := range statuses {
 		if statuses[i].Exists {
 			records = append(records, exportRecordFromStatus(statuses[i], command.recordFields))
@@ -130,28 +130,28 @@ func (command *exportCommand) records(statuses []ui.Status) []secretfmt.Record {
 	return records
 }
 
-func (command *exportCommand) writeScalar(records []secretfmt.Record) error {
+func (command *exportCommand) writeScalar(records []outputfmt.Record) error {
 	switch command.format {
 	case "dotenv":
-		return crerr.Wrap(secretfmt.ExportScalarLines(command.output, records, command.scalarField), "export scalar")
+		return crerr.Wrap(outputfmt.ExportScalarLines(command.output, records, command.scalarField), "export scalar")
 	case "json":
-		return crerr.Wrap(secretfmt.ExportJSONScalar(command.output, records, command.scalarField, command.keyField), "export scalar JSON")
+		return crerr.Wrap(outputfmt.ExportJSONScalar(command.output, records, command.scalarField, command.keyField), "export scalar JSON")
 	case "yaml", "yml":
-		return crerr.Wrap(secretfmt.ExportYAMLScalar(command.output, records, command.scalarField, command.keyField), "export scalar YAML")
+		return crerr.Wrap(outputfmt.ExportYAMLScalar(command.output, records, command.scalarField, command.keyField), "export scalar YAML")
 	default:
 		return fmt.Errorf("unsupported format: %s", command.format)
 	}
 }
 
-func (command *exportCommand) writeRecords(records []secretfmt.Record) error {
+func (command *exportCommand) writeRecords(records []outputfmt.Record) error {
 	mappings := exportFieldMappings(command.recordFields, command.cfg.FieldMappings)
 	switch command.format {
 	case "dotenv":
-		return crerr.Wrap(secretfmt.ExportDotenv(command.output, records), "export dotenv")
+		return crerr.Wrap(outputfmt.ExportDotenv(command.output, records), "export dotenv")
 	case "json":
-		return crerr.Wrap(secretfmt.ExportJSONMapped(command.output, records, mappings, command.keyField), "export JSON")
+		return crerr.Wrap(outputfmt.ExportJSONMapped(command.output, records, mappings, command.keyField), "export JSON")
 	case "yaml", "yml":
-		return crerr.Wrap(secretfmt.ExportYAMLMapped(command.output, records, mappings, command.keyField), "export YAML")
+		return crerr.Wrap(outputfmt.ExportYAMLMapped(command.output, records, mappings, command.keyField), "export YAML")
 	default:
 		return fmt.Errorf("unsupported format: %s", command.format)
 	}

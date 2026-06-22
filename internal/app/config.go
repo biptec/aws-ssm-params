@@ -12,7 +12,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/logging"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -26,7 +26,7 @@ type Config struct {
 	Logger                    *slog.Logger
 	FiltersFile               string
 	FilterGroups              []filter.Group
-	FieldMappings             []secretfmt.FieldMapping
+	FieldMappings             []outputfmt.FieldMapping
 	Fields                    []string
 	InventoryItems            []inventory.Item
 	Region                    string
@@ -162,13 +162,13 @@ func parseOutputFields(values []string) ([]string, error) {
 	return fields, nil
 }
 
-func parseMapFields(values []string) ([]secretfmt.FieldMapping, error) {
+func parseMapFields(values []string) ([]outputfmt.FieldMapping, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	mappings := make([]secretfmt.FieldMapping, 0, len(parts))
+	mappings := make([]outputfmt.FieldMapping, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--map-field accepts one value per flag; repeat --map-field instead of using commas")
@@ -189,7 +189,7 @@ func parseMapFields(values []string) ([]secretfmt.FieldMapping, error) {
 			continue
 		}
 		seen[canonical] = true
-		mappings = append(mappings, secretfmt.FieldMapping{AWSName: canonical, FileName: fileField})
+		mappings = append(mappings, outputfmt.FieldMapping{AWSName: canonical, FileName: fileField})
 	}
 	return mappings, nil
 }
