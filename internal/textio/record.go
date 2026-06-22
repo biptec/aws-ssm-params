@@ -5,55 +5,6 @@ import (
 	"strconv"
 )
 
-// FieldMapping maps an AWS field name to a file field name.
-type FieldMapping struct {
-	AWSName  string
-	FileName string
-}
-
-// Fields is an ordered set of canonical parameter field names.
-type Fields []string
-
-// Contains reports whether field is explicitly present.
-func (fields Fields) Contains(field string) bool {
-	for _, candidate := range fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return false
-}
-
-// Includes reports whether field is represented. An empty set represents all fields.
-func (fields Fields) Includes(field string) bool {
-	return len(fields) == 0 || fields.Contains(field)
-}
-
-// Allows applies output-field semantics: name is always available and an empty set allows every field.
-func (fields Fields) Allows(field string) bool {
-	return field == "name" || fields.Includes(field)
-}
-
-// With returns a copy containing each non-empty field once, preserving order.
-func (fields Fields) With(additions ...string) Fields {
-	out := append(Fields(nil), fields...)
-	for _, field := range additions {
-		if field == "" || out.Contains(field) {
-			continue
-		}
-		out = append(out, field)
-	}
-	return out
-}
-
-// RequiresValues reports whether loading parameter values is required to provide these fields.
-func (fields Fields) RequiresValues() bool {
-	if len(fields) == 0 {
-		return true
-	}
-	return fields.Contains("value") || fields.Contains("len") || fields.Contains("sha256") || fields.Contains("version")
-}
-
 // Record is the import/export representation of one SSM parameter.
 // Path is the canonical or relative SSM name, Value is the parameter value, and Type optionally carries the AWS SSM
 // parameter type when an import/export format preserves it.
@@ -88,37 +39,37 @@ func (r Record) HasField(field string) bool {
 
 func (r Record) fieldAny(field string) any {
 	switch field {
-	case "name":
+	case FieldName:
 		return r.Path
-	case "region":
+	case FieldRegion:
 		return r.Region
-	case "type":
+	case FieldType:
 		return r.Type
-	case "tier":
+	case FieldTier:
 		return r.Tier
-	case "data-type":
+	case FieldDataType:
 		return r.DataType
-	case "policies":
+	case FieldPolicies:
 		return r.Policies
-	case "description":
+	case FieldDescription:
 		return r.Description
-	case "value":
+	case FieldValue:
 		return r.Value
-	case "date":
+	case FieldDate:
 		return r.Date
-	case "version":
+	case FieldVersion:
 		if r.Version == 0 {
 			return ""
 		}
 		return r.Version
-	case "len":
+	case FieldLen:
 		if r.Len == 0 {
 			return ""
 		}
 		return r.Len
-	case "sha256":
+	case FieldSHA256:
 		return r.SHA256
-	case "user":
+	case FieldUser:
 		return r.User
 	default:
 		return ""
@@ -141,31 +92,31 @@ func (r Record) fieldValue(field string) string {
 
 func (r *Record) setFieldValue(field, value string) {
 	switch field {
-	case "name":
+	case FieldName:
 		r.Path = value
-	case "region":
+	case FieldRegion:
 		r.Region = value
-	case "type":
+	case FieldType:
 		r.Type = value
-	case "tier":
+	case FieldTier:
 		r.Tier = value
-	case "data-type":
+	case FieldDataType:
 		r.DataType = value
-	case "policies":
+	case FieldPolicies:
 		r.Policies = value
-	case "description":
+	case FieldDescription:
 		r.Description = value
-	case "value":
+	case FieldValue:
 		r.Value = value
-	case "date":
+	case FieldDate:
 		r.Date = value
-	case "version":
+	case FieldVersion:
 		r.Version, _ = strconv.ParseInt(value, 10, 64)
-	case "len":
+	case FieldLen:
 		r.Len, _ = strconv.Atoi(value)
-	case "sha256":
+	case FieldSHA256:
 		r.SHA256 = value
-	case "user":
+	case FieldUser:
 		r.User = value
 	}
 }

@@ -33,16 +33,16 @@ func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions,
 		policies = string(data)
 	}
 	opts := ssm.PutParameterOptions{}
-	if cfg.Fields.Allows("tier") {
+	if cfg.Fields.Allows(textio.FieldTier) {
 		opts.Tier = tier
 	}
-	if cfg.Fields.Allows("data-type") {
+	if cfg.Fields.Allows(textio.FieldDataType) {
 		opts.DataType = dataType
 	}
-	if cfg.Fields.Allows("description") {
+	if cfg.Fields.Allows(textio.FieldDescription) {
 		opts.Description = ctx.String("default-description")
 	}
-	if cfg.Fields.Allows("policies") {
+	if cfg.Fields.Allows(textio.FieldPolicies) {
 		opts.Policies = policies
 	}
 	return opts, nil
@@ -52,45 +52,49 @@ func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.
 	opts := resolver.defaults
 	cfg := resolver.cfg
 	if exists {
-		if cfg.Fields.Allows("tier") && strings.TrimSpace(cloud.Tier) != "" {
+		if cfg.Fields.Allows(textio.FieldTier) && strings.TrimSpace(cloud.Tier) != "" {
 			tier, err := ssm.ParseParameterTier(cloud.Tier)
 			if err != nil {
 				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud tier")
 			}
 			opts.Tier = tier
 		}
-		if cfg.Fields.Allows("data-type") && strings.TrimSpace(cloud.DataType) != "" {
+		if cfg.Fields.Allows(textio.FieldDataType) && strings.TrimSpace(cloud.DataType) != "" {
 			dataType, err := ssm.ParseParameterDataType(cloud.DataType)
 			if err != nil {
 				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud data type")
 			}
 			opts.DataType = dataType
 		}
-		if cfg.Fields.Allows("description") {
+		if cfg.Fields.Allows(textio.FieldDescription) {
 			opts.Description = cloud.Description
 		}
-		if cfg.Fields.Allows("policies") {
+		if cfg.Fields.Allows(textio.FieldPolicies) {
 			opts.Policies = cloud.Policies
 		}
 	}
-	if cfg.Fields.Allows("tier") && record.HasField("tier") && strings.TrimSpace(record.Tier) != "" {
+	if cfg.Fields.Allows(textio.FieldTier) && record.HasField(textio.FieldTier) && strings.TrimSpace(record.Tier) != "" {
 		tier, err := ssm.ParseParameterTier(record.Tier)
 		if err != nil {
 			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
 		}
 		opts.Tier = tier
 	}
-	if cfg.Fields.Allows("data-type") && record.HasField("data-type") && strings.TrimSpace(record.DataType) != "" {
+	if cfg.Fields.Allows(textio.FieldDataType) &&
+		record.HasField(textio.FieldDataType) &&
+		strings.TrimSpace(record.DataType) != "" {
 		dataType, err := ssm.ParseParameterDataType(record.DataType)
 		if err != nil {
 			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
 		}
 		opts.DataType = dataType
 	}
-	if cfg.Fields.Allows("description") && record.HasField("description") && strings.TrimSpace(record.Description) != "" {
+	if cfg.Fields.Allows(textio.FieldDescription) &&
+		record.HasField(textio.FieldDescription) &&
+		strings.TrimSpace(record.Description) != "" {
 		opts.Description = record.Description
 	}
-	if cfg.Fields.Allows("policies") && record.HasField("policies") {
+	if cfg.Fields.Allows(textio.FieldPolicies) && record.HasField(textio.FieldPolicies) {
 		if strings.TrimSpace(record.Policies) == "" {
 			opts.Policies = "[{}]"
 			opts.PoliciesSet = true

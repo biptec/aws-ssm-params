@@ -83,7 +83,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 		return nil, err
 	}
 	records = records.filter(cfg.FilterGroups)
-	if err := cfg.requireField("value", "import"); err != nil {
+	if err := cfg.requireField(textio.FieldValue, "import"); err != nil {
 		return nil, err
 	}
 	defaultOptions, err := importDefaultOptions(ctx, cfg)

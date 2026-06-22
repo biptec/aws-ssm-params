@@ -110,7 +110,9 @@ func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.Paramete
 }
 
 func recordRegion(record textio.Record, cfg Config) string {
-	if cfg.Fields.Allows("region") && record.HasField("region") && strings.TrimSpace(record.Region) != "" {
+	if cfg.Fields.Allows(textio.FieldRegion) &&
+		record.HasField(textio.FieldRegion) &&
+		strings.TrimSpace(record.Region) != "" {
 		return strings.TrimSpace(record.Region)
 	}
 	return cfg.Region
@@ -149,14 +151,16 @@ func (resolver importMetadataResolver) resolve() (metadataByKey map[string]ssm.M
 
 func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record textio.Record, cfg Config) (ssm.ParameterType, error) {
 	recordType := ""
-	if cfg.Fields.Allows("type") && record.HasField("type") && strings.TrimSpace(record.Type) != "" {
+	if cfg.Fields.Allows(textio.FieldType) &&
+		record.HasField(textio.FieldType) &&
+		strings.TrimSpace(record.Type) != "" {
 		recordType = record.Type
 	}
 	existingType := ""
 	if exists {
 		existingType = existing.Type
 	}
-	if !cfg.Fields.Allows("type") {
+	if !cfg.Fields.Allows(textio.FieldType) {
 		defaultType = ""
 	}
 	for _, candidate := range []string{recordType, existingType, defaultType} {

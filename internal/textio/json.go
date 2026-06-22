@@ -172,7 +172,7 @@ func (format *JSON) importLegacyRecords() (Records, error) {
 func (format *JSON) parseRecord(path string, raw json.RawMessage) (Record, error) {
 	var value string
 	if err := json.Unmarshal(raw, &value); err == nil {
-		return Record{Path: path, Fields: Fields{"name", "value"}, Value: value}, nil
+		return Record{Path: path, Fields: Fields{FieldName, FieldValue}, Value: value}, nil
 	}
 	var typed jsonRecord
 	if err := json.Unmarshal(raw, &typed); err != nil {
@@ -194,26 +194,26 @@ func (*JSON) recordFields(raw json.RawMessage) (Fields, error) {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, crerr.Wrap(err, "decode JSON record fields")
 	}
-	fields := Fields{"name"}
+	fields := Fields{FieldName}
 	for _, field := range []struct {
 		jsonName string
 		field    string
 	}{
-		{"region", "region"},
-		{"type", "type"},
-		{"tier", "tier"},
-		{"dataType", "data-type"},
-		{"data_type", "data-type"},
-		{"data-type", "data-type"},
-		{"policies", "policies"},
-		{"description", "description"},
-		{"value", "value"},
-		{"date", "date"},
-		{"version", "version"},
-		{"len", "len"},
-		{"length", "len"},
-		{"sha256", "sha256"},
-		{"user", "user"},
+		{"region", FieldRegion},
+		{"type", FieldType},
+		{"tier", FieldTier},
+		{"dataType", FieldDataType},
+		{"data_type", FieldDataType},
+		{"data-type", FieldDataType},
+		{"policies", FieldPolicies},
+		{"description", FieldDescription},
+		{"value", FieldValue},
+		{"date", FieldDate},
+		{"version", FieldVersion},
+		{"len", FieldLen},
+		{"length", FieldLen},
+		{"sha256", FieldSHA256},
+		{"user", FieldUser},
 	} {
 		if _, ok := object[field.jsonName]; ok {
 			fields = fields.With(field.field)
@@ -235,40 +235,40 @@ func (format *JSON) exportLegacyRecords(records Records) error {
 
 func (*JSON) exportRecord(record Record) exportJSONRecord {
 	out := exportJSONRecord{}
-	if record.includesField("region") {
+	if record.includesField(FieldRegion) {
 		out.Region = record.Region
 	}
-	if record.includesField("type") {
+	if record.includesField(FieldType) {
 		out.Type = record.Type
 	}
-	if record.includesField("tier") {
+	if record.includesField(FieldTier) {
 		out.Tier = record.Tier
 	}
-	if record.includesField("data-type") {
+	if record.includesField(FieldDataType) {
 		out.DataType = record.DataType
 	}
-	if record.includesField("policies") {
+	if record.includesField(FieldPolicies) {
 		out.Policies = record.Policies
 	}
-	if record.includesField("description") {
+	if record.includesField(FieldDescription) {
 		out.Description = record.Description
 	}
-	if record.includesField("value") {
+	if record.includesField(FieldValue) {
 		out.Value = &record.Value
 	}
-	if record.includesField("date") {
+	if record.includesField(FieldDate) {
 		out.Date = record.Date
 	}
-	if record.includesField("version") {
+	if record.includesField(FieldVersion) {
 		out.Version = &record.Version
 	}
-	if record.includesField("len") {
+	if record.includesField(FieldLen) {
 		out.Len = &record.Len
 	}
-	if record.includesField("sha256") {
+	if record.includesField(FieldSHA256) {
 		out.SHA256 = record.SHA256
 	}
-	if record.includesField("user") {
+	if record.includesField(FieldUser) {
 		out.User = record.User
 	}
 	return out

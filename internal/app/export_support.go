@@ -18,31 +18,31 @@ type exportSortRule struct {
 
 func (rule exportSortRule) value(status ui.Status) string {
 	switch rule.field {
-	case "name":
+	case textio.FieldName:
 		return status.Item.Path
-	case "region":
+	case textio.FieldRegion:
 		return status.Item.Region
-	case "type":
+	case textio.FieldType:
 		return status.Type
-	case "tier":
+	case textio.FieldTier:
 		return status.Tier
-	case "data-type":
+	case textio.FieldDataType:
 		return status.DataType
-	case "policies":
+	case textio.FieldPolicies:
 		return status.Policies
-	case "description":
+	case textio.FieldDescription:
 		return status.Description
-	case "value":
+	case textio.FieldValue:
 		return status.Value
-	case "date":
+	case textio.FieldDate:
 		return status.Modified
-	case "version":
+	case textio.FieldVersion:
 		return fmt.Sprint(status.Version)
-	case "len":
+	case textio.FieldLen:
 		return fmt.Sprint(status.Length)
-	case "sha256":
+	case textio.FieldSHA256:
 		return status.SHA256Prefix
-	case "user":
+	case textio.FieldUser:
 		return status.User
 	default:
 		return ""
@@ -54,7 +54,7 @@ type exportSortRules []exportSortRule
 func (rules exportSortRules) requiresValues() bool {
 	for _, rule := range rules {
 		switch rule.field {
-		case "value", "len", "sha256":
+		case textio.FieldValue, textio.FieldLen, textio.FieldSHA256:
 			return true
 		}
 	}
@@ -88,12 +88,22 @@ func parseExportSortRules(values []string) exportSortRules {
 func normalizeExportSortField(field string) (string, bool) {
 	field = strings.ToLower(strings.TrimSpace(field))
 	switch field {
-	case "name", "path":
-		return "name", true
-	case "region", "type", "tier", "policies", "description", "value", "date", "version", "len", "sha256", "user":
+	case textio.FieldName, "path":
+		return textio.FieldName, true
+	case textio.FieldRegion,
+		textio.FieldType,
+		textio.FieldTier,
+		textio.FieldPolicies,
+		textio.FieldDescription,
+		textio.FieldValue,
+		textio.FieldDate,
+		textio.FieldVersion,
+		textio.FieldLen,
+		textio.FieldSHA256,
+		textio.FieldUser:
 		return field, true
-	case "data-type", "datatype", "data_type":
-		return "data-type", true
+	case textio.FieldDataType, "datatype", "data_type":
+		return textio.FieldDataType, true
 	default:
 		return "", false
 	}
@@ -133,7 +143,21 @@ func (rules exportSortRules) sort(statuses ui.Statuses) {
 	})
 }
 
-var allExportFields = textio.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
+var allExportFields = textio.Fields{
+	textio.FieldName,
+	textio.FieldRegion,
+	textio.FieldType,
+	textio.FieldTier,
+	textio.FieldDataType,
+	textio.FieldPolicies,
+	textio.FieldDescription,
+	textio.FieldValue,
+	textio.FieldDate,
+	textio.FieldVersion,
+	textio.FieldLen,
+	textio.FieldSHA256,
+	textio.FieldUser,
+}
 
 func exportFields(cfg Config) textio.Fields {
 	if len(cfg.Fields) == 0 {
@@ -172,40 +196,40 @@ func exportRecordFields(fields textio.Fields, scalarField, keyField string) text
 
 func exportRecordFromStatus(status ui.Status, fields textio.Fields) textio.Record {
 	record := textio.Record{Path: status.Item.Path, Fields: fields}
-	if fields.Contains("region") {
+	if fields.Contains(textio.FieldRegion) {
 		record.Region = status.Item.Region
 	}
-	if fields.Contains("type") {
+	if fields.Contains(textio.FieldType) {
 		record.Type = status.Type
 	}
-	if fields.Contains("tier") {
+	if fields.Contains(textio.FieldTier) {
 		record.Tier = status.Tier
 	}
-	if fields.Contains("data-type") {
+	if fields.Contains(textio.FieldDataType) {
 		record.DataType = status.DataType
 	}
-	if fields.Contains("policies") {
+	if fields.Contains(textio.FieldPolicies) {
 		record.Policies = status.Policies
 	}
-	if fields.Contains("description") {
+	if fields.Contains(textio.FieldDescription) {
 		record.Description = status.Description
 	}
-	if fields.Contains("value") && status.Exists {
+	if fields.Contains(textio.FieldValue) && status.Exists {
 		record.Value = status.Value
 	}
-	if fields.Contains("date") {
+	if fields.Contains(textio.FieldDate) {
 		record.Date = status.Modified
 	}
-	if fields.Contains("version") {
+	if fields.Contains(textio.FieldVersion) {
 		record.Version = status.Version
 	}
-	if fields.Contains("len") {
+	if fields.Contains(textio.FieldLen) {
 		record.Len = status.Length
 	}
-	if fields.Contains("sha256") {
+	if fields.Contains(textio.FieldSHA256) {
 		record.SHA256 = status.SHA256Prefix
 	}
-	if fields.Contains("user") {
+	if fields.Contains(textio.FieldUser) {
 		record.User = status.User
 	}
 	return record

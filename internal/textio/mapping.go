@@ -21,7 +21,7 @@ func (mappings FieldMappings) object(record Record, keyField string) map[string]
 		}
 		value := record.fieldAny(mapping.AWSName)
 		if value == nil || value == "" {
-			if mapping.AWSName != "value" || !record.includesField("value") {
+			if mapping.AWSName != FieldValue || !record.includesField(FieldValue) {
 				continue
 			}
 		}
@@ -76,18 +76,18 @@ func (mappings FieldMappings) ForFields(fields Fields) FieldMappings {
 
 func defaultFieldMappings() FieldMappings {
 	return FieldMappings{
-		{AWSName: "name", FileName: "name"},
-		{AWSName: "region", FileName: "region"},
-		{AWSName: "type", FileName: "type"},
-		{AWSName: "tier", FileName: "tier"},
-		{AWSName: "data-type", FileName: "dataType"},
-		{AWSName: "policies", FileName: "policies"},
-		{AWSName: "description", FileName: "description"},
-		{AWSName: "value", FileName: "value"},
-		{AWSName: "date", FileName: "date"},
-		{AWSName: "version", FileName: "version"},
-		{AWSName: "len", FileName: "len"},
-		{AWSName: "sha256", FileName: "sha256"},
-		{AWSName: "user", FileName: "user"},
+		{AWSName: FieldName, FileName: FieldName},
+		{AWSName: FieldRegion, FileName: FieldRegion},
+		{AWSName: FieldType, FileName: FieldType},
+		{AWSName: FieldTier, FileName: FieldTier},
+		{AWSName: FieldDataType, FileName: "dataType"},
+		{AWSName: FieldPolicies, FileName: FieldPolicies},
+		{AWSName: FieldDescription, FileName: FieldDescription},
+		{AWSName: FieldValue, FileName: FieldValue},
+		{AWSName: FieldDate, FileName: FieldDate},
+		{AWSName: FieldVersion, FileName: FieldVersion},
+		{AWSName: FieldLen, FileName: FieldLen},
+		{AWSName: FieldSHA256, FileName: FieldSHA256},
+		{AWSName: FieldUser, FileName: FieldUser},
 	}
 }

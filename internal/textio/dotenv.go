@@ -107,9 +107,9 @@ func (format *DotEnv) Import(_ FieldMappings, _ string) (Records, error) {
 		if path == "" {
 			path = alias
 		}
-		fields := []string{"name", "value"}
+		fields := []string{FieldName, FieldValue}
 		if strings.TrimSpace(parameterType) != "" {
-			fields = append(fields, "type")
+			fields = append(fields, FieldType)
 		}
 		records = append(records, Record{Path: path, Fields: fields, Value: value, Type: parameterType})
 	}
