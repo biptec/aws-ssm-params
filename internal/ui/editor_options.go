@@ -14,6 +14,11 @@ type editorOptions struct {
 	current Status
 }
 
+type parameterTypeOptions []parameterTypeItem
+type parameterTierOptions []parameterTierItem
+type parameterDataTypeOptions []parameterDataTypeItem
+type overwriteOptions []overwriteItem
+
 func newEditorOptions(m model) editorOptions {
 	return editorOptions{opts: m.opts, editorState: m.editorState, current: m.currentStatus()}
 }
@@ -27,15 +32,7 @@ func (m editorOptions) currentItem() inventory.Item {
 }
 
 func (m editorOptions) fieldAllowed(field string) bool {
-	if field == "name" || len(m.opts.Fields) == 0 {
-		return true
-	}
-	for _, candidate := range m.opts.Fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return false
+	return m.opts.Fields.Allows(field)
 }
 
 func (m editorOptions) editFieldAllowed(field editField) bool {
@@ -66,22 +63,13 @@ func (m editorOptions) editFieldAllowed(field editField) bool {
 }
 
 // randomItems returns supported random value generator choices.
-func randomItems() []actionItem {
-	return []actionItem{{"base64 32 bytes", "base64-32"}, {"hex 32 bytes", "hex-32"}, {"uuid", "uuid"}, {"custom length base64", "base64-custom"}}
-}
-
-// itemPaths extracts SSM names for loading/progress displays.
-func itemPaths(items []inventory.Item) []string {
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		out = append(out, item.Path)
-	}
-	return out
+func randomItems() actionItems {
+	return actionItems{{"base64 32 bytes", "base64-32"}, {"hex 32 bytes", "hex-32"}, {"uuid", "uuid"}, {"custom length base64", "base64-custom"}}
 }
 
 // parameterTypeItems returns the AWS SSM parameter types exposed in the TUI.
-func parameterTypeItems() []parameterTypeItem {
-	return []parameterTypeItem{
+func parameterTypeItems() parameterTypeOptions {
+	return parameterTypeOptions{
 		{hotkey: "e", label: ssm.ParameterTypeSecureString.String(), value: ssm.ParameterTypeSecureString, description: "encrypted value; best default for secrets"},
 		{hotkey: "s", label: ssm.ParameterTypeString.String(), value: ssm.ParameterTypeString, description: "plain text scalar value"},
 		{hotkey: "l", label: ssm.ParameterTypeStringList.String(), value: ssm.ParameterTypeStringList, description: "comma-separated plain text list"},
@@ -89,8 +77,8 @@ func parameterTypeItems() []parameterTypeItem {
 }
 
 // parameterTierItems returns the AWS SSM parameter tiers exposed in the TUI.
-func parameterTierItems() []parameterTierItem {
-	return []parameterTierItem{
+func parameterTierItems() parameterTierOptions {
+	return parameterTierOptions{
 		{hotkey: "i", label: ssm.ParameterTierIntelligentTiering.String(), value: ssm.ParameterTierIntelligentTiering, description: "AWS chooses Standard or Advanced as needed"},
 		{hotkey: "s", label: ssm.ParameterTierStandard.String(), value: ssm.ParameterTierStandard, description: "default tier for most parameters"},
 		{hotkey: "a", label: ssm.ParameterTierAdvanced.String(), value: ssm.ParameterTierAdvanced, description: "larger values and higher parameter limits"},
@@ -98,8 +86,8 @@ func parameterTierItems() []parameterTierItem {
 }
 
 // parameterDataTypeItems returns AWS SSM parameter data types exposed in the TUI.
-func parameterDataTypeItems() []parameterDataTypeItem {
-	return []parameterDataTypeItem{
+func parameterDataTypeItems() parameterDataTypeOptions {
+	return parameterDataTypeOptions{
 		{hotkey: "t", label: ssm.ParameterDataTypeText.String(), value: ssm.ParameterDataTypeText, description: "ordinary text; AWS default"},
 		{hotkey: "a", label: ssm.ParameterDataTypeEC2Image.String(), value: ssm.ParameterDataTypeEC2Image, description: "validate that the value is an AMI id"},
 		{hotkey: "i", label: ssm.ParameterDataTypeSSMIntegration.String(), value: ssm.ParameterDataTypeSSMIntegration, description: "for AWS SSM service integrations"},
@@ -107,8 +95,8 @@ func parameterDataTypeItems() []parameterDataTypeItem {
 }
 
 // overwriteItems returns the choices for AWS SSM --overwrite.
-func overwriteItems() []overwriteItem {
-	return []overwriteItem{
+func overwriteItems() overwriteOptions {
+	return overwriteOptions{
 		{hotkey: "t", label: "true", value: true, description: "update the parameter if it already exists"},
 		{hotkey: "f", label: "false", value: false, description: "let AWS return an error if it already exists"},
 	}
@@ -132,7 +120,7 @@ func (m editorOptions) normalizedEditType() ssm.ParameterType {
 	return ssm.DefaultParameterType
 }
 
-func indexOfParameterType(items []parameterTypeItem, value ssm.ParameterType) int {
+func (items parameterTypeOptions) index(value ssm.ParameterType) int {
 	for i, item := range items {
 		if item.value == value {
 			return i
@@ -141,7 +129,7 @@ func indexOfParameterType(items []parameterTypeItem, value ssm.ParameterType) in
 	return 0
 }
 
-func parameterTypeIndexByHotkey(items []parameterTypeItem, key string) (int, bool) {
+func (items parameterTypeOptions) indexByHotkey(key string) (int, bool) {
 	for i, item := range items {
 		if item.hotkey == key {
 			return i, true
@@ -173,7 +161,7 @@ func (m editorOptions) shouldShowOverwriteField() bool {
 	return m.editFieldAllowed(editFieldOverwrite) && (m.editNewParameter || !m.currentStatus().Exists)
 }
 
-func indexOfParameterTier(items []parameterTierItem, value ssm.ParameterTier) int {
+func (items parameterTierOptions) index(value ssm.ParameterTier) int {
 	for i, item := range items {
 		if item.value == value {
 			return i
@@ -182,7 +170,7 @@ func indexOfParameterTier(items []parameterTierItem, value ssm.ParameterTier) in
 	return 0
 }
 
-func parameterTierIndexByHotkey(items []parameterTierItem, key string) (int, bool) {
+func (items parameterTierOptions) indexByHotkey(key string) (int, bool) {
 	for i, item := range items {
 		if item.hotkey == key {
 			return i, true
@@ -206,7 +194,7 @@ func (m editorOptions) normalizedEditDataType() ssm.ParameterDataType {
 	return ssm.DefaultParameterDataType
 }
 
-func indexOfParameterDataType(items []parameterDataTypeItem, value ssm.ParameterDataType) int {
+func (items parameterDataTypeOptions) index(value ssm.ParameterDataType) int {
 	for i, item := range items {
 		if item.value == value {
 			return i
@@ -215,7 +203,7 @@ func indexOfParameterDataType(items []parameterDataTypeItem, value ssm.Parameter
 	return 0
 }
 
-func parameterDataTypeIndexByHotkey(items []parameterDataTypeItem, key string) (int, bool) {
+func (items parameterDataTypeOptions) indexByHotkey(key string) (int, bool) {
 	for i, item := range items {
 		if item.hotkey == key {
 			return i, true
@@ -224,7 +212,7 @@ func parameterDataTypeIndexByHotkey(items []parameterDataTypeItem, key string) (
 	return 0, false
 }
 
-func indexOfOverwrite(items []overwriteItem, value bool) int {
+func (items overwriteOptions) index(value bool) int {
 	for i, item := range items {
 		if item.value == value {
 			return i
@@ -233,7 +221,7 @@ func indexOfOverwrite(items []overwriteItem, value bool) int {
 	return 0
 }
 
-func overwriteIndexByHotkey(items []overwriteItem, key string) (int, bool) {
+func (items overwriteOptions) indexByHotkey(key string) (int, bool) {
 	for i, item := range items {
 		if item.hotkey == key {
 			return i, true

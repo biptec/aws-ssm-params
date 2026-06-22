@@ -246,7 +246,7 @@ func (m shortcuts) popupSortShortcuts(kind popupKind) string {
 	}
 	lines := []string{"Sort"}
 	for _, item := range m.popupSortItems() {
-		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, columnLabel(item.column)))
+		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, item.column.Label()))
 	}
 	lines = append(lines, "  d            toggle selected direction")
 	return strings.Join(lines, "\n")
@@ -333,7 +333,7 @@ func (m shortcuts) sortShortcuts(forScreen screen) string {
 	}
 	lines := []string{"Sort"}
 	for _, item := range items {
-		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, columnLabel(item.column)))
+		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, item.column.Label()))
 	}
 	return strings.Join(lines, "\n")
 }

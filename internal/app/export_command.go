@@ -8,6 +8,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/filter"
 	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -29,13 +30,14 @@ type exportCommand struct {
 	ctx          *CLIContext
 	cfg          Config
 	client       ssm.Client
-	items        []inventory.Item
+	items        inventory.Items
 	regions      []string
 	output       io.Writer
 	format       string
 	keyField     string
 	scalarField  string
-	recordFields []string
+	recordFields outputfmt.Fields
+	sortRules    exportSortRules
 }
 
 func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error) {
@@ -76,12 +78,13 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 		keyField:     keyField,
 		scalarField:  scalarField,
 		recordFields: exportRecordFields(fields, scalarField, keyField),
+		sortRules:    parseExportSortRules(cfg.SortColumns),
 	}, nil
 }
 
 func (command *exportCommand) run() error {
 	statuses := command.loadStatuses()
-	sortStatusesForExport(statuses, command.cfg.SortColumns)
+	command.sortRules.sort(statuses)
 	records := command.records(statuses)
 	if command.scalarField != "" {
 		return command.writeScalar(records)
@@ -89,13 +92,13 @@ func (command *exportCommand) run() error {
 	return command.writeRecords(records)
 }
 
-func (command *exportCommand) loadStatuses() []ui.Status {
+func (command *exportCommand) loadStatuses() ui.Statuses {
 	includeValues := command.cfg.WithDecryption ||
-		includeValuesForFields(command.recordFields) ||
-		includeValuesForFilterGroups(command.cfg.FilterGroups) ||
-		includeValuesForSortColumns(command.cfg.SortColumns)
+		command.recordFields.RequiresValues() ||
+		command.cfg.FilterGroups.HasField(filter.FieldValue) ||
+		command.sortRules.requiresValues()
 
-	var statuses []ui.Status
+	var statuses ui.Statuses
 	if len(command.cfg.FilterGroups) > 0 && len(command.items) == 0 {
 		statuses = ui.LoadFilteredStatusesBatchForRegions(
 			command.ctx.Context,
@@ -115,13 +118,13 @@ func (command *exportCommand) loadStatuses() []ui.Status {
 		)
 	}
 	if len(command.items) > 0 {
-		return ui.FilterStatusesByGroups(statuses, command.cfg.FilterGroups)
+		return statuses.Filter(command.cfg.FilterGroups)
 	}
 	return statuses
 }
 
-func (command *exportCommand) records(statuses []ui.Status) []outputfmt.Record {
-	records := make([]outputfmt.Record, 0, len(statuses))
+func (command *exportCommand) records(statuses ui.Statuses) outputfmt.Records {
+	records := make(outputfmt.Records, 0, len(statuses))
 	for i := range statuses {
 		if statuses[i].Exists {
 			records = append(records, exportRecordFromStatus(statuses[i], command.recordFields))
@@ -130,7 +133,7 @@ func (command *exportCommand) records(statuses []ui.Status) []outputfmt.Record {
 	return records
 }
 
-func (command *exportCommand) writeScalar(records []outputfmt.Record) error {
+func (command *exportCommand) writeScalar(records outputfmt.Records) error {
 	switch command.format {
 	case "dotenv":
 		return crerr.Wrap(outputfmt.ExportScalarLines(command.output, records, command.scalarField), "export scalar")
@@ -143,8 +146,8 @@ func (command *exportCommand) writeScalar(records []outputfmt.Record) error {
 	}
 }
 
-func (command *exportCommand) writeRecords(records []outputfmt.Record) error {
-	mappings := exportFieldMappings(command.recordFields, command.cfg.FieldMappings)
+func (command *exportCommand) writeRecords(records outputfmt.Records) error {
+	mappings := command.cfg.FieldMappings.WithDefaults().ForFields(command.recordFields)
 	switch command.format {
 	case "dotenv":
 		return crerr.Wrap(outputfmt.ExportDotenv(command.output, records), "export dotenv")

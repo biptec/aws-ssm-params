@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
+	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -23,12 +24,12 @@ type Options struct {
 	Regions                   []string
 	Profile                   string
 	NamesFile                 string
-	FilterGroups              []filter.Group
+	FilterGroups              filter.Groups
 	NoColor                   bool
 	Keymap                    string
 	ShowColumns               []string
 	Sort                      []string
-	Fields                    []string
+	Fields                    outputfmt.Fields
 	IncludeValues             bool
 	ShowSecureValues          bool
 	AllowNamesFileUpdate      bool
@@ -83,14 +84,14 @@ type model struct {
 type progressMsg struct {
 	done, total int
 	region      string
-	items       []inventory.Item
+	items       inventory.Items
 }
 
 // statusBatchMsg streams partial status rows while the initial loader is still running.
-type statusBatchMsg []Status
+type statusBatchMsg Statuses
 
 // loadedMsg is sent once the initial status load has finished and the main table can be shown.
-type loadedMsg []Status
+type loadedMsg Statuses
 
 // statusUpdatedMsg reports the result of saving one parameter value from an edit screen.
 type statusUpdatedMsg struct {
@@ -104,7 +105,7 @@ type statusUpdatedMsg struct {
 
 // deleteDoneMsg reports the result of deleting one or more visible/selected parameters.
 type deleteDoneMsg struct {
-	items      []inventory.Item
+	items      inventory.Items
 	removeRows bool
 	warning    string
 	err        error
@@ -138,15 +139,15 @@ var (
 	cursorStyle      = lipgloss.NewStyle().Reverse(true)
 )
 
-func pendingStatuses(items []inventory.Item) []Status {
-	statuses := make([]Status, 0, len(items))
+func pendingStatuses(items inventory.Items) Statuses {
+	statuses := make(Statuses, 0, len(items))
 	for _, item := range items {
 		statuses = append(statuses, Status{Item: item, Pending: true})
 	}
 	return statuses
 }
 
-func (m *model) mergeStatusBatch(batch []Status) {
+func (m *model) mergeStatusBatch(batch Statuses) {
 	if len(batch) == 0 {
 		return
 	}
@@ -166,7 +167,7 @@ func (m *model) mergeStatusBatch(batch []Status) {
 		return
 	}
 	used := map[string]bool{}
-	merged := make([]Status, 0, len(m.statuses)+len(incoming))
+	merged := make(Statuses, 0, len(m.statuses)+len(incoming))
 	for i := range m.statuses {
 		status := m.statuses[i]
 		key := itemKey(status.Item.Region, status.Item.Path)
@@ -332,7 +333,7 @@ func (m model) fileActionContents() string {
 	return component.fileActionContents()
 }
 
-func (m *model) startConfirm(prompt, expected string, items []inventory.Item, ret screen) {
+func (m *model) startConfirm(prompt, expected string, items inventory.Items, ret screen) {
 	component := editorIOComponent{model: *m}
 	defer func() { *m = component.model }()
 	component.startConfirm(prompt, expected, items, ret)
@@ -377,11 +378,6 @@ func (m *model) handlePendingEditSequence(key string) (handled, consumed bool) {
 	component := editorKeybindingsComponent{model: *m}
 	defer func() { *m = component.model }()
 	return component.handlePendingEditSequence(key)
-}
-
-func (m model) fieldAllowed(field string) bool {
-	component := newEditorOptions(m)
-	return component.fieldAllowed(field)
 }
 
 func (m model) editFieldAllowed(field editField) bool {
@@ -1113,12 +1109,12 @@ func (m model) sortCursorForCurrentSort() int {
 	return component.sortCursorForCurrentSort()
 }
 
-func (m model) sortRulesOrDefault() []sortRule {
+func (m model) sortRulesOrDefault() sortRules {
 	component := newTableSorter(&m)
 	return component.sortRulesOrDefault()
 }
 
-func (m *model) setSortRules(rules []sortRule) {
+func (m *model) setSortRules(rules sortRules) {
 	component := newTableSorter(m)
 	component.setSortRules(rules)
 }
@@ -1143,7 +1139,7 @@ func (m *model) applySortWithDirection(column columnName, descending bool) {
 	component.applySortWithDirection(column, descending)
 }
 
-func (m *model) applySortWithRules(rules []sortRule) {
+func (m *model) applySortWithRules(rules sortRules) {
 	component := newTableSorter(m)
 	component.applySortWithRules(rules)
 }
@@ -1298,11 +1294,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusBatchMsg:
-		m.mergeStatusBatch([]Status(msg))
+		m.mergeStatusBatch(Statuses(msg))
 		return m, waitForLoad(m.loadCh)
 
 	case loadedMsg:
-		m.statuses = []Status(msg)
+		m.statuses = Statuses(msg)
 		m.applySortWithRules(m.sortRulesOrDefault())
 		m.screen = screenMain
 		m.busyMessage = ""

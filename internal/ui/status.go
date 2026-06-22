@@ -3,6 +3,8 @@ package ui
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +37,59 @@ type Status struct {
 	Error        string
 }
 
+// Statuses is an ordered collection of parameter statuses.
+type Statuses []Status
+
+// Filter returns statuses matching at least one group. Empty groups preserve the original collection.
+func (statuses Statuses) Filter(groups filter.Groups) Statuses {
+	if len(groups) == 0 {
+		return statuses
+	}
+	out := make(Statuses, 0, len(statuses))
+	for i := range statuses {
+		if groups.Match(statuses[i].FilterRecord()) {
+			out = append(out, statuses[i])
+		}
+	}
+	return out
+}
+
+// PrintTable renders a compact non-interactive status table to stdout.
+func (statuses Statuses) PrintTable(noColor bool) {
+	_, _ = fmt.Fprintf(os.Stdout, "%-4s %-6s %-13s %-9s %-7s %-7s %-9s %s\n", "#", "STATUS", "TYPE", "TIER", "VERSION", "LEN", "SHA256", "NAME")
+	for i := range statuses {
+		status := &statuses[i]
+		_, _ = fmt.Fprintf(
+			os.Stdout,
+			"%-4d %-6s %-13s %-9s %-7s %-7s %-9s %s\n",
+			i+1,
+			colorStatus(status.Label(), noColor),
+			valueOrDash(status.Type),
+			valueOrDash(status.Tier),
+			intOrDash(status.Version),
+			intOrDash(int64(status.Length)),
+			valueOrDash(status.SHA256Prefix),
+			status.Item.Path,
+		)
+	}
+}
+
+func colorStatus(status string, noColor bool) string {
+	if noColor {
+		return status
+	}
+	switch status {
+	case "OK":
+		return "\033[32m" + status + "\033[0m"
+	case "MISS", "EMPTY":
+		return "\033[33m" + status + "\033[0m"
+	case "ERR":
+		return "\033[31m" + status + "\033[0m"
+	default:
+		return status
+	}
+}
+
 // FilterRecord converts a status into the normalized shape used by CLI filters.
 func (status Status) FilterRecord() filter.Record {
 	return filter.Record{
@@ -47,21 +102,6 @@ func (status Status) FilterRecord() filter.Record {
 		Policies:    status.Policies,
 		Value:       status.Value,
 	}
-}
-
-// FilterStatusesByGroups returns statuses that match at least one configured filter group.
-// Empty group configuration means no filtering.
-func FilterStatusesByGroups(statuses []Status, groups []filter.Group) []Status {
-	if len(groups) == 0 {
-		return statuses
-	}
-	out := make([]Status, 0, len(statuses))
-	for i := range statuses {
-		if filter.MatchAny(groups, statuses[i].FilterRecord()) {
-			out = append(out, statuses[i])
-		}
-	}
-	return out
 }
 
 // Label converts a Status into the short label used by compact status tables.
@@ -194,20 +234,6 @@ func statusFromValue(item inventory.Item, param ssm.Parameter, meta ssm.Metadata
 		status.Modified = param.Modified
 	}
 	return status
-}
-
-// chunkRegion returns the common region for a chunk, or empty when the chunk contains mixed regions.
-func chunkRegion(items []inventory.Item) string {
-	if len(items) == 0 {
-		return ""
-	}
-	region := items[0].Region
-	for _, item := range items[1:] {
-		if item.Region != region {
-			return ""
-		}
-	}
-	return region
 }
 
 func elapsedStatusMillis(started time.Time) int64 {

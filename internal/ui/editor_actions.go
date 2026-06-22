@@ -4,6 +4,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type actionItems []actionItem
+
 type editorActionsComponent struct {
 	model model
 }
@@ -30,7 +32,7 @@ func (component *editorActionsComponent) openActionsPopupForFocusedField() bool 
 
 func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
-	items := valueActionItems()
+	items := valueActions()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
@@ -77,7 +79,7 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 		}
 		return m, nil
 	}
-	if action, ok := valueActionByHotkey(key); ok {
+	if action, ok := items.valueByHotkey(key); ok {
 		return choose(action)
 	}
 	switch key {
@@ -95,7 +97,7 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 
 func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
-	items := policiesActionItems()
+	items := policiesActions()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
@@ -138,7 +140,7 @@ func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMs
 		}
 		return m, nil
 	}
-	if action, ok := policiesActionByHotkey(key); ok {
+	if action, ok := items.valueByHotkey(key); ok {
 		return choose(action)
 	}
 	switch key {
@@ -280,7 +282,7 @@ func (component editorActionsComponent) updateRandomValuePopup(msg tea.KeyMsg) (
 	m := component.model
 	items := randomItems()
 	key := msg.String()
-	if kind, ok := randomKindByPopupHotkey(key); ok {
+	if kind, ok := items.randomKindByHotkey(key); ok {
 		return m.startRandomFromPopup(kind)
 	}
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -316,8 +318,19 @@ type valueActionItem struct {
 	label  string
 }
 
-func valueActionItems() []valueActionItem {
-	return []valueActionItem{
+type valueActionItems []valueActionItem
+
+func (items valueActionItems) valueByHotkey(key string) (string, bool) {
+	for _, item := range items {
+		if item.hotkey == key {
+			return item.value, true
+		}
+	}
+	return "", false
+}
+
+func valueActions() valueActionItems {
+	return valueActionItems{
 		{hotkey: "c", value: "clear", label: "Clear value"},
 		{hotkey: "r", value: "random", label: "Random value"},
 		{hotkey: "l", value: "load", label: "Load from file"},
@@ -325,30 +338,12 @@ func valueActionItems() []valueActionItem {
 	}
 }
 
-func valueActionByHotkey(key string) (string, bool) {
-	for _, item := range valueActionItems() {
-		if item.hotkey == key {
-			return item.value, true
-		}
-	}
-	return "", false
-}
-
-func policiesActionItems() []valueActionItem {
-	return []valueActionItem{
+func policiesActions() valueActionItems {
+	return valueActionItems{
 		{hotkey: "c", value: "clear", label: "Clear policies"},
 		{hotkey: "l", value: "load", label: "Load from file"},
 		{hotkey: "w", value: "write", label: "Write to file"},
 	}
-}
-
-func policiesActionByHotkey(key string) (string, bool) {
-	for _, item := range policiesActionItems() {
-		if item.hotkey == key {
-			return item.value, true
-		}
-	}
-	return "", false
 }
 
 func randomPopupHotkey(kind string) string {
@@ -366,8 +361,8 @@ func randomPopupHotkey(kind string) string {
 	}
 }
 
-func randomKindByPopupHotkey(key string) (string, bool) {
-	for _, item := range randomItems() {
+func (items actionItems) randomKindByHotkey(key string) (string, bool) {
+	for _, item := range items {
 		if randomPopupHotkey(item.value) == key {
 			return item.value, true
 		}

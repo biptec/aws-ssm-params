@@ -14,7 +14,7 @@ import (
 // ExportJSON writes a stable JSON object keyed by SSM name.
 // Every record uses the same object shape, even value-only exports, for example
 // {"/path":{"value":"..."}} or {"/path":{"type":"SecureString","value":"..."}}.
-func ExportJSON(w io.Writer, records []Record) error {
+func ExportJSON(w io.Writer, records Records) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	data := map[string]exportJSONRecord{}
@@ -56,7 +56,7 @@ type jsonRecord struct {
 
 // ImportJSON parses either legacy path-to-value JSON or typed path-to-object JSON and returns records sorted by path.
 // Sorting makes imports deterministic and keeps progress output stable across runs.
-func ImportJSON(r io.Reader) ([]Record, error) {
+func ImportJSON(r io.Reader) (Records, error) {
 	data := map[string]json.RawMessage{}
 	decoder := json.NewDecoder(r)
 	if err := decoder.Decode(&data); err != nil {
@@ -67,7 +67,7 @@ func ImportJSON(r io.Reader) ([]Record, error) {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
-	records := make([]Record, 0, len(paths))
+	records := make(Records, 0, len(paths))
 	for _, path := range paths {
 		record, err := parseJSONRecord(path, data[path])
 		if err != nil {
@@ -111,12 +111,12 @@ func parseJSONRecord(path string, raw json.RawMessage) (Record, error) {
 	}, nil
 }
 
-func jsonRecordFields(raw json.RawMessage) ([]string, error) {
+func jsonRecordFields(raw json.RawMessage) (Fields, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, crerr.Wrap(err, "decode JSON record fields")
 	}
-	fields := []string{"name"}
+	fields := Fields{"name"}
 	for _, field := range []struct {
 		jsonName string
 		field    string
@@ -138,23 +138,14 @@ func jsonRecordFields(raw json.RawMessage) ([]string, error) {
 		{"user", "user"},
 	} {
 		if _, ok := object[field.jsonName]; ok {
-			fields = appendUniqueField(fields, field.field)
+			fields = fields.With(field.field)
 		}
 	}
 	return fields, nil
 }
 
-func appendUniqueField(fields []string, field string) []string {
-	for _, candidate := range fields {
-		if candidate == field {
-			return fields
-		}
-	}
-	return append(fields, field)
-}
-
 // ExportJSONMapped writes records as either an array of objects or an object keyed by a selected AWS field.
-func ExportJSONMapped(w io.Writer, records []Record, mappings []FieldMapping, keyField string) error {
+func ExportJSONMapped(w io.Writer, records Records, mappings FieldMappings, keyField string) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if len(mappings) == 0 && keyField == "" {
@@ -178,7 +169,7 @@ func ExportJSONMapped(w io.Writer, records []Record, mappings []FieldMapping, ke
 }
 
 // ImportJSONMapped reads either JSON array records or a JSON object keyed by key-field.
-func ImportJSONMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]Record, error) {
+func ImportJSONMapped(r io.Reader, mappings FieldMappings, keyField string) (Records, error) {
 	if len(mappings) == 0 {
 		mappings = defaultJSONMappings()
 	}
@@ -203,7 +194,7 @@ func ImportJSONMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	records := make([]Record, 0, len(keys))
+	records := make(Records, 0, len(keys))
 	for _, key := range keys {
 		record := recordFromObject(keyed[key], mappings)
 		if keyField != "" {

@@ -93,7 +93,7 @@ func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, 
 			m.errMessage = "confirmation phrase does not match"
 			return m, nil
 		}
-		items := append([]inventory.Item(nil), m.confirmItems...)
+		items := append(inventory.Items(nil), m.confirmItems...)
 		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
 		m.loadingTitle = ""
 		m.loadingLines = nil
@@ -217,7 +217,7 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 			m.errMessage = "confirmation phrase does not match"
 			return m, nil
 		}
-		items := append([]inventory.Item(nil), m.confirmItems...)
+		items := append(inventory.Items(nil), m.confirmItems...)
 		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
 		m.loadingTitle = ""
 		m.loadingLines = nil
@@ -292,7 +292,7 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
-	if idx, ok := parameterTypeIndexByHotkey(items, key); ok {
+	if idx, ok := items.indexByHotkey(key); ok {
 		m.editType = items[idx].value
 		m.popPopup()
 		if m.typeReturnScreen == screenTextArea {
@@ -340,7 +340,7 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
-	if idx, ok := parameterTierIndexByHotkey(items, key); ok {
+	if idx, ok := items.indexByHotkey(key); ok {
 		m.editTier = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldTier)
@@ -382,7 +382,7 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
-	if idx, ok := parameterDataTypeIndexByHotkey(items, key); ok {
+	if idx, ok := items.indexByHotkey(key); ok {
 		m.editDataType = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldDataType)
@@ -424,7 +424,7 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
-	if idx, ok := overwriteIndexByHotkey(items, key); ok {
+	if idx, ok := items.indexByHotkey(key); ok {
 		m.editOverwrite = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldOverwrite)

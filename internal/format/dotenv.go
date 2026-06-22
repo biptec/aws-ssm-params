@@ -15,7 +15,7 @@ import (
 // ExportDotenv writes records as dotenv assignments with SSM metadata comments before each value.
 // The path comment makes import lossless even when aliases are duplicated or later renamed; the optional type
 // comment lets a future import recreate String/StringList/SecureString parameters without a separate flag.
-func ExportDotenv(w io.Writer, records []Record) error {
+func ExportDotenv(w io.Writer, records Records) error {
 	for i := range records {
 		record := &records[i]
 		if i > 0 {
@@ -42,14 +42,14 @@ func ExportDotenv(w io.Writer, records []Record) error {
 // A preceding '# ssm: /path' comment wins; otherwise the variable name is matched against aliases derived from inventory.
 // A preceding '# type: String|StringList|SecureString' comment is preserved on the returned record.
 // Ambiguous aliases are rejected so the tool never writes a value to the wrong parameter silently.
-func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
+func ImportDotenv(r io.Reader, items inventory.Items) (Records, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, crerr.Wrap(err, "read dotenv input")
 	}
 
-	aliases := AliasMap(items)
-	var records []Record
+	aliases := newAliasIndex(items)
+	var records Records
 	var pendingPath string
 	var pendingType string
 	for lineNumber, raw := range strings.Split(string(data), "\n") {
@@ -82,7 +82,7 @@ func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
 		pendingPath = ""
 		pendingType = ""
 		if path == "" {
-			matches := aliases[alias]
+			matches := aliases.paths(alias)
 			if len(matches) > 1 {
 				return nil, fmt.Errorf("dotenv key %s is ambiguous: %s", alias, strings.Join(matches, ", "))
 			}
@@ -128,14 +128,19 @@ func AliasForPath(path string, item inventory.Item) string {
 	return normalizeAlias(strings.Trim(path, "/"))
 }
 
-// AliasMap groups inventory paths by generated dotenv alias so imports can detect ambiguous variable names.
-func AliasMap(items []inventory.Item) map[string][]string {
-	out := map[string][]string{}
+type aliasIndex map[string][]string
+
+func newAliasIndex(items inventory.Items) aliasIndex {
+	out := aliasIndex{}
 	for _, item := range items {
 		alias := AliasForItem(item)
 		out[alias] = append(out[alias], item.Path)
 	}
 	return out
+}
+
+func (index aliasIndex) paths(alias string) []string {
+	return index[alias]
 }
 
 // quoteDotenv renders a value as a quoted dotenv literal.

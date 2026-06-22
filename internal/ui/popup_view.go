@@ -16,7 +16,7 @@ func (component popupViewComponent) renderSortPopup() string {
 
 func (component popupViewComponent) renderValueActionsPopup() string {
 	m := component.model
-	items := valueActionItems()
+	items := valueActions()
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
 		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
@@ -26,7 +26,7 @@ func (component popupViewComponent) renderValueActionsPopup() string {
 
 func (component popupViewComponent) renderPoliciesActionsPopup() string {
 	m := component.model
-	items := policiesActionItems()
+	items := policiesActions()
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
 		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
@@ -102,7 +102,7 @@ func (component popupViewComponent) sortOptionLines() []string {
 		m.sortCursor = len(items) - 1
 	}
 	for i, item := range items {
-		_, checked := sortRuleForColumn(m.sortRules, item.column)
+		_, checked := m.sortRules.find(item.column)
 		lines = append(lines, m.multiSelectLine(m.sortPopupLabel(item), checked, i == m.sortCursor))
 	}
 	return lines

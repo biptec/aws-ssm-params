@@ -71,29 +71,29 @@ func (component tableViewComponent) detailFieldAllowed(label string) bool {
 	case "name":
 		return true
 	case "region":
-		return m.fieldAllowed("region")
+		return m.opts.Fields.Allows("region")
 	case "type":
-		return m.fieldAllowed("type")
+		return m.opts.Fields.Allows("type")
 	case "tier":
-		return m.fieldAllowed("tier")
+		return m.opts.Fields.Allows("tier")
 	case "datatype", "data type", "data-type":
-		return m.fieldAllowed("data-type")
+		return m.opts.Fields.Allows("data-type")
 	case "policies":
-		return m.fieldAllowed("policies")
+		return m.opts.Fields.Allows("policies")
 	case "version":
-		return m.fieldAllowed("version")
+		return m.opts.Fields.Allows("version")
 	case "len":
-		return m.fieldAllowed("len")
+		return m.opts.Fields.Allows("len")
 	case "sha256":
-		return m.fieldAllowed("sha256")
+		return m.opts.Fields.Allows("sha256")
 	case "description":
-		return m.fieldAllowed("description")
+		return m.opts.Fields.Allows("description")
 	case "user":
-		return m.fieldAllowed("user")
+		return m.opts.Fields.Allows("user")
 	case "date":
-		return m.fieldAllowed("date")
+		return m.opts.Fields.Allows("date")
 	case "value":
-		return m.fieldAllowed("value")
+		return m.opts.Fields.Allows("value")
 	default:
 		return true
 	}

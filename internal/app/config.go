@@ -25,10 +25,10 @@ import (
 type Config struct {
 	Logger                    *slog.Logger
 	FiltersFile               string
-	FilterGroups              []filter.Group
-	FieldMappings             []outputfmt.FieldMapping
-	Fields                    []string
-	InventoryItems            []inventory.Item
+	FilterGroups              filter.Groups
+	FieldMappings             outputfmt.FieldMappings
+	Fields                    outputfmt.Fields
+	InventoryItems            inventory.Items
 	Region                    string
 	Regions                   []string
 	Profile                   string
@@ -42,6 +42,17 @@ type Config struct {
 	NoConfirmWriteSecureValue bool
 	NoConfirmDeleteOne        bool
 	NoConfirmDeleteAll        bool
+}
+
+type configBuilder struct {
+	ctx *CLIContext
+}
+
+func (cfg Config) requireField(field, command string) error {
+	if !cfg.Fields.Allows(field) {
+		return fmt.Errorf("%s requires field %q; remove --output-field restrictions or include %s", command, field, field)
+	}
+	return nil
 }
 
 var supportedFields = map[string]string{
@@ -138,13 +149,13 @@ func boolFlagValueAny(ctx *CLIContext, name string, defaultValue bool, envNames 
 	return defaultValue
 }
 
-func parseOutputFields(values []string) ([]string, error) {
+func parseOutputFields(values []string) (outputfmt.Fields, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	fields := make([]string, 0, len(parts))
+	fields := make(outputfmt.Fields, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--output-field accepts one value per flag; repeat --output-field instead of using commas")
@@ -162,13 +173,13 @@ func parseOutputFields(values []string) ([]string, error) {
 	return fields, nil
 }
 
-func parseMapFields(values []string) ([]outputfmt.FieldMapping, error) {
+func parseMapFields(values []string) (outputfmt.FieldMappings, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	mappings := make([]outputfmt.FieldMapping, 0, len(parts))
+	mappings := make(outputfmt.FieldMappings, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--map-field accepts one value per flag; repeat --map-field instead of using commas")
@@ -194,7 +205,7 @@ func parseMapFields(values []string) ([]outputfmt.FieldMapping, error) {
 	return mappings, nil
 }
 
-func parseFilterGroups(values []string, filtersFile string) ([]filter.Group, error) {
+func parseFilterGroups(values []string, filtersFile string) (filter.Groups, error) {
 	groups, err := filter.ParseGroups(compactStrings(values))
 	if err != nil {
 		return nil, crerr.Wrap(err, "parse filters")
@@ -239,6 +250,11 @@ func RejectCommaSeparatedFlagArgs(args []string, flagNames ...string) error {
 // ConfigFromCLI converts raw urfave/cli state into a Config that the rest of the application can use.
 // CLI list values are provided by repeating flags; only environment variables may contain comma-separated lists.
 func ConfigFromCLI(ctx *CLIContext) (Config, error) {
+	return configBuilder{ctx: ctx}.build()
+}
+
+func (builder configBuilder) build() (Config, error) {
+	ctx := builder.ctx
 	allRegions := boolFlagValueAny(ctx, "all-regions", false, "AWS_SSM_PARAMS_ALL_REGIONS")
 	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGION", "AWS_REGION"))
 	if allRegions && len(regions) > 0 {

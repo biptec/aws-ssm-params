@@ -42,9 +42,35 @@ type Condition struct {
 	matcher Matcher
 }
 
-// Group is an AND group. Multiple groups are ORed by MatchAny.
+// Group is an AND group. Groups combines multiple groups with OR semantics.
 type Group struct {
 	Conditions []Condition
+}
+
+// Groups is an OR collection of condition groups.
+type Groups []Group
+
+// Match reports whether record matches at least one group. No groups means match all.
+func (groups Groups) Match(record Record) bool {
+	if len(groups) == 0 {
+		return true
+	}
+	for _, group := range groups {
+		if group.Match(record) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasField reports whether any group targets field.
+func (groups Groups) HasField(field string) bool {
+	for _, group := range groups {
+		if group.HasField(field) {
+			return true
+		}
+	}
+	return false
 }
 
 // Matcher matches one value with shell-like extglob semantics.

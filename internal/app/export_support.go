@@ -16,91 +16,8 @@ type exportSortRule struct {
 	descending bool
 }
 
-func includeValuesForSortColumns(values []string) bool {
-	for _, rule := range parseExportSortRules(values) {
-		switch rule.field {
-		case "value", "len", "sha256":
-			return true
-		}
-	}
-	return false
-}
-
-func parseExportSortRules(values []string) []exportSortRule {
-	rules := make([]exportSortRule, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		parts := strings.Split(value, ":")
-		field, ok := normalizeExportSortField(parts[0])
-		if !ok {
-			continue
-		}
-		descending := false
-		if len(parts) > 1 {
-			switch strings.ToLower(strings.TrimSpace(parts[1])) {
-			case "desc", "descending":
-				descending = true
-			}
-		}
-		rules = upsertExportSortRule(rules, field, descending)
-	}
-	return rules
-}
-
-func normalizeExportSortField(field string) (string, bool) {
-	field = strings.ToLower(strings.TrimSpace(field))
-	switch field {
-	case "name", "path":
-		return "name", true
-	case "region", "type", "tier", "policies", "description", "value", "date", "version", "len", "sha256", "user":
-		return field, true
-	case "data-type", "datatype", "data_type":
-		return "data-type", true
-	default:
-		return "", false
-	}
-}
-
-func upsertExportSortRule(rules []exportSortRule, field string, descending bool) []exportSortRule {
-	out := make([]exportSortRule, 0, len(rules)+1)
-	for _, rule := range rules {
-		if rule.field != field {
-			out = append(out, rule)
-		}
-	}
-	return append(out, exportSortRule{field: field, descending: descending})
-}
-
-func sortStatusesForExport(statuses []ui.Status, values []string) {
-	rules := parseExportSortRules(values)
-	if len(rules) == 0 {
-		return
-	}
-	sort.SliceStable(statuses, func(i, j int) bool {
-		left := statuses[i]
-		right := statuses[j]
-		for _, rule := range rules {
-			cmp := natural.Compare(exportStatusSortValue(left, rule.field), exportStatusSortValue(right, rule.field))
-			if cmp == 0 {
-				continue
-			}
-			if rule.descending {
-				return cmp > 0
-			}
-			return cmp < 0
-		}
-		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
-			return cmp < 0
-		}
-		return natural.Compare(left.Item.Path, right.Item.Path) < 0
-	})
-}
-
-func exportStatusSortValue(status ui.Status, field string) string {
-	switch field {
+func (rule exportSortRule) value(status ui.Status) string {
+	switch rule.field {
 	case "name":
 		return status.Item.Path
 	case "region":
@@ -132,13 +49,97 @@ func exportStatusSortValue(status ui.Status, field string) string {
 	}
 }
 
-var allExportFields = []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
+type exportSortRules []exportSortRule
 
-func exportFields(cfg Config) []string {
-	if len(cfg.Fields) == 0 {
-		return append([]string(nil), allExportFields...)
+func (rules exportSortRules) requiresValues() bool {
+	for _, rule := range rules {
+		switch rule.field {
+		case "value", "len", "sha256":
+			return true
+		}
 	}
-	return append([]string(nil), cfg.Fields...)
+	return false
+}
+
+func parseExportSortRules(values []string) exportSortRules {
+	rules := make(exportSortRules, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parts := strings.Split(value, ":")
+		field, ok := normalizeExportSortField(parts[0])
+		if !ok {
+			continue
+		}
+		descending := false
+		if len(parts) > 1 {
+			switch strings.ToLower(strings.TrimSpace(parts[1])) {
+			case "desc", "descending":
+				descending = true
+			}
+		}
+		rules = rules.with(field, descending)
+	}
+	return rules
+}
+
+func normalizeExportSortField(field string) (string, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+	switch field {
+	case "name", "path":
+		return "name", true
+	case "region", "type", "tier", "policies", "description", "value", "date", "version", "len", "sha256", "user":
+		return field, true
+	case "data-type", "datatype", "data_type":
+		return "data-type", true
+	default:
+		return "", false
+	}
+}
+
+func (rules exportSortRules) with(field string, descending bool) exportSortRules {
+	out := make(exportSortRules, 0, len(rules)+1)
+	for _, rule := range rules {
+		if rule.field != field {
+			out = append(out, rule)
+		}
+	}
+	return append(out, exportSortRule{field: field, descending: descending})
+}
+
+func (rules exportSortRules) sort(statuses ui.Statuses) {
+	if len(rules) == 0 {
+		return
+	}
+	sort.SliceStable(statuses, func(i, j int) bool {
+		left := statuses[i]
+		right := statuses[j]
+		for _, rule := range rules {
+			cmp := natural.Compare(rule.value(left), rule.value(right))
+			if cmp == 0 {
+				continue
+			}
+			if rule.descending {
+				return cmp > 0
+			}
+			return cmp < 0
+		}
+		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
+			return cmp < 0
+		}
+		return natural.Compare(left.Item.Path, right.Item.Path) < 0
+	})
+}
+
+var allExportFields = outputfmt.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
+
+func exportFields(cfg Config) outputfmt.Fields {
+	if len(cfg.Fields) == 0 {
+		return append(outputfmt.Fields(nil), allExportFields...)
+	}
+	return append(outputfmt.Fields(nil), cfg.Fields...)
 }
 
 func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
@@ -152,7 +153,7 @@ func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
 	return cfg.Fields[0], nil
 }
 
-func validateKeyFieldOutputFields(keyField string, outputFields []string) error {
+func validateKeyFieldOutputFields(keyField string, outputFields outputfmt.Fields) error {
 	keyField = strings.TrimSpace(keyField)
 	if keyField == "" {
 		return nil
@@ -165,77 +166,46 @@ func validateKeyFieldOutputFields(keyField string, outputFields []string) error 
 	return nil
 }
 
-func exportFieldMappings(fields []string, overrides []outputfmt.FieldMapping) []outputfmt.FieldMapping {
-	effective := effectiveFieldMappings(overrides)
-	out := make([]outputfmt.FieldMapping, 0, len(fields))
-	for _, field := range fields {
-		for _, mapping := range effective {
-			if mapping.AWSName == field {
-				out = append(out, mapping)
-				break
-			}
-		}
-	}
-	return out
+func exportRecordFields(fields outputfmt.Fields, scalarField, keyField string) outputfmt.Fields {
+	return fields.With(strings.TrimSpace(scalarField), strings.TrimSpace(keyField))
 }
 
-func exportRecordFields(fields []string, scalarField, keyField string) []string {
-	out := append([]string(nil), fields...)
-	for _, field := range []string{scalarField, keyField} {
-		field = strings.TrimSpace(field)
-		if field == "" || hasExportField(out, field) {
-			continue
-		}
-		out = append(out, field)
-	}
-	return out
-}
-
-func hasExportField(fields []string, field string) bool {
-	for _, candidate := range fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return false
-}
-
-func exportRecordFromStatus(status ui.Status, fields []string) outputfmt.Record {
+func exportRecordFromStatus(status ui.Status, fields outputfmt.Fields) outputfmt.Record {
 	record := outputfmt.Record{Path: status.Item.Path, Alias: outputfmt.AliasForItem(status.Item), Fields: fields}
-	if hasExportField(fields, "region") {
+	if fields.Contains("region") {
 		record.Region = status.Item.Region
 	}
-	if hasExportField(fields, "type") {
+	if fields.Contains("type") {
 		record.Type = status.Type
 	}
-	if hasExportField(fields, "tier") {
+	if fields.Contains("tier") {
 		record.Tier = status.Tier
 	}
-	if hasExportField(fields, "data-type") {
+	if fields.Contains("data-type") {
 		record.DataType = status.DataType
 	}
-	if hasExportField(fields, "policies") {
+	if fields.Contains("policies") {
 		record.Policies = status.Policies
 	}
-	if hasExportField(fields, "description") {
+	if fields.Contains("description") {
 		record.Description = status.Description
 	}
-	if hasExportField(fields, "value") && status.Exists {
+	if fields.Contains("value") && status.Exists {
 		record.Value = status.Value
 	}
-	if hasExportField(fields, "date") {
+	if fields.Contains("date") {
 		record.Date = status.Modified
 	}
-	if hasExportField(fields, "version") {
+	if fields.Contains("version") {
 		record.Version = status.Version
 	}
-	if hasExportField(fields, "len") {
+	if fields.Contains("len") {
 		record.Len = status.Length
 	}
-	if hasExportField(fields, "sha256") {
+	if fields.Contains("sha256") {
 		record.SHA256 = status.SHA256Prefix
 	}
-	if hasExportField(fields, "user") {
+	if fields.Contains("user") {
 		record.User = status.User
 	}
 	return record

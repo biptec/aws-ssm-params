@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadPathsFileIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
+func TestPathsFileLoadIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, writeTestFile(file, `
 # full-line comment
@@ -22,7 +22,7 @@ func TestLoadPathsFileIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
 /app/prod/z/password
 `))
 
-	items, err := LoadPathsFile(file)
+	items, err := (PathsFile{Path: file}).Load()
 
 	require.NoError(t, err)
 	require.Len(t, items, 2)
@@ -32,11 +32,11 @@ func TestLoadPathsFileIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
 	assert.Equal(t, "/app/prod/z/password", items[1].Path)
 }
 
-func TestLoadPathsFileRejectsRelativePaths(t *testing.T) {
+func TestPathsFileLoadRejectsRelativePaths(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, writeTestFile(file, "relative/path\n"))
 
-	items, err := LoadPathsFile(file)
+	items, err := (PathsFile{Path: file}).Load()
 
 	require.Error(t, err)
 	assert.Nil(t, items)
@@ -68,24 +68,24 @@ func writeTempFile(t *testing.T, content string) string {
 	return file
 }
 
-func TestAppendPathIfMissingAppendsToEndAndAvoidsDuplicates(t *testing.T) {
+func TestPathsFileAppendAddsToEndAndAvoidsDuplicates(t *testing.T) {
 	file := writeTempFile(t, "# Parameters\n/app/old # existing\n")
 
-	appended, err := AppendPathIfMissing(file, "/app/new")
+	appended, err := (PathsFile{Path: file}).Append("/app/new")
 	require.NoError(t, err)
 	assert.True(t, appended)
 	assert.Equal(t, "# Parameters\n/app/old # existing\n/app/new\n", readTempFile(t, file))
 
-	appended, err = AppendPathIfMissing(file, "/app/old")
+	appended, err = (PathsFile{Path: file}).Append("/app/old")
 	require.NoError(t, err)
 	assert.False(t, appended)
 	assert.Equal(t, "# Parameters\n/app/old # existing\n/app/new\n", readTempFile(t, file))
 }
 
-func TestAppendPathIfMissingAddsMissingNewlineBeforeAppending(t *testing.T) {
+func TestPathsFileAppendAddsMissingNewlineBeforeAppending(t *testing.T) {
 	file := writeTempFile(t, "/app/old")
 
-	appended, err := AppendPathIfMissing(file, "/app/new")
+	appended, err := (PathsFile{Path: file}).Append("/app/new")
 	require.NoError(t, err)
 	assert.True(t, appended)
 	assert.Equal(t, "/app/old\n/app/new\n", readTempFile(t, file))
@@ -98,10 +98,10 @@ func readTempFile(t *testing.T, file string) string {
 	return string(data)
 }
 
-func TestRemovePathsIfPresentRemovesPathsAndPreservesOtherLines(t *testing.T) {
+func TestPathsFileRemoveDeletesPathsAndPreservesOtherLines(t *testing.T) {
 	file := writeTempFile(t, "# tracked paths\n/app/old # remove me\n/app/keep\n/app/old\n")
 
-	removed, err := RemovePathsIfPresent(file, []string{"/app/old"})
+	removed, err := (PathsFile{Path: file}).Remove([]string{"/app/old"})
 
 	require.NoError(t, err)
 	assert.Equal(t, 2, removed)

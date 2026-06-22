@@ -8,8 +8,8 @@ import (
 )
 
 // ParseGroups parses repeated --filter values. Each value is one OR group; semicolons inside a value are AND.
-func ParseGroups(values []string) ([]Group, error) {
-	groups := make([]Group, 0, len(values))
+func ParseGroups(values []string) (Groups, error) {
+	groups := make(Groups, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -25,9 +25,9 @@ func ParseGroups(values []string) ([]Group, error) {
 }
 
 // ParseFile parses a filters file. Blank lines and # comments are ignored.
-func ParseFile(r io.Reader) ([]Group, error) {
+func ParseFile(r io.Reader) (Groups, error) {
 	scanner := bufio.NewScanner(r)
-	groups := []Group{}
+	groups := Groups{}
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

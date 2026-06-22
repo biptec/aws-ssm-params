@@ -26,6 +26,13 @@ type writePolicy struct {
 	OnUpdate writePolicyAction
 }
 
+func (policy writePolicy) operation(exists bool) (writeOperation, writePolicyAction) {
+	if exists {
+		return writeOperationUpdate, policy.OnUpdate
+	}
+	return writeOperationCreate, policy.OnCreate
+}
+
 type writeOperation string
 
 const (
@@ -84,14 +91,14 @@ func askWriteConfirmation(action writeOperation, region, name string) (bool, err
 	return answer == "y" || answer == "yes", nil
 }
 
-func resolveWritePolicy(action writePolicyAction, operation writeOperation, region, name string) (bool, error) {
+func (action writePolicyAction) resolve(operation writeOperation, region, name string) (bool, error) {
 	switch action {
 	case writePolicyDefault:
 		return true, nil
 	case writePolicySkip:
 		return false, nil
 	case writePolicyError:
-		return false, fmt.Errorf("parameter %s would %s; --on-%s=error stops the command", name, operation, operationPolicyName(operation))
+		return false, fmt.Errorf("parameter %s would %s; --on-%s=error stops the command", name, operation, operation.policyName())
 	case writePolicyAsk:
 		return askWriteConfirmation(operation, region, name)
 	default:
@@ -99,7 +106,7 @@ func resolveWritePolicy(action writePolicyAction, operation writeOperation, regi
 	}
 }
 
-func operationPolicyName(operation writeOperation) string {
+func (operation writeOperation) policyName() string {
 	if operation == writeOperationCreate {
 		return "create"
 	}
@@ -110,7 +117,7 @@ func logSkipped(logger *slog.Logger, command string, operation writeOperation, p
 	if logger == nil {
 		return
 	}
-	logger.Info(command+" record skipped", "action", string(operation), "policy", "on-"+operationPolicyName(operation)+"="+string(policy), "region", region, "name", name)
+	logger.Info(command+" record skipped", "action", string(operation), "policy", "on-"+operation.policyName()+"="+string(policy), "region", region, "name", name)
 }
 
 func logRecordError(logger *slog.Logger, command string, operation writeOperation, region, name string, err error) {

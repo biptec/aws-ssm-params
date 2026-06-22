@@ -10,7 +10,7 @@ import (
 )
 
 // ExportScalarLines writes one selected field per record, one value per line.
-func ExportScalarLines(w io.Writer, records []Record, field string) error {
+func ExportScalarLines(w io.Writer, records Records, field string) error {
 	for i := range records {
 		if _, err := fmt.Fprintln(w, records[i].fieldValue(field)); err != nil {
 			return crerr.Wrap(err, "write scalar export")
@@ -21,7 +21,7 @@ func ExportScalarLines(w io.Writer, records []Record, field string) error {
 
 // ExportJSONScalar writes one selected field as JSON scalar values.
 // Without keyField it writes an array; with keyField it writes an object keyed by the selected field.
-func ExportJSONScalar(w io.Writer, records []Record, field, keyField string) error {
+func ExportJSONScalar(w io.Writer, records Records, field, keyField string) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	if keyField == "" {
@@ -44,7 +44,7 @@ func ExportJSONScalar(w io.Writer, records []Record, field, keyField string) err
 
 // ExportYAMLScalar writes one selected field as YAML scalar values.
 // Without keyField it writes a list; with keyField it writes a map keyed by the selected field.
-func ExportYAMLScalar(w io.Writer, records []Record, field, keyField string) error {
+func ExportYAMLScalar(w io.Writer, records Records, field, keyField string) error {
 	var data any
 	if keyField == "" {
 		values := make([]any, 0, len(records))

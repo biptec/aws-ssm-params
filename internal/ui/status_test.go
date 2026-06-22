@@ -235,9 +235,9 @@ func TestLoadStatusesBatchForRegionsStreamEmitsWildcardRegionMatches(t *testing.
 		},
 	}
 	items := []inventory.Item{{Path: "/app/api/password", Region: "*"}}
-	var batches [][]Status
+	var batches []Statuses
 
-	statuses := LoadStatusesBatchForRegionsStream(context.Background(), client, items, false, []string{"eu-north-1", "us-east-1"}, nil, func(batch []Status) {
+	statuses := LoadStatusesBatchForRegionsStream(context.Background(), client, items, false, []string{"eu-north-1", "us-east-1"}, nil, func(batch Statuses) {
 		batches = append(batches, batch)
 	})
 
@@ -392,7 +392,7 @@ func TestHiddenSecureStringValueIsNotEmpty(t *testing.T) {
 	assert.Equal(t, "OK", status.Label())
 }
 
-func TestFilterStatusesByGroupsKeepsMatchingStatuses(t *testing.T) {
+func TestStatusesFilterKeepsMatchingStatuses(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a"})
 	require.NoError(t, err)
 	statuses := []Status{
@@ -400,7 +400,7 @@ func TestFilterStatusesByGroupsKeepsMatchingStatuses(t *testing.T) {
 		{Item: inventory.Item{Path: "/app/b"}, Exists: true},
 	}
 
-	filtered := FilterStatusesByGroups(statuses, groups)
+	filtered := Statuses(statuses).Filter(groups)
 
 	require.Len(t, filtered, 1)
 	assert.Equal(t, "/app/a", filtered[0].Item.Path)

@@ -81,11 +81,11 @@ func TestParseGroupsUsesOrOfAndGroups(t *testing.T) {
 		{Name: "/app-infra/production/himins/sparkyfitness"},
 	}
 	for _, record := range matches {
-		if !MatchAny(groups, record) {
+		if !groups.Match(record) {
 			t.Fatalf("expected record to match: %+v", record)
 		}
 	}
-	if MatchAny(groups, Record{Name: "/prod/db", Region: "us-east-1"}) {
+	if groups.Match(Record{Name: "/prod/db", Region: "us-east-1"}) {
 		t.Fatal("expected same-group conditions to use AND")
 	}
 }
@@ -105,10 +105,10 @@ name:/prod/*;region:eu*;tier:advanced
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
-	if !MatchAny(groups, Record{Name: "/prod/db", Region: "eu-north-1", Tier: "Advanced"}) {
+	if !groups.Match(Record{Name: "/prod/db", Region: "eu-north-1", Tier: "Advanced"}) {
 		t.Fatal("expected first filters-file line to match")
 	}
-	if !MatchAny(groups, Record{Name: "/app-infra/production/himins/sparkyfitness"}) {
+	if !groups.Match(Record{Name: "/app-infra/production/himins/sparkyfitness"}) {
 		t.Fatal("expected bare name filters-file line to match")
 	}
 }

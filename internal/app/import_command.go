@@ -28,10 +28,10 @@ type importCommand struct {
 	ctx             *CLIContext
 	cfg             Config
 	client          ssm.Client
-	records         []outputfmt.Record
+	records         importRecords
 	metadata        map[string]ssm.Metadata
 	metadataErrors  map[string]error
-	defaultOptions  ssm.PutParameterOptions
+	optionsResolver importOptionsResolver
 	policy          writePolicy
 	continueOnError bool
 	summaryEnabled  bool
@@ -78,18 +78,18 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 		format,
 		input,
 		items,
-		effectiveFieldMappings(cfg.FieldMappings),
+		cfg.FieldMappings.WithDefaults(),
 		strings.TrimSpace(ctx.String("key-field")),
 	)
 	if err != nil {
 		return nil, err
 	}
-	records, err = applyRootPathToRecords(records, ctx.String("root-path"))
+	records, err = records.withRootPath(ctx.String("root-path"))
 	if err != nil {
 		return nil, err
 	}
-	records = filterRecordsByGroups(records, cfg.FilterGroups)
-	if err := requireFieldForCommand(cfg, "value", "import"); err != nil {
+	records = records.filter(cfg.FilterGroups)
+	if err := cfg.requireField("value", "import"); err != nil {
 		return nil, err
 	}
 	defaultOptions, err := importDefaultOptions(ctx, cfg)
@@ -102,7 +102,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 	}
 
 	client := NewClient(cfg)
-	metadata, metadataErrors := metadataForImportRecords(ctx.Context, client, records, cfg)
+	metadata, metadataErrors := (importMetadataResolver{ctx: ctx.Context, client: client, records: records, cfg: cfg}).resolve()
 	return &importCommand{
 		ctx:             ctx,
 		cfg:             cfg,
@@ -110,7 +110,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 		records:         records,
 		metadata:        metadata,
 		metadataErrors:  metadataErrors,
-		defaultOptions:  defaultOptions,
+		optionsResolver: importOptionsResolver{defaults: defaultOptions, cfg: cfg},
 		policy:          policy,
 		continueOnError: ctx.Bool("continue-on-error"),
 		summaryEnabled:  ctx.Bool("summary"),
@@ -148,11 +148,11 @@ func (command *importCommand) processRecord(record outputfmt.Record) error {
 		exists = false
 	}
 
-	operation, policyAction := command.operation(exists)
+	operation, policyAction := command.policy.operation(exists)
 	if strings.TrimSpace(record.Value) == "" {
 		return command.handleRecordError(operation, region, record.Path, errors.New("import record value is required"))
 	}
-	shouldWrite, err := resolveWritePolicy(policyAction, operation, region, record.Path)
+	shouldWrite, err := policyAction.resolve(operation, region, record.Path)
 	if err != nil {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
@@ -166,7 +166,7 @@ func (command *importCommand) processRecord(record outputfmt.Record) error {
 	if err != nil {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
-	options, err := importOptionsForRecord(record, existing, exists, command.defaultOptions, command.cfg)
+	options, err := command.optionsResolver.forRecord(record, existing, exists)
 	if err != nil {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
@@ -187,13 +187,6 @@ func (command *importCommand) processRecord(record outputfmt.Record) error {
 		command.summary.Created++
 	}
 	return nil
-}
-
-func (command *importCommand) operation(exists bool) (writeOperation, writePolicyAction) {
-	if exists {
-		return writeOperationUpdate, command.policy.OnUpdate
-	}
-	return writeOperationCreate, command.policy.OnCreate
 }
 
 func (command *importCommand) handleRecordError(operation writeOperation, region, name string, err error) error {
@@ -220,17 +213,17 @@ func (command *importCommand) writeSummary() {
 }
 
 // parseImport dispatches import parsing by format while keeping the Import command handler format-agnostic.
-func parseImport(format string, reader io.Reader, items []inventory.Item, mappings []outputfmt.FieldMapping, jsonKeyField string) ([]outputfmt.Record, error) {
+func parseImport(format string, reader io.Reader, items inventory.Items, mappings outputfmt.FieldMappings, jsonKeyField string) (importRecords, error) {
 	switch format {
 	case "dotenv":
 		records, err := outputfmt.ImportDotenv(reader, items)
-		return records, crerr.Wrap(err, "import dotenv")
+		return importRecords(records), crerr.Wrap(err, "import dotenv")
 	case "json":
 		records, err := outputfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
-		return records, crerr.Wrap(err, "import JSON")
+		return importRecords(records), crerr.Wrap(err, "import JSON")
 	case "yaml", "yml":
 		records, err := outputfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
-		return records, crerr.Wrap(err, "import YAML")
+		return importRecords(records), crerr.Wrap(err, "import YAML")
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}

@@ -16,10 +16,10 @@ import (
 // LoadProgress reports status-loading progress to either the interactive TUI or the non-interactive live writer.
 // done/total are item counters within the current region scan, region names the region being scanned, and chunk
 // contains the paths currently being requested from SSM.
-type LoadProgress func(done, total int, region string, chunk []inventory.Item)
+type LoadProgress func(done, total int, region string, chunk inventory.Items)
 
 // StatusBatch receives partial status rows while a long-running interactive load is still in progress.
-type StatusBatch func([]Status)
+type StatusBatch func(Statuses)
 
 type statusLoader struct {
 	ctx           context.Context
@@ -39,38 +39,38 @@ func (loader statusLoader) withClient(client ssm.Client) statusLoader {
 }
 
 // LoadStatuses loads statuses without progress output using item-level region information.
-func LoadStatuses(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool) []Status {
+func LoadStatuses(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool) Statuses {
 	return LoadStatusesForRegions(ctx, client, items, includeValues, nil)
 }
 
 // LoadStatusesForRegions loads statuses without progress output but with an explicit region scan list.
-func LoadStatusesForRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string) []Status {
+func LoadStatusesForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
 	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, nil)
 }
 
 // LoadStatusesBatch is the shared status loader entry point for item-level region lookup.
-func LoadStatusesBatch(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, progress LoadProgress) []Status {
+func LoadStatusesBatch(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, progress LoadProgress) Statuses {
 	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, nil, progress)
 }
 
 // LoadStatusesBatchForRegions chooses the correct status-loading strategy.
 // Concrete-region items are loaded directly by their item region; wildcard items are expanded across either an explicit
 // region list or every enabled AWS region discovered from the client.
-func LoadStatusesBatchForRegions(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress) []Status {
+func LoadStatusesBatchForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress) Statuses {
 	return newStatusLoader(ctx, client, includeValues, progress, nil).load(items, regions)
 }
 
 // LoadStatusesBatchForRegionsStream is the interactive loader variant. It emits partial rows as soon as each
 // region/chunk is loaded, then returns the complete final status set.
-func LoadStatusesBatchForRegionsStream(ctx context.Context, client ssm.Client, items []inventory.Item, includeValues bool, regions []string, progress LoadProgress, batch StatusBatch) []Status {
+func LoadStatusesBatchForRegionsStream(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress, batch StatusBatch) Statuses {
 	return newStatusLoader(ctx, client, includeValues, progress, batch).load(items, regions)
 }
 
-func (loader statusLoader) load(items []inventory.Item, regions []string) []Status {
+func (loader statusLoader) load(items inventory.Items, regions []string) Statuses {
 	if len(items) == 0 {
 		return loader.loadAllForRegions(regions)
 	}
-	if containsAllRegionItems(items) {
+	if items.HasWildcardRegion() {
 		if len(regions) > 0 {
 			return loader.loadRegions(items, regions)
 		}
@@ -79,20 +79,10 @@ func (loader statusLoader) load(items []inventory.Item, regions []string) []Stat
 	return loader.loadByItemRegion(items)
 }
 
-// containsAllRegionItems reports whether at least one inventory item needs wildcard region expansion.
-func containsAllRegionItems(items []inventory.Item) bool {
-	for _, item := range items {
-		if item.Region == "*" {
-			return true
-		}
-	}
-	return false
-}
-
 // loadStatusesByItemRegion loads items that already have concrete regions.
 // Items are processed in chunks of ten and grouped by region inside each chunk so SSM batch calls stay region-correct.
-func (loader statusLoader) loadByItemRegion(items []inventory.Item) []Status {
-	statuses := make([]Status, 0, len(items))
+func (loader statusLoader) loadByItemRegion(items inventory.Items) Statuses {
+	statuses := make(Statuses, 0, len(items))
 	metas := map[string]ssm.Metadata{}
 	values := map[string]ssm.Parameter{}
 	errs := map[string]error{}
@@ -104,10 +94,10 @@ func (loader statusLoader) loadByItemRegion(items []inventory.Item) []Status {
 		}
 		chunkItems := items[start:end]
 		if loader.progress != nil {
-			loader.progress(start, len(items), chunkRegion(chunkItems), chunkItems)
+			loader.progress(start, len(items), chunkItems.CommonRegion(), chunkItems)
 		}
 
-		byRegion := map[string][]inventory.Item{}
+		byRegion := map[string]inventory.Items{}
 		for _, item := range chunkItems {
 			byRegion[item.Region] = append(byRegion[item.Region], item)
 		}
@@ -130,7 +120,7 @@ func (loader statusLoader) loadByItemRegion(items []inventory.Item) []Status {
 			}
 		}
 		if loader.batch != nil {
-			chunkStatuses := make([]Status, 0, len(chunkItems))
+			chunkStatuses := make(Statuses, 0, len(chunkItems))
 			for _, item := range chunkItems {
 				chunkStatuses = append(chunkStatuses, statusFromMaps(item, item.Region, metas, values, errs, loader.includeValues))
 			}
@@ -148,16 +138,16 @@ func (loader statusLoader) loadByItemRegion(items []inventory.Item) []Status {
 	return statuses
 }
 
-func (loader statusLoader) emit(statuses []Status) {
+func (loader statusLoader) emit(statuses Statuses) {
 	if loader.batch == nil || len(statuses) == 0 {
 		return
 	}
-	loader.batch(append([]Status(nil), statuses...))
+	loader.batch(append(Statuses(nil), statuses...))
 }
 
 // loadAllStatusesForRegions discovers every SSM parameter in the selected regions.
 // It is used when no paths file was provided, so the TUI can be opened as a full SSM parameter browser/manager.
-func (loader statusLoader) loadAllForRegions(regions []string) []Status {
+func (loader statusLoader) loadAllForRegions(regions []string) Statuses {
 	if len(regions) == 0 {
 		if region := loader.client.DefaultRegion(); region != "" {
 			regions = []string{region}
@@ -165,7 +155,7 @@ func (loader statusLoader) loadAllForRegions(regions []string) []Status {
 			regions = []string{""}
 		}
 	}
-	statuses := make([]Status, 0, len(regions)*64)
+	statuses := make(Statuses, 0, len(regions)*64)
 	for _, region := range regions {
 		statuses = append(statuses, loader.withClient(loader.client.ForRegion(region)).loadAllRegion(region)...)
 	}
@@ -178,15 +168,15 @@ func (loader statusLoader) loadAllForRegions(regions []string) []Status {
 	return statuses
 }
 
-func (loader statusLoader) loadAllRegion(region string) []Status {
+func (loader statusLoader) loadAllRegion(region string) Statuses {
 	if loader.progress != nil {
 		loader.progress(0, 0, region, nil)
 	}
 	metas, err := loader.client.ListParameterMetadata(loader.ctx)
 	if err != nil {
-		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
+		return Statuses{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
 	}
-	items := make([]inventory.Item, 0, len(metas))
+	items := make(inventory.Items, 0, len(metas))
 	metaByKey := map[string]ssm.Metadata{}
 	for i := range metas {
 		meta := metas[i]
@@ -234,7 +224,7 @@ func (loader statusLoader) loadAllRegion(region string) []Status {
 		loader.progress(len(items), len(items), region, nil)
 	}
 
-	statuses := make([]Status, 0, len(items))
+	statuses := make(Statuses, 0, len(items))
 	for _, item := range items {
 		status := statusFromMaps(item, item.Region, metaByKey, values, errs, loader.includeValues)
 		if status.isMissing() {
@@ -248,10 +238,10 @@ func (loader statusLoader) loadAllRegion(region string) []Status {
 
 // loadStatusesAllRegions discovers enabled AWS regions, then scans wildcard items across all of them.
 // If region discovery fails, every item receives an error status so the UI can show the failure inline.
-func (loader statusLoader) loadAllRegions(items []inventory.Item) []Status {
+func (loader statusLoader) loadAllRegions(items inventory.Items) Statuses {
 	regions, err := loader.client.ListRegions(loader.ctx)
 	if err != nil {
-		statuses := make([]Status, 0, len(items))
+		statuses := make(Statuses, 0, len(items))
 		for _, item := range items {
 			status := Status{Item: item, Type: ssm.DefaultParameterType.String(), Error: err.Error()}
 			statuses = append(statuses, status)
@@ -264,9 +254,9 @@ func (loader statusLoader) loadAllRegions(items []inventory.Item) []Status {
 // loadStatusesRegions scans wildcard items across a fixed region list.
 // It creates one status row per region where a parameter exists or errors, then appends a wildcard missing row
 // for paths that were not found in any scanned region.
-func (loader statusLoader) loadRegions(items []inventory.Item, regions []string) []Status {
+func (loader statusLoader) loadRegions(items inventory.Items, regions []string) Statuses {
 	logger := logging.FromContext(loader.ctx)
-	statuses := []Status{}
+	statuses := Statuses{}
 	found := map[string]bool{}
 	var previousCompleted time.Time
 	for index, region := range regions {
@@ -296,7 +286,7 @@ func (loader statusLoader) loadRegions(items []inventory.Item, regions []string)
 	return statuses
 }
 
-func (loader statusLoader) loadOneRegion(items []inventory.Item, region string) (statuses []Status, found map[string]bool) {
+func (loader statusLoader) loadOneRegion(items inventory.Items, region string) (statuses Statuses, found map[string]bool) {
 	logger := logging.FromContext(loader.ctx)
 	found = map[string]bool{}
 	if loader.progress != nil {
@@ -309,7 +299,7 @@ func (loader statusLoader) loadOneRegion(items []inventory.Item, region string) 
 	metadataDuration := elapsedStatusMillis(metadataStarted)
 	if err != nil {
 		logger.LogAttrs(loader.ctx, slog.LevelDebug, "region metadata scan failed", slog.String("region", region), slog.Int64("duration_ms", metadataDuration), slog.Any("error", err))
-		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}, found
+		return Statuses{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}, found
 	}
 	logger.LogAttrs(loader.ctx, slog.LevelDebug, "region metadata scan completed", slog.String("region", region), slog.Int64("duration_ms", metadataDuration), slog.Int("metadata_count", len(metas)))
 
@@ -326,7 +316,7 @@ func (loader statusLoader) loadOneRegion(items []inventory.Item, region string) 
 		metaByPath[meta.Name] = meta
 	}
 
-	matchedItems := make([]inventory.Item, 0, len(items))
+	matchedItems := make(inventory.Items, 0, len(items))
 	metaByKey := map[string]ssm.Metadata{}
 	for _, item := range items {
 		meta, ok := metaByPath[item.Path]
@@ -341,7 +331,7 @@ func (loader statusLoader) loadOneRegion(items []inventory.Item, region string) 
 	logger.LogAttrs(loader.ctx, slog.LevelDebug, "region metadata match completed", slog.String("region", region), slog.Int64("duration_ms", elapsedStatusMillis(matchStarted)), slog.Int("matched_count", len(matchedItems)), slog.Int("item_count", len(items)))
 
 	if !loader.includeValues {
-		statuses = make([]Status, 0, len(matchedItems))
+		statuses = make(Statuses, 0, len(matchedItems))
 		for _, item := range matchedItems {
 			statuses = append(statuses, statusFromMetadata(item, metaByKey[itemKey(region, item.Path)]))
 		}
@@ -371,7 +361,7 @@ func (loader statusLoader) loadOneRegion(items []inventory.Item, region string) 
 		logger.LogAttrs(loader.ctx, slog.LevelDebug, "region value lookup started", slog.String("region", region), slog.Int("start", start), slog.Int("count", len(chunkItems)))
 		values, errs := loader.client.GetMany(loader.ctx, paths)
 		logger.LogAttrs(loader.ctx, slog.LevelDebug, "region value lookup completed", slog.String("region", region), slog.Int("start", start), slog.Int("value_count", len(values)), slog.Int("error_count", len(errs)), slog.Int64("duration_ms", elapsedStatusMillis(valueLookupStarted)))
-		chunkStatuses := make([]Status, 0, len(chunkItems))
+		chunkStatuses := make(Statuses, 0, len(chunkItems))
 		for _, item := range chunkItems {
 			meta := metaByKey[itemKey(region, item.Path)]
 			if param, ok := values[item.Path]; ok {

@@ -13,7 +13,7 @@ type tableState struct {
 	columnCursor   int
 	sortBy         columnName
 	sortDescending bool
-	sortRules      []sortRule
+	sortRules      sortRules
 	sortCursor     int
 }
 
@@ -147,7 +147,7 @@ func (component tableColumnsComponent) columnOptionLines() []string {
 	lines = append(lines, m.muted("# and NAME are always visible."), "")
 	for i, c := range cols {
 		checked := visible[c]
-		lines = append(lines, m.multiSelectLine(columnLabel(c), checked, i == m.columnCursor))
+		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor))
 	}
 	return lines
 }
@@ -170,10 +170,10 @@ func columnItems() []columnName {
 
 func (component tableColumnsComponent) columnAllowed(column columnName) bool {
 	m := component.model
-	return m.fieldAllowed(fieldForColumn(column))
+	return m.opts.Fields.Allows(column.Field())
 }
 
-func fieldForColumn(column columnName) string {
+func (column columnName) Field() string {
 	switch column {
 	case columnIndex:
 		return string(column)
@@ -216,8 +216,8 @@ func (component tableColumnsComponent) allowedColumnItems() []columnName {
 	return out
 }
 
-func columnLabel(c columnName) string {
-	switch c {
+func (column columnName) Label() string {
+	switch column {
 	case columnIndex:
 		return "Index"
 	case columnPath:
@@ -243,7 +243,7 @@ func columnLabel(c columnName) string {
 	case columnDescription:
 		return "Description"
 	default:
-		return string(c)
+		return string(column)
 	}
 }
 

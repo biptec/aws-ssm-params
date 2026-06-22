@@ -138,7 +138,7 @@ func (component editorIOComponent) fileActionContents() string {
 }
 
 // startConfirm initializes a confirmation screen for one or more items.
-func (component *editorIOComponent) startConfirm(prompt, expected string, items []inventory.Item, ret screen) {
+func (component *editorIOComponent) startConfirm(prompt, expected string, items inventory.Items, ret screen) {
 	m := &component.model
 	m.confirmPrompt = prompt
 	m.confirmExpected = expected
@@ -278,11 +278,11 @@ func saveValueCmdWithBackend(ctx context.Context, backend uiBackend, item invent
 
 // deleteCmd groups selected items by concrete region and deletes them from SSM.
 // Wildcard missing rows are skipped because they do not represent a real parameter in one AWS region.
-func deleteCmd(ctx context.Context, client ssm.Client, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func deleteCmd(ctx context.Context, client ssm.Client, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return deleteCmdWithBackend(ctx, newDefaultBackend(client), items, pathsFile, allowNamesFileUpdate)
 }
 
-func deleteCmdWithBackend(ctx context.Context, backend uiBackend, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func deleteCmdWithBackend(ctx context.Context, backend uiBackend, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		return backend.deleteParameters(ctx, items, pathsFile, allowNamesFileUpdate)
 	}

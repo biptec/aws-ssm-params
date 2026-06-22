@@ -290,7 +290,7 @@ func (component editorStateComponent) regionSelectOptions() []string {
 func (component editorStateComponent) startTypeSelect(ret screen) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.typeReturnScreen = ret
-	m.typeCursor = indexOfParameterType(parameterTypeItems(), m.normalizedEditType())
+	m.typeCursor = parameterTypeItems().index(m.normalizedEditType())
 	m.pushPopup(popupTypeSelect)
 	return m, nil
 }
@@ -298,7 +298,7 @@ func (component editorStateComponent) startTypeSelect(ret screen) (tea.Model, te
 func (component editorStateComponent) startTierSelect(ret screen) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.typeReturnScreen = ret
-	m.tierCursor = indexOfParameterTier(parameterTierItems(), m.normalizedEditTier())
+	m.tierCursor = parameterTierItems().index(m.normalizedEditTier())
 	m.pushPopup(popupTierSelect)
 	return m, nil
 }
@@ -306,7 +306,7 @@ func (component editorStateComponent) startTierSelect(ret screen) (tea.Model, te
 func (component editorStateComponent) startDataTypeSelect(ret screen) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.typeReturnScreen = ret
-	m.dataTypeCursor = indexOfParameterDataType(parameterDataTypeItems(), m.normalizedEditDataType())
+	m.dataTypeCursor = parameterDataTypeItems().index(m.normalizedEditDataType())
 	m.pushPopup(popupDataTypeSelect)
 	return m, nil
 }
@@ -317,7 +317,7 @@ func (component editorStateComponent) startOverwriteSelect(ret screen) (tea.Mode
 		return m.focusEditField(editFieldDescription), nil
 	}
 	m.typeReturnScreen = ret
-	m.overwriteCursor = indexOfOverwrite(overwriteItems(), m.editOverwrite)
+	m.overwriteCursor = overwriteItems().index(m.editOverwrite)
 	m.pushPopup(popupOverwriteSelect)
 	return m, nil
 }

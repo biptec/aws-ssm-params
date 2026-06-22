@@ -16,7 +16,7 @@ type popupState struct {
 
 	confirmPrompt   string
 	confirmExpected string
-	confirmItems    []inventory.Item
+	confirmItems    inventory.Items
 
 	shortcutsFor       screen
 	shortcutsPopupFor  popupKind

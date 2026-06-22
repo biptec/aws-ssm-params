@@ -94,7 +94,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		}
 	case "x":
 		if len(m.visible()) > 0 {
-			items := []inventory.Item{m.currentItem()}
+			items := inventory.Items{m.currentItem()}
 			if m.opts.NoConfirmDeleteOne {
 				return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 			}

@@ -8,7 +8,7 @@ import (
 )
 
 type listState struct {
-	statuses []Status
+	statuses Statuses
 
 	selected         int
 	selectedExpanded bool
@@ -74,9 +74,9 @@ func (m listState) visiblePaths() []string {
 	return out
 }
 
-func (m listState) visibleItems() []inventory.Item {
+func (m listState) visibleItems() inventory.Items {
 	vis := m.visible()
-	out := make([]inventory.Item, 0, len(vis))
+	out := make(inventory.Items, 0, len(vis))
 	for _, idx := range vis {
 		out = append(out, m.statuses[idx].Item)
 	}
@@ -124,7 +124,7 @@ func (m *listState) replaceStatus(path string, st Status) {
 		if m.statuses[i].Item.Path != path {
 			continue
 		}
-		if sameItem(m.statuses[i].Item, st.Item) {
+		if m.statuses[i].Item.SameIdentity(st.Item) {
 			m.statuses[i] = st
 			return
 		}
@@ -144,7 +144,7 @@ func (m *listState) replaceStatus(path string, st Status) {
 	m.selected = len(m.statuses) - 1
 }
 
-func (m *listState) removeItemRows(items []inventory.Item) {
+func (m *listState) removeItemRows(items inventory.Items) {
 	targets := map[string]bool{}
 	for _, item := range items {
 		targets[itemKey(item.Region, item.Path)] = true
@@ -162,14 +162,9 @@ func (m *listState) removeItemRows(items []inventory.Item) {
 // markMissingItem updates the UI after deletion by replacing matching concrete rows with a missing status.
 func (m *listState) markMissingItem(item inventory.Item) {
 	for i := range m.statuses {
-		if sameItem(m.statuses[i].Item, item) {
+		if m.statuses[i].Item.SameIdentity(item) {
 			m.statuses[i] = Status{Item: item, Type: ssm.DefaultParameterType.String()}
 			return
 		}
 	}
-}
-
-// sameItem compares inventory identity fields that uniquely identify a row in the UI.
-func sameItem(a, b inventory.Item) bool {
-	return a.Path == b.Path && a.Region == b.Region
 }

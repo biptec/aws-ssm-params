@@ -37,14 +37,71 @@ type sortRule struct {
 	descending bool
 }
 
+func (rule sortRule) directionArrow() string {
+	if rule.descending {
+		return "↓"
+	}
+	return "↑"
+}
+
+type sortRules []sortRule
+
+func (rules sortRules) primary() (columnName, bool) {
+	if len(rules) == 0 {
+		return columnPath, false
+	}
+	return rules[0].column, rules[0].descending
+}
+
+func (rules sortRules) index(column columnName) int {
+	for i, rule := range rules {
+		if rule.column == column {
+			return i
+		}
+	}
+	return -1
+}
+
+func (rules sortRules) find(column columnName) (sortRule, bool) {
+	index := rules.index(column)
+	if index < 0 {
+		return sortRule{}, false
+	}
+	return rules[index], true
+}
+
+func (rules sortRules) without(column columnName) sortRules {
+	filtered := make(sortRules, 0, len(rules))
+	for _, rule := range rules {
+		if rule.column != column {
+			filtered = append(filtered, rule)
+		}
+	}
+	return filtered
+}
+
+func (rules sortRules) with(column columnName, descending bool) sortRules {
+	if column == "" {
+		return rules
+	}
+	return append(rules.without(column), sortRule{column: column, descending: descending})
+}
+
+func (rules sortRules) orDefault() sortRules {
+	if len(rules) == 0 {
+		return sortRules{{column: columnPath}}
+	}
+	return rules
+}
+
 type sortItem struct {
 	hotkey string
 	column columnName
 	label  string
 }
 
-func parseInitialSortOptions(values []string) []sortRule {
-	rules := make([]sortRule, 0, len(values))
+func parseInitialSortOptions(values []string) sortRules {
+	rules := make(sortRules, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
@@ -63,19 +120,12 @@ func parseInitialSortOptions(values []string) []sortRule {
 				descending = true
 			}
 		}
-		rules = withSortRule(rules, column, descending)
+		rules = rules.with(column, descending)
 	}
 	if len(rules) == 0 {
-		return []sortRule{{column: columnPath}}
+		return sortRules{{column: columnPath}}
 	}
 	return rules
-}
-
-func primarySortRule(rules []sortRule) (columnName, bool) {
-	if len(rules) == 0 {
-		return columnPath, false
-	}
-	return rules[0].column, rules[0].descending
 }
 
 func columnByFieldName(name string) (columnName, bool) {
@@ -87,7 +137,7 @@ func columnByFieldName(name string) (columnName, bool) {
 		return "", false
 	}
 	for _, column := range columnItems() {
-		if name == string(column) || name == fieldForColumn(column) {
+		if name == string(column) || name == column.Field() {
 			return column, true
 		}
 	}
@@ -155,7 +205,7 @@ func (component tableSorter) visibleSortItems() []sortItem {
 		if n == 10 {
 			hotkey = "0"
 		}
-		items = append(items, sortItem{hotkey: hotkey, column: col, label: columnLabel(col)})
+		items = append(items, sortItem{hotkey: hotkey, column: col, label: col.Label()})
 	}
 	return items
 }
@@ -173,7 +223,7 @@ func (component tableSorter) visibleSortColumnByHotkey(key string) (columnName, 
 func (component tableSorter) sortCursorForCurrentSort() int {
 	m := component
 	items := m.popupSortItems()
-	primary, _ := primarySortRule(m.sortRules)
+	primary, _ := m.sortRules.primary()
 	for i, item := range items {
 		if item.column == primary {
 			return i
@@ -182,57 +232,15 @@ func (component tableSorter) sortCursorForCurrentSort() int {
 	return 0
 }
 
-func sortRuleIndex(rules []sortRule, column columnName) int {
-	for i, rule := range rules {
-		if rule.column == column {
-			return i
-		}
-	}
-	return -1
+func (component tableSorter) sortRulesOrDefault() sortRules {
+	return component.sortRules.orDefault()
 }
 
-func sortRuleForColumn(rules []sortRule, column columnName) (sortRule, bool) {
-	idx := sortRuleIndex(rules, column)
-	if idx < 0 {
-		return sortRule{}, false
-	}
-	return rules[idx], true
-}
-
-func withoutSortRule(rules []sortRule, column columnName) []sortRule {
-	filtered := make([]sortRule, 0, len(rules))
-	for _, rule := range rules {
-		if rule.column != column {
-			filtered = append(filtered, rule)
-		}
-	}
-	return filtered
-}
-
-func withSortRule(rules []sortRule, column columnName, descending bool) []sortRule {
-	if column == "" {
-		return rules
-	}
-	updated := withoutSortRule(rules, column)
-	updated = append(updated, sortRule{column: column, descending: descending})
-	return updated
-}
-
-func (component tableSorter) sortRulesOrDefault() []sortRule {
+func (component *tableSorter) setSortRules(rules sortRules) {
 	m := component
-	if len(m.sortRules) == 0 {
-		return []sortRule{{column: columnPath}}
-	}
-	return m.sortRules
-}
-
-func (component *tableSorter) setSortRules(rules []sortRule) {
-	m := component
-	if len(rules) == 0 {
-		rules = []sortRule{{column: columnPath}}
-	}
-	m.sortRules = append([]sortRule(nil), rules...)
-	m.sortBy, m.sortDescending = primarySortRule(m.sortRules)
+	rules = rules.orDefault()
+	m.sortRules = append(sortRules(nil), rules...)
+	m.sortBy, m.sortDescending = m.sortRules.primary()
 }
 
 func (component *tableSorter) applySort(column columnName) {
@@ -244,7 +252,7 @@ func (component *tableSorter) applySort(column columnName) {
 	if column == m.sortBy {
 		descending = !m.sortDescending
 	}
-	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
+	m.applySortWithRules(sortRules{{column: column, descending: descending}})
 }
 
 func (component *tableSorter) toggleSortColumn(column columnName) {
@@ -253,10 +261,10 @@ func (component *tableSorter) toggleSortColumn(column columnName) {
 		return
 	}
 	rules := m.sortRulesOrDefault()
-	if sortRuleIndex(rules, column) >= 0 {
-		rules = withoutSortRule(rules, column)
+	if rules.index(column) >= 0 {
+		rules = rules.without(column)
 	} else {
-		rules = withSortRule(rules, column, false)
+		rules = rules.with(column, false)
 	}
 	m.applySortWithRules(rules)
 }
@@ -267,9 +275,9 @@ func (component *tableSorter) toggleSortDirection(column columnName) {
 		return
 	}
 	rules := m.sortRulesOrDefault()
-	idx := sortRuleIndex(rules, column)
+	idx := rules.index(column)
 	if idx < 0 {
-		rules = withSortRule(rules, column, true)
+		rules = rules.with(column, true)
 	} else {
 		rules[idx].descending = !rules[idx].descending
 	}
@@ -281,10 +289,10 @@ func (component *tableSorter) applySortWithDirection(column columnName, descendi
 	if column == "" {
 		return
 	}
-	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
+	m.applySortWithRules(sortRules{{column: column, descending: descending}})
 }
 
-func (component *tableSorter) applySortWithRules(rules []sortRule) {
+func (component *tableSorter) applySortWithRules(rules sortRules) {
 	m := component
 	var selectedKey string
 	if len(m.visible()) > 0 && m.selected < len(m.visible()) {
@@ -328,24 +336,17 @@ func (component tableSorter) columnHeader(c columnName) string {
 	if c == columnIndex {
 		return "#"
 	}
-	header := strings.ToUpper(columnLabel(c))
-	if rule, ok := sortRuleForColumn(m.sortRules, c); ok {
-		header += " " + sortDirectionArrow(rule.descending)
+	header := strings.ToUpper(c.Label())
+	if rule, ok := m.sortRules.find(c); ok {
+		header += " " + rule.directionArrow()
 	}
 	return header
 }
 
-func sortDirectionArrow(descending bool) string {
-	if descending {
-		return "↓"
-	}
-	return "↑"
-}
-
 func (component tableSorter) sortPopupLabel(item sortItem) string {
 	m := component
-	if rule, ok := sortRuleForColumn(m.sortRules, item.column); ok {
-		return item.label + " " + sortDirectionArrow(rule.descending)
+	if rule, ok := m.sortRules.find(item.column); ok {
+		return item.label + " " + rule.directionArrow()
 	}
 	return item.label
 }

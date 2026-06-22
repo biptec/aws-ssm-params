@@ -13,13 +13,56 @@ type FieldMapping struct {
 	FileName string
 }
 
+// Fields is an ordered set of canonical parameter field names.
+type Fields []string
+
+// Contains reports whether field is explicitly present.
+func (fields Fields) Contains(field string) bool {
+	for _, candidate := range fields {
+		if candidate == field {
+			return true
+		}
+	}
+	return false
+}
+
+// Includes reports whether field is represented. An empty set represents all fields.
+func (fields Fields) Includes(field string) bool {
+	return len(fields) == 0 || fields.Contains(field)
+}
+
+// Allows applies output-field semantics: name is always available and an empty set allows every field.
+func (fields Fields) Allows(field string) bool {
+	return field == "name" || fields.Includes(field)
+}
+
+// With returns a copy containing each non-empty field once, preserving order.
+func (fields Fields) With(additions ...string) Fields {
+	out := append(Fields(nil), fields...)
+	for _, field := range additions {
+		if field == "" || out.Contains(field) {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
+// RequiresValues reports whether loading parameter values is required to provide these fields.
+func (fields Fields) RequiresValues() bool {
+	if len(fields) == 0 {
+		return true
+	}
+	return fields.Contains("value") || fields.Contains("len") || fields.Contains("sha256") || fields.Contains("version")
+}
+
 // Record is the import/export representation of one SSM parameter.
 // Path is the canonical SSM name, Alias is the human-friendly dotenv variable name, Value is the parameter value,
 // and Type optionally carries the AWS SSM parameter type when an import/export format preserves it.
 type Record struct {
 	Path        string
 	Alias       string
-	Fields      []string
+	Fields      Fields
 	Region      string
 	Value       string
 	Type        string
@@ -33,6 +76,9 @@ type Record struct {
 	SHA256      string
 	User        string
 }
+
+// Records is an ordered collection of import/export records.
+type Records []Record
 
 func (r Record) exportJSONRecord() exportJSONRecord {
 	out := exportJSONRecord{}
@@ -79,15 +125,12 @@ func (r Record) exportJSONRecord() exportJSONRecord {
 }
 
 func (r Record) includesField(field string) bool {
-	if len(r.Fields) == 0 {
-		return true
-	}
-	for _, candidate := range r.Fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return false
+	return r.Fields.Includes(field)
+}
+
+// HasField reports whether the record contains field. Records without an explicit field set represent all fields.
+func (r Record) HasField(field string) bool {
+	return r.includesField(field)
 }
 
 func (r Record) fieldAny(field string) any {

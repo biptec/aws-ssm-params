@@ -16,17 +16,22 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
 
-// LoadPathsFile reads a simple newline-based SSM inventory file.
+// PathsFile manages one newline-based SSM inventory file.
+type PathsFile struct {
+	Path string
+}
+
+// Load reads a simple newline-based SSM inventory file.
 // Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
 // duplicates are removed, and the final list is sorted to make downstream output deterministic.
-func LoadPathsFile(filePath string) ([]Item, error) {
-	file, err := fileio.Open(filePath)
+func (pathsFile PathsFile) Load() (Items, error) {
+	file, err := fileio.Open(pathsFile.Path)
 	if err != nil {
-		return nil, crerr.Wrapf(err, "open paths file %s", filePath)
+		return nil, crerr.Wrapf(err, "open paths file %s", pathsFile.Path)
 	}
 	defer func() { _ = file.Close() }()
 
-	items, err := LoadPaths(file, filePath)
+	items, err := LoadPaths(file, pathsFile.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -36,9 +41,9 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 // LoadPaths reads newline-based SSM inventory content from reader.
 // Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
 // duplicates are removed, and the final list is sorted to make downstream output deterministic.
-func LoadPaths(reader io.Reader, source string) ([]Item, error) {
+func LoadPaths(reader io.Reader, source string) (Items, error) {
 	seen := map[string]bool{}
-	var items []Item
+	var items Items
 	scanner := bufio.NewScanner(reader)
 	lineNo := 0
 	for scanner.Scan() {
@@ -63,9 +68,9 @@ func LoadPaths(reader io.Reader, source string) ([]Item, error) {
 	return items, nil
 }
 
-// AppendPathIfMissing appends one absolute SSM name to a paths file unless that path is already listed.
+// Append appends one absolute SSM name unless that path is already listed.
 // It preserves the existing file order and adds the new path at the end so the file can be grown from the TUI.
-func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
+func (pathsFile PathsFile) Append(parameterPath string) (bool, error) {
 	parameterPath = strings.TrimSpace(parameterPath)
 	if parameterPath == "" {
 		return false, errors.New("SSM name is required")
@@ -74,10 +79,10 @@ func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 		return false, fmt.Errorf("invalid SSM name: %s", parameterPath)
 	}
 
-	cleanPath := filepath.Clean(filePath)
+	cleanPath := filepath.Clean(pathsFile.Path)
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil && !os.IsNotExist(err) {
-		return false, crerr.Wrapf(err, "read paths file %s", filePath)
+		return false, crerr.Wrapf(err, "read paths file %s", pathsFile.Path)
 	}
 	if pathFileContainsPath(string(data), parameterPath) {
 		return false, nil
@@ -87,13 +92,13 @@ func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		prefix = "\n"
 	}
-	file, err := fileio.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	file, err := fileio.OpenFile(pathsFile.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return false, crerr.Wrapf(err, "open paths file %s", filePath)
+		return false, crerr.Wrapf(err, "open paths file %s", pathsFile.Path)
 	}
 	defer func() { _ = file.Close() }()
 	if _, err := file.WriteString(prefix + parameterPath + "\n"); err != nil {
-		return false, crerr.Wrapf(err, "append path to %s", filePath)
+		return false, crerr.Wrapf(err, "append path to %s", pathsFile.Path)
 	}
 	return true, nil
 }
@@ -108,9 +113,9 @@ func pathFileContainsPath(content, parameterPath string) bool {
 	return false
 }
 
-// RemovePathsIfPresent removes listed SSM names from a paths file, preserving comments and unrelated entries.
+// Remove removes listed SSM names, preserving comments and unrelated entries.
 // Lines that contain a matching path followed by an inline comment are removed as a whole.
-func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error) {
+func (pathsFile PathsFile) Remove(parameterPaths []string) (int, error) {
 	targets := map[string]bool{}
 	for _, parameterPath := range parameterPaths {
 		parameterPath = strings.TrimSpace(parameterPath)
@@ -121,7 +126,7 @@ func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error)
 	if len(targets) == 0 {
 		return 0, nil
 	}
-	cleanPath := filepath.Clean(filePath)
+	cleanPath := filepath.Clean(pathsFile.Path)
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil {
 		return 0, crerr.Wrapf(err, "read paths file %s", cleanPath)

@@ -16,7 +16,7 @@ import (
 
 type runtimeState struct {
 	ctx    context.Context
-	items  []inventory.Item
+	items  inventory.Items
 	loadCh chan tea.Msg
 
 	width  int
@@ -40,7 +40,7 @@ type runtimeState struct {
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
 // The function returns only after the user quits the TUI or Bubble Tea reports an error.
-func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) error {
+func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Items, opts Options) error {
 	m := newModel(ctx, client, items, opts)
 	programOptions := []tea.ProgramOption{tea.WithAltScreen()}
 	if opts.UseInputTTY {
@@ -53,9 +53,9 @@ func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.It
 
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
-func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) model {
+func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opts Options) model {
 	sortRules := parseInitialSortOptions(opts.Sort)
-	sortBy, sortDescending := primarySortRule(sortRules)
+	sortBy, sortDescending := sortRules.primary()
 	input := textinput.New()
 	input.Prompt = ""
 	input.CharLimit = 0
@@ -134,16 +134,16 @@ func configureTextInputStyles(input *textinput.Model, opts Options) {
 
 // startLoadCmd launches the initial SSM status scan in a goroutine.
 // Progress and final results are sent through loadCh so the Bubble Tea event loop can render loading updates.
-func startLoadCmdWithBackend(ctx context.Context, backend uiBackend, items []inventory.Item, groups []filter.Group, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
+func startLoadCmdWithBackend(ctx context.Context, backend uiBackend, items inventory.Items, groups filter.Groups, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			loader := func(done, total int, region string, chunk []inventory.Item) {
-				ch <- progressMsg{done: done, total: total, region: region, items: append([]inventory.Item(nil), chunk...)}
+			loader := func(done, total int, region string, chunk inventory.Items) {
+				ch <- progressMsg{done: done, total: total, region: region, items: append(inventory.Items(nil), chunk...)}
 			}
-			emitBatch := func(statuses []Status) {
-				statuses = FilterStatusesByGroups(statuses, groups)
+			emitBatch := func(statuses Statuses) {
+				statuses = statuses.Filter(groups)
 				if len(statuses) > 0 {
-					ch <- statusBatchMsg(append([]Status(nil), statuses...))
+					ch <- statusBatchMsg(append(Statuses(nil), statuses...))
 				}
 			}
 			statuses := backend.loadStatuses(ctx, items, groups, regions, includeValues, loader, emitBatch)

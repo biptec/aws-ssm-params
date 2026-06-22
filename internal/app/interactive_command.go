@@ -6,6 +6,7 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -85,7 +86,7 @@ func (command interactiveCommand) options(regionLabel string, regions []string) 
 		ShowColumns:               cfg.ShowColumns,
 		Sort:                      cfg.SortColumns,
 		Fields:                    cfg.Fields,
-		IncludeValues:             cfg.WithDecryption || includeValuesForFields(cfg.Fields) || includeValuesForFilterGroups(cfg.FilterGroups),
+		IncludeValues:             cfg.WithDecryption || cfg.Fields.RequiresValues() || cfg.FilterGroups.HasField(filter.FieldValue),
 		ShowSecureValues:          cfg.WithDecryption,
 		NoConfirmOverwriteFile:    cfg.NoConfirmOverwriteFile,
 		NoConfirmWriteSecureValue: cfg.NoConfirmWriteSecureValue,
@@ -95,7 +96,7 @@ func (command interactiveCommand) options(regionLabel string, regions []string) 
 	}
 }
 
-func loadInteractiveInventoryFromStdin() ([]inventory.Item, bool, error) {
+func loadInteractiveInventoryFromStdin() (inventory.Items, bool, error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return nil, false, crerr.Wrap(err, "stat stdin")

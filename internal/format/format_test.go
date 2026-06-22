@@ -134,7 +134,7 @@ func TestImportJSONSupportsFullRecordObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, records, 1)
 	record := records[0]
-	assert.Equal(t, []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, record.Fields)
+	assert.Equal(t, Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, record.Fields)
 	assert.Equal(t, "eu-north-1", record.Region)
 	assert.Equal(t, "SecureString", record.Type)
 	assert.Equal(t, "Advanced", record.Tier)

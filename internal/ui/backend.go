@@ -19,14 +19,14 @@ import (
 )
 
 type uiBackend interface {
-	loadStatuses(context.Context, []inventory.Item, []filter.Group, []string, bool, LoadProgress, StatusBatch) []Status
+	loadStatuses(context.Context, inventory.Items, filter.Groups, []string, bool, LoadProgress, StatusBatch) Statuses
 	listRegions(context.Context) ([]string, error)
 	readFile(string) ([]byte, error)
 	writeFile(string, []byte, fs.FileMode) error
 	statFile(string) (fs.FileInfo, error)
 	randomValue(string, string) (string, error)
 	saveParameter(context.Context, inventory.Item, string, string, ssm.ParameterType, ssm.PutParameterOptions, string, bool) statusUpdatedMsg
-	deleteParameters(context.Context, []inventory.Item, string, bool) deleteDoneMsg
+	deleteParameters(context.Context, inventory.Items, string, bool) deleteDoneMsg
 }
 
 type fileStore interface {
@@ -76,12 +76,12 @@ func (backend defaultBackend) fileStore() fileStore {
 	return backend.files
 }
 
-func (backend defaultBackend) loadStatuses(ctx context.Context, items []inventory.Item, groups []filter.Group, regions []string, includeValues bool, progress LoadProgress, batch StatusBatch) []Status {
+func (backend defaultBackend) loadStatuses(ctx context.Context, items inventory.Items, groups filter.Groups, regions []string, includeValues bool, progress LoadProgress, batch StatusBatch) Statuses {
 	if len(groups) > 0 && len(items) == 0 {
 		return LoadFilteredStatusesBatchForRegions(ctx, backend.client, groups, includeValues, regions, progress)
 	}
 	statuses := LoadStatusesBatchForRegionsStream(ctx, backend.client, items, includeValues, regions, progress, batch)
-	return FilterStatusesByGroups(statuses, groups)
+	return statuses.Filter(groups)
 }
 
 func (backend defaultBackend) listRegions(ctx context.Context) ([]string, error) {
@@ -137,9 +137,9 @@ func (backend defaultBackend) saveParameter(ctx context.Context, item inventory.
 	}
 	appendedToNamesFile := false
 	if pathsFile != "" && allowNamesFileUpdate {
-		appended, err := inventory.AppendPathIfMissing(pathsFile, item.Path)
+		appended, err := (inventory.PathsFile{Path: pathsFile}).Append(item.Path)
 		if err != nil {
-			st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
+			st := LoadStatuses(ctx, regionalClient, inventory.Items{item}, true)[0]
 			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", item.Path, pathsFile, err)}
 		}
 		if appended {
@@ -148,7 +148,7 @@ func (backend defaultBackend) saveParameter(ctx context.Context, item inventory.
 			item.Source = pathsFile
 		}
 	}
-	st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
+	st := LoadStatuses(ctx, regionalClient, inventory.Items{item}, true)[0]
 	message := "Updated " + item.Path
 	if appendedToNamesFile {
 		message += " and added it to " + pathsFile
@@ -156,7 +156,7 @@ func (backend defaultBackend) saveParameter(ctx context.Context, item inventory.
 	return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: message}
 }
 
-func (backend defaultBackend) deleteParameters(ctx context.Context, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) deleteDoneMsg {
+func (backend defaultBackend) deleteParameters(ctx context.Context, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) deleteDoneMsg {
 	byRegion := map[string][]string{}
 	for _, item := range items {
 		if item.Region == "*" {
@@ -172,7 +172,7 @@ func (backend defaultBackend) deleteParameters(ctx context.Context, items []inve
 
 	removeRows := pathsFile == ""
 	if pathsFile != "" && allowNamesFileUpdate {
-		if _, err := inventory.RemovePathsIfPresent(pathsFile, itemPaths(items)); err != nil {
+		if _, err := (inventory.PathsFile{Path: pathsFile}).Remove(items.Paths()); err != nil {
 			return deleteDoneMsg{items: items, warning: fmt.Sprintf("Could not update %s after delete: %v", pathsFile, err)}
 		}
 		removeRows = true

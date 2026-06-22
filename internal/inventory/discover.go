@@ -14,17 +14,24 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 )
 
+// Discoverer scans one GitOps repository/environment pair.
+type Discoverer struct {
+	RepoRoot    string
+	Environment string
+	EnabledOnly bool
+}
+
 // Discover scans the original GitOps repository layout and builds an inventory of SSM parameters.
 // It combines enabled app values.yaml files, cluster-level kustomization secrets, and Terraform Flux token config,
 // then deduplicates and sorts everything so generated path files and UI rows are stable.
-func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
-	envDir := filepath.Join(repoRoot, "clusters", env)
+func (discoverer Discoverer) Discover() (Items, error) {
+	envDir := discoverer.environmentDir()
 	appsDir := filepath.Join(envDir, "apps")
 	if !exists(appsDir) {
 		return nil, fmt.Errorf("apps directory not found: %s", appsDir)
 	}
 
-	enabledApps, err := discoverEnabledApps(envDir)
+	enabledApps, err := discoverer.enabledApps()
 	if err != nil {
 		return nil, crerr.Wrap(err, "discover enabled apps")
 	}
@@ -34,13 +41,13 @@ func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
 		return nil, crerr.Wrapf(err, "read apps directory %s", appsDir)
 	}
 
-	var items []Item
+	var items Items
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		appName := entry.Name()
-		if enabledOnly && !enabledApps[appName] {
+		if discoverer.EnabledOnly && !enabledApps[appName] {
 			continue
 		}
 		valuesPath := filepath.Join(appsDir, appName, "values.yaml")
@@ -54,28 +61,32 @@ func Discover(repoRoot, env string, enabledOnly bool) ([]Item, error) {
 		items = append(items, appItems...)
 	}
 
-	kItems, err := scanKustomizationForSecrets(envDir, env)
+	kItems, err := discoverer.scanKustomizationForSecrets()
 	if err != nil {
 		return nil, crerr.Wrap(err, "scan kustomization secrets")
 	}
 	items = append(items, kItems...)
 
-	fItems, err := scanTerraformFluxToken(repoRoot, env)
+	fItems, err := discoverer.scanTerraformFluxToken()
 	if err != nil {
 		return nil, crerr.Wrap(err, "scan Terraform Flux token")
 	}
 	items = append(items, fItems...)
 
-	items = dedupe(items)
+	items = items.MergeDuplicates()
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil
 }
 
-// discoverEnabledApps parses an environment kustomization.yaml and returns apps that are actively referenced.
+func (discoverer Discoverer) environmentDir() string {
+	return filepath.Join(discoverer.RepoRoot, "clusters", discoverer.Environment)
+}
+
+// enabledApps parses an environment kustomization.yaml and returns apps that are actively referenced.
 // This lets discovery ignore app directories that exist in the repo but are not deployed in the selected environment.
-func discoverEnabledApps(envDir string) (map[string]bool, error) {
+func (discoverer Discoverer) enabledApps() (map[string]bool, error) {
 	result := map[string]bool{}
-	path := filepath.Join(envDir, "kustomization.yaml")
+	path := filepath.Join(discoverer.environmentDir(), "kustomization.yaml")
 	data, err := fileio.ReadFile(path)
 	if err != nil {
 		return result, crerr.Wrapf(err, "read kustomization %s", path)
@@ -96,15 +107,15 @@ func discoverEnabledApps(envDir string) (map[string]bool, error) {
 
 // scanKustomizationForSecrets finds cluster-level SSM names embedded directly in kustomization.yaml.
 // Currently it extracts GHCR token references because those are shared infrastructure secrets, not app-local values.
-func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
-	path := filepath.Join(envDir, "kustomization.yaml")
+func (discoverer Discoverer) scanKustomizationForSecrets() (Items, error) {
+	path := filepath.Join(discoverer.environmentDir(), "kustomization.yaml")
 	data, err := fileio.ReadFile(path)
 	if err != nil {
 		return nil, crerr.Wrapf(err, "read kustomization %s", path)
 	}
 	seen := map[string]bool{}
 	var items []Item
-	re := regexp.MustCompile(`/app-infra/` + regexp.QuoteMeta(env) + `/ghcr/token`)
+	re := regexp.MustCompile(`/app-infra/` + regexp.QuoteMeta(discoverer.Environment) + `/ghcr/token`)
 	for _, match := range re.FindAllString(string(data), -1) {
 		if !seen[match] {
 			seen[match] = true
@@ -116,8 +127,8 @@ func scanKustomizationForSecrets(envDir, env string) ([]Item, error) {
 
 // scanTerraformFluxToken resolves the Flux GitHub token SSM name from terraform.tfvars.
 // If the Terraform variable is absent, it returns the conventional default path so the inventory still includes the token.
-func scanTerraformFluxToken(repoRoot, env string) ([]Item, error) {
-	path := filepath.Join(repoRoot, "terraform", "environments", env, "terraform.tfvars")
+func (discoverer Discoverer) scanTerraformFluxToken() (Items, error) {
+	path := filepath.Join(discoverer.RepoRoot, "terraform", "environments", discoverer.Environment, "terraform.tfvars")
 	value := "/flux/github/token"
 	if data, err := fileio.ReadFile(path); err == nil {
 		re := regexp.MustCompile(`(?m)^\s*gitops_token_ssm_parameter\s*=\s*"([^"]+)"`)
@@ -126,45 +137,7 @@ func scanTerraformFluxToken(repoRoot, env string) ([]Item, error) {
 			value = m[1]
 		}
 	}
-	return []Item{{Path: value, Kind: "flux-token", Source: filepath.ToSlash(path)}}, nil
-}
-
-// dedupe merges multiple discoveries of the same SSM name into one inventory item.
-// Metadata fields are concatenated instead of discarded so users can still see every source/kind that referenced the path.
-func dedupe(items []Item) []Item {
-	byPath := map[string]Item{}
-	for _, item := range items {
-		if item.Path == "" {
-			continue
-		}
-		if old, ok := byPath[item.Path]; ok {
-			old.Kind = merge(old.Kind, item.Kind)
-			old.Source = merge(old.Source, item.Source)
-			old.App = merge(old.App, item.App)
-			old.Component = merge(old.Component, item.Component)
-			old.SecretName = merge(old.SecretName, item.SecretName)
-			byPath[item.Path] = old
-			continue
-		}
-		byPath[item.Path] = item
-	}
-
-	out := make([]Item, 0, len(byPath))
-	for _, item := range byPath {
-		out = append(out, item)
-	}
-	return out
-}
-
-// merge appends metadata value b to value a unless it is empty or already included.
-func merge(a, b string) string {
-	if a == "" {
-		return b
-	}
-	if b == "" || strings.Contains(a, b) {
-		return a
-	}
-	return a + "," + b
+	return Items{{Path: value, Kind: "flux-token", Source: filepath.ToSlash(path)}}, nil
 }
 
 // exists reports whether a path exists and can be statted.

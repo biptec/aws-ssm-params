@@ -10,6 +10,11 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
+type importOptionsResolver struct {
+	defaults ssm.PutParameterOptions
+	cfg      Config
+}
+
 func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions, error) {
 	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
 	if err != nil {
@@ -28,63 +33,64 @@ func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions,
 		policies = string(data)
 	}
 	opts := ssm.PutParameterOptions{}
-	if fieldAllowed(cfg.Fields, "tier") {
+	if cfg.Fields.Allows("tier") {
 		opts.Tier = tier
 	}
-	if fieldAllowed(cfg.Fields, "data-type") {
+	if cfg.Fields.Allows("data-type") {
 		opts.DataType = dataType
 	}
-	if fieldAllowed(cfg.Fields, "description") {
+	if cfg.Fields.Allows("description") {
 		opts.Description = ctx.String("default-description")
 	}
-	if fieldAllowed(cfg.Fields, "policies") {
+	if cfg.Fields.Allows("policies") {
 		opts.Policies = policies
 	}
 	return opts, nil
 }
 
-func importOptionsForRecord(record outputfmt.Record, cloud ssm.Metadata, exists bool, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
-	opts := defaults
+func (resolver importOptionsResolver) forRecord(record outputfmt.Record, cloud ssm.Metadata, exists bool) (ssm.PutParameterOptions, error) {
+	opts := resolver.defaults
+	cfg := resolver.cfg
 	if exists {
-		if fieldAllowed(cfg.Fields, "tier") && strings.TrimSpace(cloud.Tier) != "" {
+		if cfg.Fields.Allows("tier") && strings.TrimSpace(cloud.Tier) != "" {
 			tier, err := ssm.ParseParameterTier(cloud.Tier)
 			if err != nil {
 				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud tier")
 			}
 			opts.Tier = tier
 		}
-		if fieldAllowed(cfg.Fields, "data-type") && strings.TrimSpace(cloud.DataType) != "" {
+		if cfg.Fields.Allows("data-type") && strings.TrimSpace(cloud.DataType) != "" {
 			dataType, err := ssm.ParseParameterDataType(cloud.DataType)
 			if err != nil {
 				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud data type")
 			}
 			opts.DataType = dataType
 		}
-		if fieldAllowed(cfg.Fields, "description") {
+		if cfg.Fields.Allows("description") {
 			opts.Description = cloud.Description
 		}
-		if fieldAllowed(cfg.Fields, "policies") {
+		if cfg.Fields.Allows("policies") {
 			opts.Policies = cloud.Policies
 		}
 	}
-	if fieldAllowed(cfg.Fields, "tier") && recordHasField(record, "tier") && strings.TrimSpace(record.Tier) != "" {
+	if cfg.Fields.Allows("tier") && record.HasField("tier") && strings.TrimSpace(record.Tier) != "" {
 		tier, err := ssm.ParseParameterTier(record.Tier)
 		if err != nil {
 			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
 		}
 		opts.Tier = tier
 	}
-	if fieldAllowed(cfg.Fields, "data-type") && recordHasField(record, "data-type") && strings.TrimSpace(record.DataType) != "" {
+	if cfg.Fields.Allows("data-type") && record.HasField("data-type") && strings.TrimSpace(record.DataType) != "" {
 		dataType, err := ssm.ParseParameterDataType(record.DataType)
 		if err != nil {
 			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
 		}
 		opts.DataType = dataType
 	}
-	if fieldAllowed(cfg.Fields, "description") && recordHasField(record, "description") && strings.TrimSpace(record.Description) != "" {
+	if cfg.Fields.Allows("description") && record.HasField("description") && strings.TrimSpace(record.Description) != "" {
 		opts.Description = record.Description
 	}
-	if fieldAllowed(cfg.Fields, "policies") && recordHasField(record, "policies") {
+	if cfg.Fields.Allows("policies") && record.HasField("policies") {
 		if strings.TrimSpace(record.Policies) == "" {
 			opts.Policies = "[{}]"
 			opts.PoliciesSet = true

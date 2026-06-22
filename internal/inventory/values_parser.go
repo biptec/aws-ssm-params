@@ -9,65 +9,67 @@ type yamlLine struct {
 	text   string
 }
 
+type yamlLines []yamlLine
+
 // parseValues converts the small subset of YAML used by app values files into valuesData.
 func parseValues(text string) valuesData {
 	lines := parseYAMLLines(text)
 	values := valuesData{Components: map[string]componentData{}}
 
-	if app := topBlock(lines, "app"); len(app) > 0 {
-		values.AppName = directValue(app, 2, "name")
+	if app := lines.topBlock("app"); len(app) > 0 {
+		values.AppName = app.directValue(2, "name")
 	}
-	if global := topBlock(lines, "global"); len(global) > 0 {
-		values.GlobalEnvironment = directValue(global, 2, "environment")
+	if global := lines.topBlock("global"); len(global) > 0 {
+		values.GlobalEnvironment = global.directValue(2, "environment")
 	}
-	if secrets := topBlock(lines, "secrets"); len(secrets) > 0 {
-		values.SecretsEnabled = parseBool(directValue(secrets, 2, "enabled"))
-		values.SecretsProvider = directValue(secrets, 2, "provider")
-		values.SecretsPrefix = directValue(secrets, 2, "prefix")
-		values.SecretsEnvironment = directValue(secrets, 2, "environment")
-		values.SecretsOrg = directValue(secrets, 2, "org")
-		values.SecretsName = directValue(secrets, 2, "name")
-		values.SecretsKeys = directList(secrets, 2, "keys")
+	if secrets := lines.topBlock("secrets"); len(secrets) > 0 {
+		values.SecretsEnabled = parseBool(secrets.directValue(2, "enabled"))
+		values.SecretsProvider = secrets.directValue(2, "provider")
+		values.SecretsPrefix = secrets.directValue(2, "prefix")
+		values.SecretsEnvironment = secrets.directValue(2, "environment")
+		values.SecretsOrg = secrets.directValue(2, "org")
+		values.SecretsName = secrets.directValue(2, "name")
+		values.SecretsKeys = secrets.directList(2, "keys")
 	}
 
-	for name, block := range childBlocks(topBlock(lines, "components"), 2) {
+	for name, block := range lines.topBlock("components").childBlocks(2) {
 		values.Components[name] = parseComponent(block)
 	}
 	return values
 }
 
-func parseComponent(block []yamlLine) componentData {
-	component := componentData{Enabled: parseBool(directValue(block, 4, "enabled"))}
-	ingress := nestedBlock(block, 4, "ingress")
+func parseComponent(block yamlLines) componentData {
+	component := componentData{Enabled: parseBool(block.directValue(4, "enabled"))}
+	ingress := block.nestedBlock(4, "ingress")
 	if len(ingress) == 0 {
 		return component
 	}
-	component.IngressEnabled = parseBool(directValue(ingress, 6, "enabled"))
-	tls := nestedBlock(ingress, 6, "tls")
+	component.IngressEnabled = parseBool(ingress.directValue(6, "enabled"))
+	tls := ingress.nestedBlock(6, "tls")
 	if len(tls) == 0 {
 		return component
 	}
 
-	component.TLSEnabled = parseBool(directValue(tls, 8, "enabled"))
-	component.TLSMode = directValue(tls, 8, "mode")
-	component.TLSSecretName = directValue(tls, 8, "secretName")
+	component.TLSEnabled = parseBool(tls.directValue(8, "enabled"))
+	component.TLSMode = tls.directValue(8, "mode")
+	component.TLSSecretName = tls.directValue(8, "secretName")
 
-	if externalSecret := nestedBlock(tls, 8, "externalSecret"); len(externalSecret) > 0 {
-		component.TLSCertKey = directValue(externalSecret, 10, "certKey")
-		component.TLSKeyKey = directValue(externalSecret, 10, "keyKey")
+	if externalSecret := tls.nestedBlock(8, "externalSecret"); len(externalSecret) > 0 {
+		component.TLSCertKey = externalSecret.directValue(10, "certKey")
+		component.TLSKeyKey = externalSecret.directValue(10, "keyKey")
 	}
-	if backup := nestedBlock(tls, 8, "backupToSsm"); len(backup) > 0 {
-		component.BackupEnabled = parseBool(directValue(backup, 10, "enabled"))
-		component.BackupPrefix = directValue(backup, 10, "prefix")
-		component.BackupEnvironment = directValue(backup, 10, "environment")
-		component.BackupDomain = directValue(backup, 10, "domain")
-		component.BackupDomains = directList(backup, 10, "domains")
+	if backup := tls.nestedBlock(8, "backupToSsm"); len(backup) > 0 {
+		component.BackupEnabled = parseBool(backup.directValue(10, "enabled"))
+		component.BackupPrefix = backup.directValue(10, "prefix")
+		component.BackupEnvironment = backup.directValue(10, "environment")
+		component.BackupDomain = backup.directValue(10, "domain")
+		component.BackupDomains = backup.directList(10, "domains")
 	}
 	return component
 }
 
-func parseYAMLLines(text string) []yamlLine {
-	var lines []yamlLine
+func parseYAMLLines(text string) yamlLines {
+	var lines yamlLines
 	for _, raw := range strings.Split(text, "\n") {
 		line := strings.TrimRight(raw, "\r")
 		trimmed := strings.TrimSpace(line)
@@ -93,38 +95,38 @@ func countIndent(line string) int {
 	return count
 }
 
-func topBlock(lines []yamlLine, key string) []yamlLine {
-	return nestedBlock(lines, 0, key)
+func (lines yamlLines) topBlock(key string) yamlLines {
+	return lines.nestedBlock(0, key)
 }
 
-func nestedBlock(lines []yamlLine, indent int, key string) []yamlLine {
+func (lines yamlLines) nestedBlock(indent int, key string) yamlLines {
 	needle := key + ":"
 	for index, line := range lines {
 		if line.indent != indent || line.text != needle {
 			continue
 		}
-		end := yamlBlockEnd(lines, index+1, indent)
+		end := lines.blockEnd(index+1, indent)
 		return lines[index+1 : end]
 	}
 	return nil
 }
 
-func childBlocks(lines []yamlLine, indent int) map[string][]yamlLine {
-	blocks := map[string][]yamlLine{}
+func (lines yamlLines) childBlocks(indent int) map[string]yamlLines {
+	blocks := map[string]yamlLines{}
 	for index := 0; index < len(lines); index++ {
 		line := lines[index]
 		if line.indent != indent || strings.HasPrefix(line.text, "- ") || !strings.HasSuffix(line.text, ":") {
 			continue
 		}
 		name := strings.TrimSuffix(line.text, ":")
-		end := yamlBlockEnd(lines, index+1, indent)
+		end := lines.blockEnd(index+1, indent)
 		blocks[name] = lines[index+1 : end]
 		index = end - 1
 	}
 	return blocks
 }
 
-func yamlBlockEnd(lines []yamlLine, start, parentIndent int) int {
+func (lines yamlLines) blockEnd(start, parentIndent int) int {
 	end := start
 	for end < len(lines) && lines[end].indent > parentIndent {
 		end++
@@ -132,7 +134,7 @@ func yamlBlockEnd(lines []yamlLine, start, parentIndent int) int {
 	return end
 }
 
-func directValue(lines []yamlLine, indent int, key string) string {
+func (lines yamlLines) directValue(indent int, key string) string {
 	prefix := key + ":"
 	for _, line := range lines {
 		if line.indent == indent && strings.HasPrefix(line.text, prefix) {
@@ -142,7 +144,7 @@ func directValue(lines []yamlLine, indent int, key string) string {
 	return ""
 }
 
-func directList(lines []yamlLine, indent int, key string) []string {
+func (lines yamlLines) directList(indent int, key string) []string {
 	needle := key + ":"
 	for index, line := range lines {
 		if line.indent != indent || line.text != needle {

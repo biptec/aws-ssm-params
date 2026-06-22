@@ -14,7 +14,7 @@ import (
 )
 
 // ExportYAMLMapped writes records as either an array of objects or an object keyed by a selected AWS field.
-func ExportYAMLMapped(w io.Writer, records []Record, mappings []FieldMapping, keyField string) error {
+func ExportYAMLMapped(w io.Writer, records Records, mappings FieldMappings, keyField string) error {
 	if len(mappings) == 0 {
 		mappings = defaultJSONMappings()
 	}
@@ -44,7 +44,7 @@ func ExportYAMLMapped(w io.Writer, records []Record, mappings []FieldMapping, ke
 }
 
 // ImportYAMLMapped reads either YAML array records or a YAML object keyed by key-field.
-func ImportYAMLMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]Record, error) {
+func ImportYAMLMapped(r io.Reader, mappings FieldMappings, keyField string) (Records, error) {
 	if len(mappings) == 0 {
 		mappings = defaultJSONMappings()
 	}
@@ -78,7 +78,7 @@ func ImportYAMLMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		records := make([]Record, 0, len(keys))
+		records := make(Records, 0, len(keys))
 		for _, key := range keys {
 			record := recordFromYAMLObject(keyed[key], mappings)
 			if keyField != "" {
@@ -97,8 +97,8 @@ func ImportYAMLMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]
 	}
 }
 
-func recordsFromYAMLObjects(objects []map[string]any, mappings []FieldMapping, keyField string) []Record {
-	records := make([]Record, 0, len(objects))
+func recordsFromYAMLObjects(objects []map[string]any, mappings FieldMappings, keyField string) Records {
+	records := make(Records, 0, len(objects))
 	for _, object := range objects {
 		record := recordFromYAMLObject(object, mappings)
 		if keyField != "" && record.fieldValue(keyField) == "" {
@@ -109,9 +109,9 @@ func recordsFromYAMLObjects(objects []map[string]any, mappings []FieldMapping, k
 	return records
 }
 
-func recordFromYAMLObject(object map[string]any, mappings []FieldMapping) Record {
+func recordFromYAMLObject(object map[string]any, mappings FieldMappings) Record {
 	record := Record{}
-	fields := make([]string, 0, len(mappings))
+	fields := make(Fields, 0, len(mappings))
 	for _, mapping := range mappings {
 		value, ok := object[mapping.FileName]
 		if !ok {

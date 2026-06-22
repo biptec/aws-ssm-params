@@ -56,8 +56,8 @@ func TestConfigFromCLIParsesRepeatedRegionsFiltersAndFields(t *testing.T) {
 	assert.Equal(t, []string{"path", "value"}, cfg.ShowColumns)
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
-	assert.Equal(t, []string{"name", "value"}, cfg.Fields)
-	assert.Equal(t, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, outputfmt.Fields{"name", "value"}, cfg.Fields)
+	assert.Equal(t, outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	require.Len(t, cfg.FilterGroups, 1)
 	assert.True(t, cfg.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
 }
@@ -77,8 +77,8 @@ func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
 	assert.Equal(t, "eu-north-1", cfg.Region)
 	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
 	assert.True(t, cfg.WithDecryption)
-	assert.Equal(t, []string{"name", "value"}, cfg.Fields)
-	assert.Equal(t, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, outputfmt.Fields{"name", "value"}, cfg.Fields)
+	assert.Equal(t, outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	assert.Equal(t, []string{"path", "value"}, cfg.ShowColumns)
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
@@ -192,13 +192,13 @@ func TestRejectCommaSeparatedFlagArgsIgnoresArgsAfterDoubleDash(t *testing.T) {
 func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a", "name:/app/c"})
 	require.NoError(t, err)
-	records := []outputfmt.Record{
+	records := importRecords{
 		{Path: "/app/a", Value: "a"},
 		{Path: "/app/b", Value: "b"},
 		{Path: "/app/c", Value: "c"},
 	}
 
-	filtered := filterRecordsByGroups(records, groups)
+	filtered := records.filter(groups)
 
 	require.Len(t, filtered, 2)
 	assert.Equal(t, []string{"/app/a", "/app/c"}, []string{filtered[0].Path, filtered[1].Path})
@@ -214,9 +214,9 @@ func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
-	records := []outputfmt.Record{{Path: "DATABASE_URL", Alias: "DATABASE_URL", Value: "postgres://localhost/app"}}
+	records := importRecords{{Path: "DATABASE_URL", Alias: "DATABASE_URL", Value: "postgres://localhost/app"}}
 
-	resolved, err := applyRootPathToRecords(records, "/app/prod/api/")
+	resolved, err := records.withRootPath("/app/prod/api/")
 
 	require.NoError(t, err)
 	records = resolved
@@ -225,9 +225,9 @@ func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
-	records := []outputfmt.Record{{Path: "/explicit/path", Alias: "EXPLICIT_PATH"}}
+	records := importRecords{{Path: "/explicit/path", Alias: "EXPLICIT_PATH"}}
 
-	resolved, err := applyRootPathToRecords(records, "/app/prod")
+	resolved, err := records.withRootPath("/app/prod")
 
 	require.NoError(t, err)
 	records = resolved
@@ -236,18 +236,18 @@ func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsRejectsRelativeNamesWithoutRoot(t *testing.T) {
-	records := []outputfmt.Record{{Path: "DATABASE_URL"}}
+	records := importRecords{{Path: "DATABASE_URL"}}
 
-	_, err := applyRootPathToRecords(records, "")
+	_, err := records.withRootPath("")
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "--root-path")
 }
 
 func TestApplyRootPathToRecordsRejectsRelativeRootPath(t *testing.T) {
-	records := []outputfmt.Record{{Path: "DATABASE_URL"}}
+	records := importRecords{{Path: "DATABASE_URL"}}
 
-	_, err := applyRootPathToRecords(records, "app/prod")
+	_, err := records.withRootPath("app/prod")
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "must start with /")
@@ -324,9 +324,11 @@ func TestValidateKeyFieldOutputFieldsAllowsImplicitAllFields(t *testing.T) {
 }
 
 func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
-	mappings := exportFieldMappings([]string{"name", "value", "type"}, []outputfmt.FieldMapping{{AWSName: "name", FileName: "title"}})
+	mappings := outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}}.
+		WithDefaults().
+		ForFields(outputfmt.Fields{"name", "value", "type"})
 
-	assert.Equal(t, []outputfmt.FieldMapping{
+	assert.Equal(t, outputfmt.FieldMappings{
 		{AWSName: "name", FileName: "title"},
 		{AWSName: "value", FileName: "value"},
 		{AWSName: "type", FileName: "type"},
@@ -336,7 +338,7 @@ func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
 func TestExportRecordFieldsIncludesScalarAndKeyFields(t *testing.T) {
 	fields := exportRecordFields([]string{"value"}, "value", "region")
 
-	assert.Equal(t, []string{"value", "region"}, fields)
+	assert.Equal(t, outputfmt.Fields{"value", "region"}, fields)
 }
 
 func TestSortStatusesForExportUsesMultipleColumns(t *testing.T) {
@@ -346,16 +348,16 @@ func TestSortStatusesForExportUsesMultipleColumns(t *testing.T) {
 		{Item: inventory.Item{Path: "/app/b", Region: "eu-north-1"}, Type: "String", Version: 2},
 	}
 
-	sortStatusesForExport(statuses, []string{"type:asc", "version:desc", "name:asc"})
+	parseExportSortRules([]string{"type:asc", "version:desc", "name:asc"}).sort(statuses)
 
 	assert.Equal(t, []string{"/app/c", "/app/a", "/app/b"}, []string{statuses[0].Item.Path, statuses[1].Item.Path, statuses[2].Item.Path})
 }
 
 func TestIncludeValuesForSortColumnsIncludesDerivedValueFields(t *testing.T) {
-	assert.True(t, includeValuesForSortColumns([]string{"len:desc"}))
-	assert.True(t, includeValuesForSortColumns([]string{"sha256:asc"}))
-	assert.True(t, includeValuesForSortColumns([]string{"value:asc"}))
-	assert.False(t, includeValuesForSortColumns([]string{"name:asc", "type:desc"}))
+	assert.True(t, parseExportSortRules([]string{"len:desc"}).requiresValues())
+	assert.True(t, parseExportSortRules([]string{"sha256:asc"}).requiresValues())
+	assert.True(t, parseExportSortRules([]string{"value:asc"}).requiresValues())
+	assert.False(t, parseExportSortRules([]string{"name:asc", "type:desc"}).requiresValues())
 }
 
 func TestExportFieldsDefaultsToAllFields(t *testing.T) {
@@ -363,7 +365,7 @@ func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 
 	fields := exportFields(Config{})
 
-	assert.Equal(t, []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, fields)
+	assert.Equal(t, outputfmt.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, fields)
 }
 
 func TestExportDefaultFieldsWithKeyFieldStillRequestValues(t *testing.T) {
@@ -372,7 +374,7 @@ func TestExportDefaultFieldsWithKeyFieldStillRequestValues(t *testing.T) {
 
 	assert.Contains(t, recordFields, "name")
 	assert.Contains(t, recordFields, "value")
-	assert.True(t, includeValuesForFields(recordFields))
+	assert.True(t, recordFields.RequiresValues())
 }
 
 func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
@@ -388,7 +390,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 
 	record := exportRecordFromStatus(status, []string{"name", "value"})
 
-	assert.Equal(t, []string{"name", "value"}, record.Fields)
+	assert.Equal(t, outputfmt.Fields{"name", "value"}, record.Fields)
 	assert.Equal(t, "secret", record.Value)
 	assert.Empty(t, record.Region)
 	assert.Empty(t, record.Type)
@@ -400,7 +402,7 @@ func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
-	opts, err := importOptionsForRecord(record, cloud, true, defaults, Config{})
+	opts, err := (importOptionsResolver{defaults: defaults, cfg: Config{}}).forRecord(record, cloud, true)
 
 	require.NoError(t, err)
 	assert.Empty(t, opts.Policies)
@@ -411,7 +413,7 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierAdvanced.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: `[{"Type":"Expiration"}]`}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
-	opts, err := importOptionsForRecord(record, cloud, true, defaults, Config{})
+	opts, err := (importOptionsResolver{defaults: defaults, cfg: Config{}}).forRecord(record, cloud, true)
 
 	require.NoError(t, err)
 	assert.Equal(t, "[{}]", opts.Policies)
@@ -428,7 +430,7 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 	}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "default desc")
 
-	opts, err := importOptionsForRecord(record, ssm.Metadata{}, false, defaults, Config{})
+	opts, err := (importOptionsResolver{defaults: defaults, cfg: Config{}}).forRecord(record, ssm.Metadata{}, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Advanced", opts.Tier.String())
