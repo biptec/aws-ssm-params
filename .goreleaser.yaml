@@ -1,0 +1,71 @@
+version: 2
+
+project_name: aws-ssm-params
+
+dist: dist
+
+builds:
+  - id: aws-ssm-params
+    main: ./cmd/aws-ssm-params
+    binary: aws-ssm-params
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: aws-ssm-params
+    ids:
+      - aws-ssm-params
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
+    wrap_in_directory: "{{ .ProjectName }}-{{ .Tag }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  github:
+    owner: biptec
+    name: aws-ssm-params
+
+homebrew_casks:
+  - name: aws-ssm-params
+    ids:
+      - aws-ssm-params
+    binaries:
+      - aws-ssm-params
+    directory: Casks
+    homepage: "https://github.com/biptec/aws-ssm-params"
+    description: "CLI/TUI for AWS SSM Parameter Store values"
+    license: MIT
+    commit_msg_template: "chore(homebrew): update {{ .ProjectName }} to {{ .Tag }}"
+    repository:
+      owner: biptec
+      name: homebrew-tools
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    caveats: |
+      To get started:
+        aws-ssm-params --help

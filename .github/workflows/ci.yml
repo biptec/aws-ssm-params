@@ -89,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -96,54 +98,24 @@ jobs:
           go-version: '1.26.4'
           cache: true
 
-      - name: Build release artifacts
+      - name: Remove local vendor tree
+        run: rm -rf vendor
+
+      - name: Check Homebrew tap token
         shell: bash
+        env:
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_GITHUB_TOKEN}" ]; then
+            echo "::error::Missing repository secret HOMEBREW_TAP_GITHUB_TOKEN. Create a token with contents write access to biptec/homebrew-tools and save it under this name."
+            exit 1
+          fi
 
-          version="${GITHUB_REF_NAME}"
-          mkdir -p dist release
-
-          targets=(
-            "linux amd64"
-            "linux arm64"
-            "darwin amd64"
-            "darwin arm64"
-            "windows amd64"
-            "windows arm64"
-          )
-
-          for target in "${targets[@]}"; do
-            read -r goos goarch <<< "$target"
-            ext=""
-            if [ "$goos" = "windows" ]; then
-              ext=".exe"
-            fi
-
-            binary="aws-ssm-params${ext}"
-            artifact="aws-ssm-params-${version}-${goos}-${goarch}"
-            build_dir="dist/${artifact}"
-            mkdir -p "$build_dir"
-
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
-              go build -trimpath -ldflags="-s -w" -o "${build_dir}/${binary}" ./cmd/aws-ssm-params
-
-            cp README.md "$build_dir/"
-            if [ -f LICENSE ]; then
-              cp LICENSE "$build_dir/"
-            fi
-
-            if [ "$goos" = "windows" ]; then
-              (cd dist && zip -qr "../release/${artifact}.zip" "${artifact}")
-            else
-              tar -C dist -czf "release/${artifact}.tar.gz" "${artifact}"
-            fi
-          done
-
-          (cd release && sha256sum * > checksums.txt)
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v7
         with:
-          files: release/*
-          generate_release_notes: true
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
