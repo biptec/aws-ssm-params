@@ -7,6 +7,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type tableColumnsComponent struct {
+	model model
+}
+
 type columnName string
 
 const (
@@ -24,14 +28,16 @@ const (
 	columnPath        columnName = "path"
 )
 
-func (m *model) openColumnsPopup() {
+func (component *tableColumnsComponent) openColumnsPopup() {
+	m := &component.model
 	m.columnCursor = 0
 	m.columnsDraft = nil
 	m.pushPopup(popupColumns)
 }
 
 // updateColumns handles the column visibility picker and returns to the screen that opened it.
-func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component tableColumnsComponent) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	cols := m.allowedColumnItems()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -70,7 +76,8 @@ func (m model) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	cols := m.allowedColumnItems()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -112,15 +119,18 @@ func (m model) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // renderColumnsScreen renders the legacy full-screen table-column chooser.
 // The main UI now opens the same content as a popup, but keeping this renderer
 // makes the shortcuts context and focused tests straightforward.
-func (m model) renderColumnsScreen() string {
+func (component tableColumnsComponent) renderColumnsScreen() string {
+	m := component.model
 	return m.renderBox("Columns", m.columnOptionLines(), m.height)
 }
 
-func (m model) renderColumnsPopup() string {
+func (component tableColumnsComponent) renderColumnsPopup() string {
+	m := component.model
 	return m.renderPopupBoxWithActions("Columns", m.columnOptionLines(), "Esc close")
 }
 
-func (m model) columnOptionLines() []string {
+func (component tableColumnsComponent) columnOptionLines() []string {
+	m := component.model
 	cols := m.allowedColumnItems()
 	visible := m.columnsForRendering()
 	lines := make([]string, 0, 2+len(cols))
@@ -148,7 +158,8 @@ func columnItems() []columnName {
 	}
 }
 
-func (m model) columnAllowed(column columnName) bool {
+func (component tableColumnsComponent) columnAllowed(column columnName) bool {
+	m := component.model
 	return m.fieldAllowed(fieldForColumn(column))
 }
 
@@ -183,7 +194,8 @@ func fieldForColumn(column columnName) string {
 	}
 }
 
-func (m model) allowedColumnItems() []columnName {
+func (component tableColumnsComponent) allowedColumnItems() []columnName {
+	m := component.model
 	items := columnItems()
 	out := make([]columnName, 0, len(items))
 	for _, column := range items {
@@ -225,7 +237,8 @@ func columnLabel(c columnName) string {
 	}
 }
 
-func (m model) columnsForRendering() map[columnName]bool {
+func (component tableColumnsComponent) columnsForRendering() map[columnName]bool {
+	m := component.model
 	return m.columns
 }
 

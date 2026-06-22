@@ -7,7 +7,12 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
-func (m model) currentStatus() Status {
+type listStateComponent struct {
+	model model
+}
+
+func (component listStateComponent) currentStatus() Status {
+	m := component.model
 	vis := m.visible()
 	if len(vis) == 0 || m.selected < 0 || m.selected >= len(vis) {
 		return Status{}
@@ -15,15 +20,18 @@ func (m model) currentStatus() Status {
 	return m.statuses[vis[m.selected]]
 }
 
-func (m model) currentItem() inventory.Item {
+func (component listStateComponent) currentItem() inventory.Item {
+	m := component.model
 	return m.currentStatus().Item
 }
 
-func (m model) visible() []int {
+func (component listStateComponent) visible() []int {
+	m := component.model
 	return m.matchesFor(m.effectiveQuery)
 }
 
-func (m model) matchesFor(query string) []int {
+func (component listStateComponent) matchesFor(query string) []int {
+	m := component.model
 	q := strings.ToLower(query)
 	out := []int{}
 	for i := range m.statuses {
@@ -35,7 +43,8 @@ func (m model) matchesFor(query string) []int {
 }
 
 // applySearchQuery updates the search query, validates it against visible rows, and keeps selection in range.
-func (m *model) applySearchQuery(query string) {
+func (component *listStateComponent) applySearchQuery(query string) {
+	m := &component.model
 	m.query = query
 	if query == "" {
 		m.effectiveQuery = ""
@@ -53,7 +62,8 @@ func (m *model) applySearchQuery(query string) {
 	m.ensureSelection()
 }
 
-func (m model) visiblePaths() []string {
+func (component listStateComponent) visiblePaths() []string {
+	m := component.model
 	vis := m.visible()
 	out := make([]string, 0, len(vis))
 	for _, idx := range vis {
@@ -62,7 +72,8 @@ func (m model) visiblePaths() []string {
 	return out
 }
 
-func (m model) visibleItems() []inventory.Item {
+func (component listStateComponent) visibleItems() []inventory.Item {
+	m := component.model
 	vis := m.visible()
 	out := make([]inventory.Item, 0, len(vis))
 	for _, idx := range vis {
@@ -72,7 +83,8 @@ func (m model) visibleItems() []inventory.Item {
 }
 
 // ensureSelection clamps the selected row so it always points at a visible item when possible.
-func (m *model) ensureSelection() {
+func (component *listStateComponent) ensureSelection() {
+	m := &component.model
 	vis := m.visible()
 	if len(vis) == 0 {
 		m.selected = 0
@@ -87,7 +99,8 @@ func (m *model) ensureSelection() {
 }
 
 // move changes the selected row by delta within the currently visible result set.
-func (m *model) move(delta int) {
+func (component *listStateComponent) move(delta int) {
+	m := &component.model
 	vis := m.visible()
 	if len(vis) == 0 {
 		return
@@ -106,7 +119,8 @@ func (m *model) move(delta int) {
 // replaceStatus updates the status list after saving a value.
 // It prefers the exact path+region row so multi-region screens do not replace the wrong regional value;
 // when a wildcard missing row was saved to a concrete region, it replaces that wildcard row as a fallback.
-func (m *model) replaceStatus(path string, st Status) {
+func (component *listStateComponent) replaceStatus(path string, st Status) {
+	m := &component.model
 	fallback := -1
 	for i := range m.statuses {
 		if m.statuses[i].Item.Path != path {
@@ -132,7 +146,8 @@ func (m *model) replaceStatus(path string, st Status) {
 	m.selected = len(m.statuses) - 1
 }
 
-func (m *model) removeItemRows(items []inventory.Item) {
+func (component *listStateComponent) removeItemRows(items []inventory.Item) {
+	m := &component.model
 	targets := map[string]bool{}
 	for _, item := range items {
 		targets[itemKey(item.Region, item.Path)] = true
@@ -148,7 +163,8 @@ func (m *model) removeItemRows(items []inventory.Item) {
 }
 
 // markMissingItem updates the UI after deletion by replacing matching concrete rows with a missing status.
-func (m *model) markMissingItem(item inventory.Item) {
+func (component *listStateComponent) markMissingItem(item inventory.Item) {
+	m := &component.model
 	for i := range m.statuses {
 		if sameItem(m.statuses[i].Item, item) {
 			m.statuses[i] = Status{Item: item, Type: ssm.DefaultParameterType.String()}

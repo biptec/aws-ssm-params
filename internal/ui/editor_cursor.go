@@ -1,148 +1,17 @@
-// Package ui implements the interactive terminal user interface.
 package ui
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/charmbracelet/bubbles/textarea"
 )
 
-func (m model) usesViEditMode() bool {
-	return m.keymapStyle() == keymapVi && isEditableTextField(m.editField)
+type editorCursorComponent struct {
+	model model
 }
 
-func (m model) updateEmacsTextFieldKey(key string) (model, bool) {
-	if m.keymapStyle() != keymapEmacs || !isEditableTextField(m.editField) {
-		return m, false
-	}
-	switch key {
-	case "ctrl+f", "right":
-		m.moveActiveTextCursor(1)
-		return m, true
-	case "ctrl+b", "left":
-		m.moveActiveTextCursor(-1)
-		return m, true
-	case "ctrl+p", "up":
-		m.moveActiveTextLine(-1)
-		return m, true
-	case "ctrl+n", "down":
-		m.moveActiveTextLine(1)
-		return m, true
-	case "ctrl+a", "home":
-		m.activeTextLineStart()
-		return m, true
-	case "ctrl+e", "end":
-		m.activeTextLineEnd()
-		return m, true
-	case "alt+f":
-		m.activeTextWordForward()
-		return m, true
-	case "alt+b":
-		m.activeTextWordBackward()
-		return m, true
-	case "alt+<":
-		m.activeTextStart()
-		return m, true
-	case "alt+>":
-		m.activeTextEnd()
-		return m, true
-	case "ctrl+d":
-		m.activeTextDeleteChar()
-		return m, true
-	case "ctrl+k":
-		m.activeTextDeleteToLineEnd()
-		return m, true
-	case "alt+d":
-		m.activeTextDeleteWordForward()
-		return m, true
-	case "alt+backspace":
-		m.activeTextDeleteWordBackward()
-		return m, true
-	}
-	return m, false
-}
-
-func (m model) updateViTextFieldNormal(key string) (model, bool) {
-	if _, consumed := (&m).handlePendingEditSequence(key); consumed {
-		return m, true
-	}
-	switch key {
-	case "i":
-		m.viInsertMode = true
-		m = m.focusEditField(m.editField)
-		return m, true
-	case "h", "left":
-		m.moveActiveTextCursor(-1)
-		return m, true
-	case "l", "right":
-		m.moveActiveTextCursor(1)
-		return m, true
-	case "j", "down":
-		m.moveActiveTextLine(1)
-		return m, true
-	case "pagedown", "pgdown", "ctrl+f":
-		m.moveActiveMultilinePage(1)
-		return m, true
-	case "pageup", "pgup", "ctrl+b":
-		m.moveActiveMultilinePage(-1)
-		return m, true
-	case "k", "up":
-		m.moveActiveTextLine(-1)
-		return m, true
-	case "0", "home":
-		m.activeTextLineStart()
-		return m, true
-	case "$", "end":
-		m.activeTextLineEnd()
-		return m, true
-	case "w":
-		m.activeTextWordForward()
-		return m, true
-	case "b":
-		m.activeTextWordBackward()
-		return m, true
-	case "G":
-		m.activeTextEnd()
-		return m, true
-	case "g":
-		m.pendingKeySequence = "g"
-		return m, true
-	case "d":
-		m.pendingKeySequence = "d"
-		return m, true
-	case "D":
-		m.activeTextDeleteToLineEnd()
-		return m, true
-	case "x":
-		m.activeTextDeleteChar()
-		return m, true
-	}
-	return m, false
-}
-
-func (m *model) handlePendingEditSequence(key string) (handled, consumed bool) {
-	if m.pendingKeySequence == "" {
-		return false, false
-	}
-	pending := m.pendingKeySequence
-	m.pendingKeySequence = ""
-	switch pending + key {
-	case "gg":
-		m.activeTextStart()
-		return true, true
-	case "dw":
-		m.activeTextDeleteWordForward()
-		return true, true
-	case "db":
-		m.activeTextDeleteWordBackward()
-		return true, true
-	default:
-		return false, true
-	}
-}
-
-func (m *model) moveActiveTextCursor(delta int) {
+func (component *editorCursorComponent) moveActiveTextCursor(delta int) {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -158,7 +27,8 @@ func (m *model) moveActiveTextCursor(delta int) {
 	}
 }
 
-func (m *model) moveActiveTextLine(delta int) {
+func (component *editorCursorComponent) moveActiveTextLine(delta int) {
+	m := &component.model
 	if !isMultilineEditField(m.editField) {
 		return
 	}
@@ -174,7 +44,8 @@ func (m *model) moveActiveTextLine(delta int) {
 	}
 }
 
-func (m *model) moveActiveWrappedLine(delta int) {
+func (component *editorCursorComponent) moveActiveWrappedLine(delta int) {
+	m := &component.model
 	value := m.activeTextValue()
 	width := m.multilineContentWidth()
 	lines, segments := multilineVisualSegments(value, width)
@@ -192,7 +63,8 @@ func (m *model) moveActiveWrappedLine(delta int) {
 	m.setActiveTextCursorAbs(multilineAbsPosition(lines, targetSegment.logical, newOffset))
 }
 
-func (m *model) activeTextCursorLineOffset() (line, offset int) {
+func (component *editorCursorComponent) activeTextCursorLineOffset() (line, offset int) {
+	m := &component.model
 	switch m.editField {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return 0, 0
@@ -234,7 +106,8 @@ func multilineAbsPosition(lines []string, line, offset int) int {
 	return abs + offset
 }
 
-func (m *model) activeTextLineStart() {
+func (component *editorCursorComponent) activeTextLineStart() {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -250,7 +123,8 @@ func (m *model) activeTextLineStart() {
 	}
 }
 
-func (m *model) activeTextLineEnd() {
+func (component *editorCursorComponent) activeTextLineEnd() {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -266,20 +140,30 @@ func (m *model) activeTextLineEnd() {
 	}
 }
 
-func (m *model) activeTextStart() { m.setActiveTextCursorAbs(0) }
-func (m *model) activeTextEnd()   { m.setActiveTextCursorAbs(len([]rune(m.activeTextValue()))) }
+func (component *editorCursorComponent) activeTextStart() {
+	m := &component.model
+	m.setActiveTextCursorAbs(0)
+}
 
-func (m *model) activeTextWordForward() {
+func (component *editorCursorComponent) activeTextEnd() {
+	m := &component.model
+	m.setActiveTextCursorAbs(len([]rune(m.activeTextValue())))
+}
+
+func (component *editorCursorComponent) activeTextWordForward() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	m.setActiveTextCursorAbs(wordForwardIndex(value, m.activeTextCursorAbs()))
 }
 
-func (m *model) activeTextWordBackward() {
+func (component *editorCursorComponent) activeTextWordBackward() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	m.setActiveTextCursorAbs(wordBackwardIndex(value, m.activeTextCursorAbs()))
 }
 
-func (m *model) activeTextDeleteChar() {
+func (component *editorCursorComponent) activeTextDeleteChar() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	pos := m.activeTextCursorAbs()
 	if pos < 0 || pos >= len(value) {
@@ -289,7 +173,8 @@ func (m *model) activeTextDeleteChar() {
 	m.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (m *model) activeTextDeleteToLineEnd() {
+func (component *editorCursorComponent) activeTextDeleteToLineEnd() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	pos := m.activeTextCursorAbs()
 	if pos < 0 || pos > len(value) {
@@ -309,7 +194,8 @@ func (m *model) activeTextDeleteToLineEnd() {
 	m.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (m *model) activeTextDeleteWordForward() {
+func (component *editorCursorComponent) activeTextDeleteWordForward() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	pos := m.activeTextCursorAbs()
 	end := wordForwardIndex(value, pos)
@@ -323,7 +209,8 @@ func (m *model) activeTextDeleteWordForward() {
 	m.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (m *model) activeTextDeleteWordBackward() {
+func (component *editorCursorComponent) activeTextDeleteWordBackward() {
+	m := &component.model
 	value := []rune(m.activeTextValue())
 	pos := m.activeTextCursorAbs()
 	start := wordBackwardIndex(value, pos)
@@ -334,7 +221,8 @@ func (m *model) activeTextDeleteWordBackward() {
 	m.setActiveTextValueAndCursor(string(value), start)
 }
 
-func (m *model) activeTextValue() string {
+func (component *editorCursorComponent) activeTextValue() string {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 		return ""
@@ -353,7 +241,8 @@ func (m *model) activeTextValue() string {
 	}
 }
 
-func (m *model) activeTextCursorAbs() int {
+func (component *editorCursorComponent) activeTextCursorAbs() int {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 		return 0
@@ -372,7 +261,8 @@ func (m *model) activeTextCursorAbs() int {
 	}
 }
 
-func (m *model) setActiveTextCursorAbs(pos int) {
+func (component *editorCursorComponent) setActiveTextCursorAbs(pos int) {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -388,7 +278,8 @@ func (m *model) setActiveTextCursorAbs(pos int) {
 	}
 }
 
-func (m *model) setActiveTextValueAndCursor(value string, pos int) {
+func (component *editorCursorComponent) setActiveTextValueAndCursor(value string, pos int) {
+	m := &component.model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -409,15 +300,18 @@ func (m *model) setActiveTextValueAndCursor(value string, pos int) {
 	}
 }
 
-func (m *model) textAreaCursorAbs() int {
+func (component *editorCursorComponent) textAreaCursorAbs() int {
+	m := &component.model
 	return textAreaCursorAbs(m.textArea)
 }
 
-func (m *model) descriptionAreaCursorAbs() int {
+func (component *editorCursorComponent) descriptionAreaCursorAbs() int {
+	m := &component.model
 	return textAreaCursorAbs(m.editDescriptionArea)
 }
 
-func (m *model) policiesAreaCursorAbs() int {
+func (component *editorCursorComponent) policiesAreaCursorAbs() int {
+	m := &component.model
 	return textAreaCursorAbs(m.editPoliciesArea)
 }
 
@@ -438,15 +332,18 @@ func textAreaCursorAbs(area interface {
 	return abs + col
 }
 
-func (m *model) setTextAreaCursorAbs(pos int) {
+func (component *editorCursorComponent) setTextAreaCursorAbs(pos int) {
+	m := &component.model
 	setTextAreaAbsPosition(&m.textArea, pos)
 }
 
-func (m *model) setDescriptionAreaCursorAbs(pos int) {
+func (component *editorCursorComponent) setDescriptionAreaCursorAbs(pos int) {
+	m := &component.model
 	setTextAreaAbsPosition(&m.editDescriptionArea, pos)
 }
 
-func (m *model) setPoliciesAreaCursorAbs(pos int) {
+func (component *editorCursorComponent) setPoliciesAreaCursorAbs(pos int) {
+	m := &component.model
 	setTextAreaAbsPosition(&m.editPoliciesArea, pos)
 }
 
@@ -481,33 +378,4 @@ func setTextAreaAbsPosition(area *textarea.Model, pos int) {
 		}
 	}
 	area.SetCursor(targetOffset)
-}
-
-func wordForwardIndex(value []rune, pos int) int {
-	pos = min(max(0, pos), len(value))
-	for pos < len(value) && !unicode.IsSpace(value[pos]) {
-		pos++
-	}
-	for pos < len(value) && unicode.IsSpace(value[pos]) {
-		pos++
-	}
-	return pos
-}
-
-func wordBackwardIndex(value []rune, pos int) int {
-	pos = min(max(0, pos), len(value))
-	for pos > 0 && unicode.IsSpace(value[pos-1]) {
-		pos--
-	}
-	for pos > 0 && !unicode.IsSpace(value[pos-1]) {
-		pos--
-	}
-	return pos
-}
-
-func absInt(value int) int {
-	if value < 0 {
-		return -value
-	}
-	return value
 }

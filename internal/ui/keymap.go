@@ -1,5 +1,9 @@
 package ui
 
+type keymapComponent struct {
+	model model
+}
+
 type keymapStyle string
 
 const (
@@ -30,11 +34,13 @@ func normalizeKeymapStyle(value string) keymapStyle {
 	}
 }
 
-func (m model) keymapStyle() keymapStyle {
+func (component keymapComponent) keymapStyle() keymapStyle {
+	m := component.model
 	return normalizeKeymapStyle(m.opts.Keymap)
 }
 
-func (m model) navigationAction(key string) (navigationAction, bool) {
+func (component keymapComponent) navigationAction(key string) (navigationAction, bool) {
+	m := component.model
 	switch key {
 	case "up", "shift+tab":
 		return navPrevious, true
@@ -79,7 +85,8 @@ func (m model) navigationAction(key string) (navigationAction, bool) {
 	return navNone, false
 }
 
-func (m model) editorNavigationAction(key string) (navigationAction, bool) {
+func (component keymapComponent) editorNavigationAction(key string) (navigationAction, bool) {
+	m := component.model
 	action, ok := m.navigationAction(key)
 	if !ok {
 		return navNone, false
@@ -93,7 +100,8 @@ func (m model) editorNavigationAction(key string) (navigationAction, bool) {
 	return action, true
 }
 
-func (m model) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
+func (component keymapComponent) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
+	m := component.model
 	if m.pendingKeySequence == "" {
 		return navNone, false, false
 	}

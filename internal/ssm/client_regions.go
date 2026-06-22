@@ -7,50 +7,13 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/aws/aws-sdk-go-v2/service/sts"
 	crerr "github.com/cockroachdb/errors"
 )
-
-// CheckAccess validates credentials/profile by calling STS GetCallerIdentity.
-// It fails early before the UI starts so users do not wait through partial scans with broken credentials.
-func (c *AWSClient) CheckAccess(ctx context.Context) error {
-	operation := "sts.GetCallerIdentity"
-	c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region))
-	if _, err := c.sts(ctx).GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{}); err != nil {
-		return crerr.Wrap(c.logAPIError(ctx, operation, err), "cannot access AWS with current credentials/profile")
-	}
-	c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region))
-	return nil
-}
-
-// ListRegions returns AWS regions that are available for scanning.
-// Regions with OptInStatus=not-opted-in are excluded because SSM calls there would fail for the account.
-func (c *AWSClient) ListRegions(ctx context.Context) ([]string, error) {
-	operation := "ec2.DescribeRegions"
-	c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region), slog.Bool("all_regions", true))
-	out, err := c.region(ctx).DescribeRegions(ctx, c)
-	if err != nil {
-		return nil, c.logAPIError(ctx, operation, err)
-	}
-	regions := make([]string, 0, len(out))
-	for _, region := range out {
-		if region.Name == "" || region.OptInStatus == "not-opted-in" {
-			continue
-		}
-		regions = append(regions, region.Name)
-	}
-	sort.Strings(regions)
-	c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region), slog.Int("count", len(regions)))
-	c.logDebug(ctx, "aws api response", slog.String("operation", operation), slog.String("region", c.Region), slog.Any("regions", regions))
-	return regions, nil
-}
 
 type signedEC2RegionAPI struct{}
 

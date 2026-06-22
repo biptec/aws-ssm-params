@@ -8,6 +8,10 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/natural"
 )
 
+type tableSortComponent struct {
+	model model
+}
+
 type sortRule struct {
 	column     columnName
 	descending bool
@@ -86,7 +90,8 @@ func sortItems() []sortItem {
 	}
 }
 
-func (m model) popupSortItems() []sortItem {
+func (component tableSortComponent) popupSortItems() []sortItem {
+	m := component.model
 	visible := map[columnName]bool{columnPath: true}
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -102,7 +107,8 @@ func (m model) popupSortItems() []sortItem {
 	return items
 }
 
-func (m model) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
+func (component tableSortComponent) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
+	m := component.model
 	for _, item := range m.popupSortItems() {
 		if item.hotkey == key {
 			return item.column, true
@@ -111,7 +117,8 @@ func (m model) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
 	return "", false
 }
 
-func (m model) visibleSortItems() []sortItem {
+func (component tableSortComponent) visibleSortItems() []sortItem {
+	m := component.model
 	cols := []columnName{columnPath}
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -133,7 +140,8 @@ func (m model) visibleSortItems() []sortItem {
 	return items
 }
 
-func (m model) visibleSortColumnByHotkey(key string) (columnName, bool) {
+func (component tableSortComponent) visibleSortColumnByHotkey(key string) (columnName, bool) {
+	m := component.model
 	for _, item := range m.visibleSortItems() {
 		if item.hotkey == key {
 			return item.column, true
@@ -142,7 +150,8 @@ func (m model) visibleSortColumnByHotkey(key string) (columnName, bool) {
 	return "", false
 }
 
-func (m model) sortCursorForCurrentSort() int {
+func (component tableSortComponent) sortCursorForCurrentSort() int {
+	m := component.model
 	items := m.popupSortItems()
 	primary, _ := primarySortRule(m.sortRules)
 	for i, item := range items {
@@ -189,14 +198,16 @@ func withSortRule(rules []sortRule, column columnName, descending bool) []sortRu
 	return updated
 }
 
-func (m model) sortRulesOrDefault() []sortRule {
+func (component tableSortComponent) sortRulesOrDefault() []sortRule {
+	m := component.model
 	if len(m.sortRules) == 0 {
 		return []sortRule{{column: columnPath}}
 	}
 	return m.sortRules
 }
 
-func (m *model) setSortRules(rules []sortRule) {
+func (component *tableSortComponent) setSortRules(rules []sortRule) {
+	m := &component.model
 	if len(rules) == 0 {
 		rules = []sortRule{{column: columnPath}}
 	}
@@ -204,7 +215,8 @@ func (m *model) setSortRules(rules []sortRule) {
 	m.sortBy, m.sortDescending = primarySortRule(m.sortRules)
 }
 
-func (m *model) applySort(column columnName) {
+func (component *tableSortComponent) applySort(column columnName) {
+	m := &component.model
 	if column == "" {
 		return
 	}
@@ -215,7 +227,8 @@ func (m *model) applySort(column columnName) {
 	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
 }
 
-func (m *model) toggleSortColumn(column columnName) {
+func (component *tableSortComponent) toggleSortColumn(column columnName) {
+	m := &component.model
 	if column == "" {
 		return
 	}
@@ -228,7 +241,8 @@ func (m *model) toggleSortColumn(column columnName) {
 	m.applySortWithRules(rules)
 }
 
-func (m *model) toggleSortDirection(column columnName) {
+func (component *tableSortComponent) toggleSortDirection(column columnName) {
+	m := &component.model
 	if column == "" {
 		return
 	}
@@ -242,14 +256,16 @@ func (m *model) toggleSortDirection(column columnName) {
 	m.applySortWithRules(rules)
 }
 
-func (m *model) applySortWithDirection(column columnName, descending bool) {
+func (component *tableSortComponent) applySortWithDirection(column columnName, descending bool) {
+	m := &component.model
 	if column == "" {
 		return
 	}
 	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
 }
 
-func (m *model) applySortWithRules(rules []sortRule) {
+func (component *tableSortComponent) applySortWithRules(rules []sortRule) {
+	m := &component.model
 	var selectedKey string
 	if len(m.visible()) > 0 && m.selected < len(m.visible()) {
 		st := m.statuses[m.visible()[m.selected]]
@@ -287,7 +303,8 @@ func (m *model) applySortWithRules(rules []sortRule) {
 	m.ensureSelection()
 }
 
-func (m model) columnHeader(c columnName) string {
+func (component tableSortComponent) columnHeader(c columnName) string {
+	m := component.model
 	if c == columnIndex {
 		return "#"
 	}
@@ -305,7 +322,8 @@ func sortDirectionArrow(descending bool) string {
 	return "↑"
 }
 
-func (m model) sortPopupLabel(item sortItem) string {
+func (component tableSortComponent) sortPopupLabel(item sortItem) string {
+	m := component.model
 	if rule, ok := sortRuleForColumn(m.sortRules, item.column); ok {
 		return item.label + " " + sortDirectionArrow(rule.descending)
 	}

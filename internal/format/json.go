@@ -54,62 +54,6 @@ type jsonRecord struct {
 	User        string `json:"user,omitempty"`
 }
 
-func (r Record) exportJSONRecord() exportJSONRecord {
-	out := exportJSONRecord{}
-	if r.includesField("region") {
-		out.Region = r.Region
-	}
-	if r.includesField("type") {
-		out.Type = r.Type
-	}
-	if r.includesField("tier") {
-		out.Tier = r.Tier
-	}
-	if r.includesField("data-type") {
-		out.DataType = r.DataType
-	}
-	if r.includesField("policies") {
-		out.Policies = r.Policies
-	}
-	if r.includesField("description") {
-		out.Description = r.Description
-	}
-	if r.includesField("value") {
-		value := r.Value
-		out.Value = &value
-	}
-	if r.includesField("date") {
-		out.Date = r.Date
-	}
-	if r.includesField("version") {
-		version := r.Version
-		out.Version = &version
-	}
-	if r.includesField("len") {
-		length := r.Len
-		out.Len = &length
-	}
-	if r.includesField("sha256") {
-		out.SHA256 = r.SHA256
-	}
-	if r.includesField("user") {
-		out.User = r.User
-	}
-	return out
-}
-
-func (r Record) includesField(field string) bool {
-	if len(r.Fields) == 0 {
-		return true
-	}
-	for _, candidate := range r.Fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return false
-}
-
 // ImportJSON parses either legacy path-to-value JSON or typed path-to-object JSON and returns records sorted by path.
 // Sorting makes imports deterministic and keeps progress output stable across runs.
 func ImportJSON(r io.Reader) ([]Record, error) {

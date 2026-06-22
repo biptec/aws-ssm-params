@@ -18,7 +18,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *model) openFileWriteConfirmation(kind fileWriteConfirmation) {
+type editorIOComponent struct {
+	model model
+}
+
+func (component *editorIOComponent) openFileWriteConfirmation(kind fileWriteConfirmation) {
+	m := &component.model
 	m.pendingFileWrite = kind
 	m.warningMessage = ""
 	if m.activePopup == popupFileWriteConfirm {
@@ -31,7 +36,8 @@ func (m *model) openFileWriteConfirmation(kind fileWriteConfirmation) {
 }
 
 // loadValueFromFile reads the path from the edit screen and replaces the active file-action field with that file content.
-func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
+func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
+	m := component.model
 	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
 		m.errMessage = "File path is required."
@@ -69,7 +75,8 @@ func (m model) loadValueFromFile() (tea.Model, tea.Cmd) {
 
 // writeValueToFile writes the current active file-action field to the path from the edit screen.
 // SecureString value writes and overwrite operations require explicit y confirmation to reduce accidental local writes.
-func (m model) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.Model, tea.Cmd) {
+func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.Model, tea.Cmd) {
+	m := component.model
 	path := strings.TrimSpace(m.editFileInput.Value())
 	if path == "" {
 		m.errMessage = "File path is required."
@@ -125,7 +132,8 @@ func (m model) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.M
 	return m, nil
 }
 
-func (m model) fileActionContents() string {
+func (component editorIOComponent) fileActionContents() string {
+	m := component.model
 	if m.fileActionField == editFieldPolicies {
 		return m.editPoliciesArea.Value()
 	}
@@ -133,7 +141,8 @@ func (m model) fileActionContents() string {
 }
 
 // startConfirm initializes a confirmation screen for one or more items.
-func (m *model) startConfirm(prompt, expected string, items []inventory.Item, ret screen) {
+func (component *editorIOComponent) startConfirm(prompt, expected string, items []inventory.Item, ret screen) {
+	m := &component.model
 	m.confirmPrompt = prompt
 	m.confirmExpected = expected
 	m.confirmItems = items
@@ -145,7 +154,8 @@ func (m *model) startConfirm(prompt, expected string, items []inventory.Item, re
 	m.pushPopup(popupConfirm)
 }
 
-func (m model) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
+func (component editorIOComponent) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
+	m := component.model
 	if kind == "base64-custom" {
 		m.fileActionMode = "random-custom"
 		m.input.SetValue("32")
@@ -157,7 +167,8 @@ func (m model) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
 	return m.generateRandomValueIntoEditor(kind)
 }
 
-func (m model) generateRandomValueIntoEditor(kind string) (tea.Model, tea.Cmd) {
+func (component editorIOComponent) generateRandomValueIntoEditor(kind string) (tea.Model, tea.Cmd) {
+	m := component.model
 	value, err := m.randomValue(kind)
 	if err != nil {
 		m.errMessage = err.Error()
@@ -173,7 +184,8 @@ func (m model) generateRandomValueIntoEditor(kind string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) randomValue(kind string) (string, error) {
+func (component editorIOComponent) randomValue(kind string) (string, error) {
+	m := component.model
 	switch kind {
 	case "base64-32":
 		value, err := randomx.Base64(32)
@@ -197,7 +209,8 @@ func (m model) randomValue(kind string) (string, error) {
 }
 
 // saveValue captures the current item/region and switches to the loading screen while the save command runs.
-func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
+func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) {
+	m := component.model
 	item := m.currentItem()
 	oldPath := item.Path
 	if m.screen == screenTextArea {

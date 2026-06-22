@@ -7,8 +7,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type editorStateComponent struct {
+	model model
+}
+
 // startMultiline opens the selected parameter value in the multiline editor.
-func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startMultiline(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.returnScreen = ret
 	m.editRegion = m.initialEditRegion()
 	m.editType = m.initialEditType()
@@ -44,7 +49,8 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 }
 
 // startNewParameter opens the editor with empty fields so users can create a parameter without a names file.
-func (m model) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.returnScreen = ret
 	m.editRegion = m.initialEditRegion()
 	m.editType = ssm.DefaultParameterType
@@ -78,7 +84,8 @@ func (m model) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
 }
 
 // focusEditField moves the edit-screen focus to one field and focuses/blurs the underlying input widgets.
-func (m model) focusEditField(field editField) model {
+func (component editorStateComponent) focusEditField(field editField) model {
+	m := component.model
 	if !m.editFieldAllowed(field) || (field == editFieldPolicies && !m.shouldShowPoliciesField()) || (field == editFieldOverwrite && !m.shouldShowOverwriteField()) {
 		fields := m.editFieldOrder()
 		if len(fields) == 0 {
@@ -110,7 +117,8 @@ func (m model) focusEditField(field editField) model {
 }
 
 // blurEditFields removes focus from all concrete input widgets used by the edit screen.
-func (m *model) blurEditFields() {
+func (component *editorStateComponent) blurEditFields() {
+	m := &component.model
 	m.textArea.Blur()
 	m.editPoliciesArea.Blur()
 	m.editDescriptionArea.Blur()
@@ -119,7 +127,8 @@ func (m *model) blurEditFields() {
 	m.editFileInput.Blur()
 }
 
-func (m model) requestEditorBack() (tea.Model, tea.Cmd) {
+func (component editorStateComponent) requestEditorBack() (tea.Model, tea.Cmd) {
+	m := component.model
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
 	if m.editorHasUnsavedChanges() {
@@ -130,7 +139,8 @@ func (m model) requestEditorBack() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *model) discardEditorChanges() {
+func (component *editorStateComponent) discardEditorChanges() {
+	m := &component.model
 	m.blurEditFields()
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
@@ -138,14 +148,16 @@ func (m *model) discardEditorChanges() {
 	m.screen = m.returnScreen
 }
 
-func (m model) editorHasUnsavedChanges() bool {
+func (component editorStateComponent) editorHasUnsavedChanges() bool {
+	m := component.model
 	if m.editInitialSnapshot == (editSnapshot{}) {
 		return false
 	}
 	return m.currentEditSnapshot() != m.editInitialSnapshot
 }
 
-func (m model) currentEditSnapshot() editSnapshot {
+func (component editorStateComponent) currentEditSnapshot() editSnapshot {
+	m := component.model
 	return editSnapshot{
 		name:          m.editPathInput.Value(),
 		region:        m.editRegion,
@@ -161,22 +173,26 @@ func (m model) currentEditSnapshot() editSnapshot {
 }
 
 // focusNextEditField advances the edit-screen focus in the visual field order.
-func (m model) focusNextEditField() (tea.Model, tea.Cmd) {
+func (component editorStateComponent) focusNextEditField() (tea.Model, tea.Cmd) {
+	m := component.model
 	return m.moveToEditField(m.nextEditField(), editDirectionNext)
 }
 
 // focusPreviousEditField moves the edit-screen focus backwards in the visual field order.
-func (m model) focusPreviousEditField() (tea.Model, tea.Cmd) {
+func (component editorStateComponent) focusPreviousEditField() (tea.Model, tea.Cmd) {
+	m := component.model
 	return m.moveToEditField(m.previousEditField(), editDirectionPrevious)
 }
 
 // moveToEditField moves focus through all edit fields without opening selector screens automatically.
-func (m model) moveToEditField(field editField, direction editDirection) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) moveToEditField(field editField, direction editDirection) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.editDirection = direction
 	return m.focusEditField(field), nil
 }
 
-func (m model) editFieldOrder() []editField {
+func (component editorStateComponent) editFieldOrder() []editField {
+	m := component.model
 	candidates := []editField{editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType}
 	if m.shouldShowOverwriteField() {
 		candidates = append(candidates, editFieldOverwrite)
@@ -198,19 +214,22 @@ func (m model) editFieldOrder() []editField {
 	return fields
 }
 
-func (m model) hasVisibleFieldAfter(field editField) bool {
+func (component editorStateComponent) hasVisibleFieldAfter(field editField) bool {
+	m := component.model
 	fields := m.editFieldOrder()
 	idx := indexOfEditField(fields, field)
 	return idx >= 0 && idx < len(fields)-1
 }
 
-func (m model) nextEditField() editField {
+func (component editorStateComponent) nextEditField() editField {
+	m := component.model
 	fields := m.editFieldOrder()
 	idx := indexOfEditField(fields, m.editField)
 	return fields[nextCursor(idx, len(fields))]
 }
 
-func (m model) previousEditField() editField {
+func (component editorStateComponent) previousEditField() editField {
+	m := component.model
 	fields := m.editFieldOrder()
 	idx := indexOfEditField(fields, m.editField)
 	return fields[previousCursor(idx, len(fields))]
@@ -226,7 +245,8 @@ func indexOfEditField(fields []editField, field editField) int {
 }
 
 // openRegionSelect loads all enabled AWS regions on first use, then opens the region selector.
-func (m model) openRegionSelect() (tea.Model, tea.Cmd) {
+func (component editorStateComponent) openRegionSelect() (tea.Model, tea.Cmd) {
+	m := component.model
 	m = m.ensureRegionSelectOptions()
 	regions := m.regionSelectOptions()
 	if len(regions) == 0 {
@@ -238,7 +258,8 @@ func (m model) openRegionSelect() (tea.Model, tea.Cmd) {
 }
 
 // ensureRegionSelectOptions lazily asks AWS for the full enabled-region list so saving is not limited to startup regions.
-func (m model) ensureRegionSelectOptions() model {
+func (component editorStateComponent) ensureRegionSelectOptions() model {
+	m := component.model
 	if len(m.editRegionOptions) > 0 || m.client == nil {
 		return m
 	}
@@ -253,7 +274,8 @@ func (m model) ensureRegionSelectOptions() model {
 	return m
 }
 
-func (m model) regionSelectOptions() []string {
+func (component editorStateComponent) regionSelectOptions() []string {
+	m := component.model
 	var regions []string
 	if len(m.editRegionOptions) > 0 {
 		regions = append([]string(nil), m.editRegionOptions...)
@@ -265,28 +287,32 @@ func (m model) regionSelectOptions() []string {
 }
 
 // startTypeSelect opens the type picker and remembers which editor/preview screen should be restored afterwards.
-func (m model) startTypeSelect(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startTypeSelect(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.typeReturnScreen = ret
 	m.typeCursor = indexOfParameterType(parameterTypeItems(), m.normalizedEditType())
 	m.pushPopup(popupTypeSelect)
 	return m, nil
 }
 
-func (m model) startTierSelect(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startTierSelect(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.typeReturnScreen = ret
 	m.tierCursor = indexOfParameterTier(parameterTierItems(), m.normalizedEditTier())
 	m.pushPopup(popupTierSelect)
 	return m, nil
 }
 
-func (m model) startDataTypeSelect(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startDataTypeSelect(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	m.typeReturnScreen = ret
 	m.dataTypeCursor = indexOfParameterDataType(parameterDataTypeItems(), m.normalizedEditDataType())
 	m.pushPopup(popupDataTypeSelect)
 	return m, nil
 }
 
-func (m model) startOverwriteSelect(ret screen) (tea.Model, tea.Cmd) {
+func (component editorStateComponent) startOverwriteSelect(ret screen) (tea.Model, tea.Cmd) {
+	m := component.model
 	if !m.shouldShowOverwriteField() {
 		return m.focusEditField(editFieldDescription), nil
 	}

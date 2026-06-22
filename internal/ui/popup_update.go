@@ -2,87 +2,17 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type popupKind int
-
-const (
-	popupNone popupKind = iota
-	popupColumns
-	popupShortcuts
-	popupConfirm
-	popupSort
-	popupRegionSelect
-	popupTypeSelect
-	popupTierSelect
-	popupDataTypeSelect
-	popupOverwriteSelect
-	popupValueActions
-	popupPoliciesActions
-	popupFileAction
-	popupFileWriteConfirm
-	popupUnsavedChanges
-	popupRandomValue
-)
-
-func (m *model) openShortcuts(from screen) {
-	m.shortcutsFor = from
-	m.shortcutsPopupFor = popupNone
-	m.pushPopup(popupShortcuts)
+type popupUpdateComponent struct {
+	model model
 }
 
-func (m *model) openPopupShortcuts(from screen, popup popupKind) {
-	m.shortcutsFor = from
-	m.shortcutsPopupFor = popup
-	m.pushPopup(popupShortcuts)
-}
-
-func (m *model) pushPopup(kind popupKind) {
-	m.popupStack = nil
-	m.activePopup = kind
-	m.pendingKeySequence = ""
-}
-
-func (m *model) pushNestedPopup(kind popupKind) {
-	m.popupStack = nil
-	if m.activePopup != popupNone {
-		m.popupStack = append(m.popupStack, m.activePopup)
-	}
-	m.activePopup = kind
-	m.pendingKeySequence = ""
-}
-
-func (m *model) popPopup() {
-	if len(m.popupStack) == 0 {
-		m.activePopup = popupNone
-		m.pendingKeySequence = ""
-		return
-	}
-	last := len(m.popupStack) - 1
-	m.activePopup = m.popupStack[last]
-	m.popupStack = m.popupStack[:last]
-	m.pendingKeySequence = ""
-}
-
-func (m *model) clearPopupStack() {
-	m.activePopup = popupNone
-	m.popupStack = nil
-	m.pendingKeySequence = ""
-}
-
-func (m model) popupLayers() []popupKind {
-	layers := append([]popupKind(nil), m.popupStack...)
-	if m.activePopup != popupNone {
-		layers = append(layers, m.activePopup)
-	}
-	return layers
-}
-
-func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := m.popupSortItems()
 	key := msg.String()
 	if key != "d" {
@@ -149,7 +79,8 @@ func cursorFromNavigation(cursor, length int, action navigationAction) int {
 }
 
 // updateConfirm verifies a typed confirmation phrase before running destructive delete operations.
-func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	switch msg.String() {
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenConfirm)
@@ -174,7 +105,8 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateRegionSelect lets users choose the concrete AWS region for saving a wildcard/all-regions parameter.
-func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	regions := m.regionSelectOptions()
 	if len(regions) == 0 {
 		m.screen = screenTextArea
@@ -211,7 +143,8 @@ func (m model) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateTypeSelect lets users choose which AWS SSM parameter type will be used when the current value is saved.
 // Existing parameters start with their current type; missing parameters start as SecureString unless the user changes it.
-func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := parameterTypeItems()
 	if len(items) == 0 {
 		m.screen = m.typeReturnScreen
@@ -251,7 +184,8 @@ func (m model) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // updateHelp closes the legacy shortcuts screen and returns to the screen it documents.
-func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
 		m.screen = m.shortcutsFor
@@ -259,7 +193,8 @@ func (m model) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
 		m.popPopup()
@@ -267,7 +202,8 @@ func (m model) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	key := msg.String()
 	switch key {
 	case "ctrl+_", "ctrl+/":
@@ -297,7 +233,8 @@ func (m model) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	regions := m.regionSelectOptions()
 	if len(regions) == 0 {
 		m.popPopup()
@@ -333,7 +270,8 @@ func (m model) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := parameterTypeItems()
 	if len(items) == 0 {
 		m.popPopup()
@@ -380,7 +318,8 @@ func (m model) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateTierSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := parameterTierItems()
 	if len(items) == 0 {
 		m.popPopup()
@@ -421,7 +360,8 @@ func (m model) updateTierSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateDataTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := parameterDataTypeItems()
 	if len(items) == 0 {
 		m.popPopup()
@@ -462,7 +402,8 @@ func (m model) updateDataTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := overwriteItems()
 	if len(items) == 0 {
 		m.popPopup()
@@ -502,232 +443,3 @@ func (m model) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	return m, nil
 }
-
-func (m model) renderSortPopup() string {
-	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Space toggle   D direction   Esc close")
-}
-
-func (m model) renderValueActionsPopup() string {
-	items := valueActionItems()
-	lines := make([]string, 0, len(items))
-	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
-	}
-	return m.renderPopupBoxWithActions("Value Actions", lines, "Enter select   Esc cancel")
-}
-
-func (m model) renderPoliciesActionsPopup() string {
-	items := policiesActionItems()
-	lines := make([]string, 0, len(items))
-	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
-	}
-	return m.renderPopupBoxWithActions("Policies Actions", lines, "Enter select   Esc cancel")
-}
-
-func (m model) renderFileActionPopup() string {
-	title := "Load from file"
-	if m.fileActionField == editFieldPolicies {
-		title = "Load policies from file"
-	}
-	label := "File path:"
-	inputWidth := 48
-	switch m.fileActionMode {
-	case "write":
-		title = "Write to file"
-		if m.fileActionField == editFieldPolicies {
-			title = "Write policies to file"
-		}
-	case "random-custom":
-		title = "Random Value"
-		label = "Byte length:"
-		inputWidth = 12
-	}
-	button := "load"
-	switch m.fileActionMode {
-	case "write":
-		button = "write"
-	case "random-custom":
-		button = "generate"
-	}
-	lines := []string{m.popupInputLine(label, m.input, inputWidth)}
-	return m.renderPopupBoxWithActions(title, lines, "Enter "+button+"   Esc cancel")
-}
-
-func (m model) renderFileWriteConfirmPopup() string {
-	message := "Confirm file write?"
-	switch m.pendingFileWrite {
-	case fileWriteConfirmationNone:
-	case fileWriteConfirmationSecure:
-		message = "This is a SecureString value. Write it to a local file in plain text?"
-	case fileWriteConfirmationOverwrite:
-		message = "File already exists. Overwrite it?"
-
-	default:
-	}
-	return m.renderPopupBoxWithActions("Confirm", []string{message}, "Enter yes   Esc cancel")
-}
-
-func (m model) renderUnsavedChangesPopup() string {
-	return m.renderPopupBoxWithActions("Confirm", []string{"Unsaved changes. Discard unsaved changes?"}, "Enter discard   Esc cancel")
-}
-
-func (m model) renderRandomValuePopup() string {
-	items := randomItems()
-	lines := make([]string, 0, len(items))
-	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.randomCursor, i == m.randomCursor))
-	}
-	return m.renderPopupBoxWithActions("Random Value", lines, "Enter select   Esc cancel")
-}
-
-func (m model) sortOptionLines() []string {
-	items := m.popupSortItems()
-	lines := make([]string, 0, len(items))
-	if len(items) > 0 && m.sortCursor >= len(items) {
-		m.sortCursor = len(items) - 1
-	}
-	for i, item := range items {
-		_, checked := sortRuleForColumn(m.sortRules, item.column)
-		lines = append(lines, m.multiSelectLine(m.sortPopupLabel(item), checked, i == m.sortCursor))
-	}
-	return lines
-}
-
-// renderConfirmScreen renders the destructive-action confirmation prompt and input field.
-func (m model) renderConfirmScreen() string {
-	confirmLines := strings.Split(m.confirmPrompt, "\n")
-	lines := make([]string, 0, len(confirmLines)+2)
-	for _, line := range confirmLines {
-		lines = append(lines, "  "+line)
-	}
-	lines = append(lines, "", "  > "+m.input.View())
-	return m.renderBox("Confirm", lines, m.height)
-}
-
-func (m model) renderConfirmPopup() string {
-	confirmLines := strings.Split(m.confirmPrompt, "\n")
-	lines := make([]string, 0, len(confirmLines)+2)
-	for _, line := range confirmLines {
-		if strings.TrimSpace(line) == "" {
-			lines = append(lines, "")
-			continue
-		}
-		lines = append(lines, line)
-	}
-	if m.confirmExpected != "" {
-		prefix := "Type " + m.value(m.confirmExpected) + " to confirm: "
-		lines = append(lines, "", m.popupInputLinePlainPrefix(prefix, m.input, max(len(m.confirmExpected)+1, 18)))
-	}
-	return m.renderPopupBoxWithActions("Confirm", lines, "Enter confirm   Esc cancel")
-}
-
-// renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.
-func (m model) renderRegionSelectScreen() string {
-	regions := m.regionSelectOptions()
-	lines := make([]string, 0, 2+len(regions))
-	lines = append(lines, "  "+m.muted("Choose region for saving this value:"), "")
-	for i, region := range regions {
-		row := region
-		if i == m.regionCursor {
-			row = m.selectedMarker() + m.selectedRow(row)
-		} else {
-			row = "  " + row
-		}
-		lines = append(lines, "  "+row)
-	}
-	return m.renderBox("Region", lines, m.height)
-}
-
-func (m model) renderRegionSelectPopup() string {
-	return m.renderPopupBoxWithActions("Region", m.regionSelectLines(), "Enter select   Esc cancel")
-}
-
-func (m model) regionSelectLines() []string {
-	regions := m.regionSelectOptions()
-	lines := make([]string, 0, 2+len(regions))
-	lines = append(lines, m.muted("Choose region for saving this value:"), "")
-	for i, region := range regions {
-		lines = append(lines, m.singleSelectLine(region, i == m.regionCursor, i == m.regionCursor))
-	}
-	return lines
-}
-
-// renderTypeSelectScreen renders the AWS SSM parameter type picker used by value editors.
-func (m model) renderTypeSelectScreen() string {
-	typeItems := parameterTypeItems()
-	lines := make([]string, 0, 2+len(typeItems))
-	lines = append(lines, "  "+m.muted("Choose how this value should be stored in AWS SSM Parameter Store:"), "")
-	for i, it := range typeItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		if i == m.typeCursor {
-			row = m.selectedMarker() + m.selectedRow(row)
-		} else {
-			row = "  " + row
-		}
-		lines = append(lines, "  "+row)
-	}
-	return m.renderBox("Parameter Type", lines, m.height)
-}
-
-func (m model) renderTypeSelectPopup() string {
-	return m.renderPopupBoxWithActions("Parameter Type", m.typeSelectLines(), "Enter select   Esc cancel")
-}
-
-func (m model) renderTierSelectPopup() string {
-	return m.renderPopupBoxWithActions("Parameter Tier", m.tierSelectLines(), "Enter select   Esc cancel")
-}
-
-func (m model) renderDataTypeSelectPopup() string {
-	return m.renderPopupBoxWithActions("Data Type", m.dataTypeSelectLines(), "Enter select   Esc cancel")
-}
-
-func (m model) renderOverwriteSelectPopup() string {
-	return m.renderPopupBoxWithActions("Overwrite", m.overwriteSelectLines(), "Enter select   Esc cancel")
-}
-
-func (m model) typeSelectLines() []string {
-	typeItems := parameterTypeItems()
-	lines := make([]string, 0, 2+len(typeItems))
-	lines = append(lines, m.muted("Choose how this value should be stored in AWS SSM Parameter Store:"), "")
-	for i, it := range typeItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.typeCursor, i == m.typeCursor))
-	}
-	return lines
-}
-
-func (m model) tierSelectLines() []string {
-	tierItems := parameterTierItems()
-	lines := make([]string, 0, 2+len(tierItems))
-	lines = append(lines, m.muted("Choose the AWS SSM storage tier for this parameter:"), "")
-	for i, it := range tierItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.tierCursor, i == m.tierCursor))
-	}
-	return lines
-}
-
-func (m model) dataTypeSelectLines() []string {
-	dataTypeItems := parameterDataTypeItems()
-	lines := make([]string, 0, 2+len(dataTypeItems))
-	lines = append(lines, m.muted("Choose AWS SSM value validation data type:"), "")
-	for i, it := range dataTypeItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.dataTypeCursor, i == m.dataTypeCursor))
-	}
-	return lines
-}
-
-func (m model) overwriteSelectLines() []string {
-	overwriteItems := overwriteItems()
-	lines := make([]string, 0, 2+len(overwriteItems))
-	lines = append(lines, m.muted("Choose whether AWS SSM may overwrite an existing parameter:"), "")
-	for i, it := range overwriteItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.overwriteCursor, i == m.overwriteCursor))
-	}
-	return lines
-}
-
-// renderHelpScreen renders the full shortcut reference.

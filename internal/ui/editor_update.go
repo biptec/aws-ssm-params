@@ -4,8 +4,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type editorUpdateComponent struct {
+	model model
+}
+
 // updateTextArea handles the unified edit form: editable SSM name, region/type selectors, file path, multiline value, and save/file operations.
-func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	resetFileConfirmation := func() {
 		m.pendingFileWrite = fileWriteConfirmationNone
 		m.warningMessage = ""

@@ -4,7 +4,12 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *model) openActionsPopupForFocusedField() bool {
+type editorActionsComponent struct {
+	model model
+}
+
+func (component *editorActionsComponent) openActionsPopupForFocusedField() bool {
+	m := &component.model
 	switch m.editField {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
 		return false
@@ -23,7 +28,8 @@ func (m *model) openActionsPopupForFocusedField() bool {
 	}
 }
 
-func (m model) updateValueActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := valueActionItems()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -87,7 +93,8 @@ func (m model) updateValueActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := policiesActionItems()
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -147,7 +154,8 @@ func (m model) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	key := msg.String()
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
@@ -210,7 +218,8 @@ func (m model) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) updateFileWriteConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updateFileWriteConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	key := msg.String()
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
@@ -253,7 +262,8 @@ func (m model) updateFileWriteConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-func (m model) updateUnsavedChangesPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updateUnsavedChangesPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	switch msg.String() {
 	case "ctrl+_", "ctrl/", "ctrl+/":
 		m.openPopupShortcuts(screenTextArea, popupUnsavedChanges)
@@ -266,7 +276,8 @@ func (m model) updateUnsavedChangesPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) updateRandomValuePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (component editorActionsComponent) updateRandomValuePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
 	items := randomItems()
 	key := msg.String()
 	if kind, ok := randomKindByPopupHotkey(key); ok {

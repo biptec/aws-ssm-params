@@ -10,7 +10,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func (m model) renderTextAreaScreen() string {
+type editorViewComponent struct {
+	model model
+}
+
+func (component editorViewComponent) renderTextAreaScreen() string {
+	m := component.model
 	title := "Edit Parameter"
 	if m.editNewParameter || !m.currentStatus().Exists {
 		title = "New Parameter"
@@ -63,11 +68,13 @@ func (m model) renderTextAreaScreen() string {
 	return m.renderBox(title, lines, preferredHeight)
 }
 
-func (m model) renderTextAreaValueLines(maxRows int) []string {
+func (component editorViewComponent) renderTextAreaValueLines(maxRows int) []string {
+	m := component.model
 	return m.renderMultilineFieldLines(editFieldValue, m.textArea, maxRows)
 }
 
-func (m model) renderExpandableField(field editField, label string, area textarea.Model, labelWidth, maxRows int, hasNext bool) []string {
+func (component editorViewComponent) renderExpandableField(field editField, label string, area textarea.Model, labelWidth, maxRows int, hasNext bool) []string {
+	m := component.model
 	if !m.shouldRenderExpandedField(field, area, labelWidth) {
 		return []string{m.editFieldLine(field, label, m.singleLineAreaView(field, area, labelWidth), labelWidth)}
 	}
@@ -79,19 +86,22 @@ func (m model) renderExpandableField(field editField, label string, area textare
 	return lines
 }
 
-func (m model) shouldRenderExpandedField(field editField, area textarea.Model, labelWidth int) bool {
+func (component editorViewComponent) shouldRenderExpandedField(field editField, area textarea.Model, labelWidth int) bool {
+	m := component.model
 	if m.expandedFields[field] {
 		return true
 	}
 	return !m.canRenderCompactValue(area.Value(), labelWidth)
 }
 
-func (m model) singleLineFieldWidth(labelWidth int) int {
+func (component editorViewComponent) singleLineFieldWidth(labelWidth int) int {
+	m := component.model
 	labelText := padMin("", labelWidth+1)
 	return max(1, m.boxInnerWidth()-lipgloss.Width(labelText)-3)
 }
 
-func (m model) singleLineAreaView(field editField, area textarea.Model, labelWidth int) string {
+func (component editorViewComponent) singleLineAreaView(field editField, area textarea.Model, labelWidth int) string {
+	m := component.model
 	width := m.singleLineFieldWidth(labelWidth)
 	value := strings.ReplaceAll(area.Value(), "\n", " ")
 	focused := m.editField == field && area.Focused()
@@ -102,7 +112,8 @@ func (m model) singleLineAreaView(field editField, area textarea.Model, labelWid
 	return m.value(m.inputValueWithCursor(value, offset, width))
 }
 
-func (m model) expandableFieldValue(field editField) string {
+func (component editorViewComponent) expandableFieldValue(field editField) string {
+	m := component.model
 	switch field {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return ""
@@ -117,7 +128,8 @@ func (m model) expandableFieldValue(field editField) string {
 	}
 }
 
-func (m *model) collapseExpandedFieldAfterEdit(field editField, before string) {
+func (component *editorViewComponent) collapseExpandedFieldAfterEdit(field editField, before string) {
+	m := &component.model
 	if !isExpandableEditField(field) || m.expandedFields == nil || !m.expandedFields[field] {
 		return
 	}
@@ -130,14 +142,16 @@ func (m *model) collapseExpandedFieldAfterEdit(field editField, before string) {
 	}
 }
 
-func (m model) canRenderCompactValue(value string, labelWidth int) bool {
+func (component editorViewComponent) canRenderCompactValue(value string, labelWidth int) bool {
+	m := component.model
 	if strings.Contains(value, "\n") {
 		return false
 	}
 	return lipgloss.Width(value) <= m.singleLineFieldWidth(labelWidth)
 }
 
-func (m *model) expandCompactFieldIfNeeded() bool {
+func (component *editorViewComponent) expandCompactFieldIfNeeded() bool {
+	m := &component.model
 	if !isExpandableEditField(m.editField) || m.isCurrentExpandableFieldExpanded() {
 		return false
 	}
@@ -150,7 +164,8 @@ func (m *model) expandCompactFieldIfNeeded() bool {
 	return true
 }
 
-func (m *model) insertNewlineInActiveExpandableField() {
+func (component *editorViewComponent) insertNewlineInActiveExpandableField() {
+	m := &component.model
 	if !isExpandableEditField(m.editField) {
 		return
 	}
@@ -160,7 +175,8 @@ func (m *model) insertNewlineInActiveExpandableField() {
 	m.setActiveTextValueAndCursor(string(value), pos+1)
 }
 
-func (m model) isCurrentExpandableFieldExpanded() bool {
+func (component editorViewComponent) isCurrentExpandableFieldExpanded() bool {
+	m := component.model
 	switch m.editField {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return false
@@ -175,7 +191,8 @@ func (m model) isCurrentExpandableFieldExpanded() bool {
 	}
 }
 
-func (m model) renderMultilineFieldLines(field editField, area textarea.Model, maxRows int) []string {
+func (component editorViewComponent) renderMultilineFieldLines(field editField, area textarea.Model, maxRows int) []string {
+	m := component.model
 	maxRows = max(1, maxRows)
 	wrapWidth := m.multilineContentWidth()
 	logicalLines, segments := multilineVisualSegments(area.Value(), wrapWidth)
@@ -281,7 +298,8 @@ func cursorVisualSegmentIndex(lines []string, segments []multilineVisualSegment,
 	return 0
 }
 
-func (m model) multilineContentWidth() int {
+func (component editorViewComponent) multilineContentWidth() int {
+	m := component.model
 	if !m.showGutters {
 		return max(8, m.boxInnerWidth()-2)
 	}
@@ -290,7 +308,8 @@ func (m model) multilineContentWidth() int {
 	return max(8, m.boxInnerWidth()-prefixWidth-2)
 }
 
-func (m model) withCursorMarker(line string, offset int) string {
+func (component editorViewComponent) withCursorMarker(line string, offset int) string {
+	m := component.model
 	runes := []rune(line)
 	offset = min(max(0, offset), len(runes))
 	if offset == len(runes) {
@@ -305,7 +324,8 @@ func (m model) withCursorMarker(line string, offset int) string {
 	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
 }
 
-func (m model) textAreaBodyHeight() int {
+func (component editorViewComponent) textAreaBodyHeight() int {
+	m := component.model
 	if m.height <= 0 {
 		return max(8, m.height-2)
 	}
@@ -313,11 +333,13 @@ func (m model) textAreaBodyHeight() int {
 	return max(8, bodyHeight)
 }
 
-func (m model) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
+func (component editorViewComponent) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
+	m := component.model
 	return m.fieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth)
 }
 
-func (m model) editTextInputFieldLine(field editField, name string, input textinput.Model, labelWidth int) string {
+func (component editorViewComponent) editTextInputFieldLine(field editField, name string, input textinput.Model, labelWidth int) string {
+	m := component.model
 	label := m.editFieldLabel(field, name)
 	labelText := padMin(label+":", labelWidth+1)
 	// Bubbles textinput renders the focused cursor as one visible cell in addition to
@@ -328,7 +350,8 @@ func (m model) editTextInputFieldLine(field editField, name string, input textin
 	return m.fieldLine(label, input.View(), labelWidth)
 }
 
-func (m model) editFieldLabel(field editField, name string) string {
+func (component editorViewComponent) editFieldLabel(field editField, name string) string {
+	m := component.model
 	if m.keymapStyle() == keymapVi && m.viInsertMode && m.editField == field && isEditableTextField(field) {
 		return name + " [INSERT]"
 	}
@@ -347,21 +370,24 @@ func isExpandableEditField(field editField) bool {
 	return isMultilineEditField(field)
 }
 
-func (m model) shouldTypePrintableQInEditField() bool {
+func (component editorViewComponent) shouldTypePrintableQInEditField() bool {
+	m := component.model
 	if !isEditableTextField(m.editField) {
 		return false
 	}
 	return m.keymapStyle() == keymapEmacs || m.viInsertMode
 }
 
-func (m model) editOptionValue(field editField, value string) string {
+func (component editorViewComponent) editOptionValue(field editField, value string) string {
+	m := component.model
 	if m.editField == field {
 		value += " <"
 	}
 	return m.value(value)
 }
 
-func (m *model) moveActiveMultilinePage(direction int) {
+func (component *editorViewComponent) moveActiveMultilinePage(direction int) {
+	m := &component.model
 	height := m.textArea.Height()
 	switch m.editField {
 	case editFieldValue, editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
@@ -378,7 +404,8 @@ func (m *model) moveActiveMultilinePage(direction int) {
 }
 
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
-func (m model) textAreaFooterText() string {
+func (component editorViewComponent) textAreaFooterText() string {
+	m := component.model
 	valueAction := ""
 	switch m.editField {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
