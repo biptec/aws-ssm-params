@@ -156,15 +156,21 @@ func dedupe(items []Item) []Item {
 	return out
 }
 
-// merge appends metadata value b to value a unless it is empty or already included.
+// merge combines comma-separated metadata values without losing distinct values that overlap as substrings.
 func merge(a, b string) string {
-	if a == "" {
-		return b
+	values := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, raw := range []string{a, b} {
+		for _, value := range strings.Split(raw, ",") {
+			value = strings.TrimSpace(value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			values = append(values, value)
+		}
 	}
-	if b == "" || strings.Contains(a, b) {
-		return a
-	}
-	return a + "," + b
+	return strings.Join(values, ",")
 }
 
 // exists reports whether a path exists and can be statted.

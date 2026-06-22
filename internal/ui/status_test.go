@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWriteLoadProgress(t *testing.T) {
+	var output bytes.Buffer
+	progress := writeLoadProgress(&output)
+
+	progress(2, 3, "eu-north-1", []inventory.Item{{Path: "/app/one"}, {Path: "/app/two"}})
+
+	assert.Equal(t, "Loading parameters 2/3 from eu-north-1 region...\n/app/one\n/app/two\n", output.String())
+}
 
 type fakeSSMClient struct {
 	region              string

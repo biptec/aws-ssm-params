@@ -43,6 +43,20 @@ func TestLoadPathsFileRejectsRelativePaths(t *testing.T) {
 	assert.ErrorContains(t, err, "invalid SSM name")
 }
 
+func TestPathFileLinePathNormalizesAllSupportedLineForms(t *testing.T) {
+	tests := map[string]string{
+		"empty":          "",
+		"comment":        "  # comment\r\n",
+		"path":           " /app/token \r\n",
+		"inline comment": "/app/token # managed",
+	}
+
+	assert.Equal(t, "", pathFileLinePath(tests["empty"]))
+	assert.Equal(t, "", pathFileLinePath(tests["comment"]))
+	assert.Equal(t, "/app/token", pathFileLinePath(tests["path"]))
+	assert.Equal(t, "/app/token", pathFileLinePath(tests["inline comment"]))
+}
+
 func writeTestFile(path, content string) error {
 	return crerr.Wrapf(os.WriteFile(path, []byte(content), 0o600), "write test file %s", path)
 }

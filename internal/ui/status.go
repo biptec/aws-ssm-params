@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sort"
@@ -159,16 +160,7 @@ func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, 
 	writer.Start()
 	defer writer.Stop()
 
-	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
-		if region != "" {
-			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
-		} else {
-			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d...\n", done, total)
-		}
-		for _, item := range chunk {
-			_, _ = fmt.Fprintf(writer, "%s\n", item.Path)
-		}
-	})
+	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, writeLoadProgress(writer))
 }
 
 // LoadStatuses loads statuses without progress output using item-level region information.
@@ -218,7 +210,11 @@ func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssm.
 	writer.Start()
 	defer writer.Stop()
 
-	return LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, func(done, total int, region string, chunk []inventory.Item) {
+	return LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, writeLoadProgress(writer))
+}
+
+func writeLoadProgress(writer io.Writer) LoadProgress {
+	return func(done, total int, region string, chunk []inventory.Item) {
 		if region != "" {
 			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d from %s region...\n", done, total, region)
 		} else {
@@ -227,7 +223,7 @@ func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssm.
 		for _, item := range chunk {
 			_, _ = fmt.Fprintf(writer, "%s\n", item.Path)
 		}
-	})
+	}
 }
 
 // LoadFilteredStatusesBatchForRegions discovers parameter metadata with DescribeParameters prefilters,

@@ -43,13 +43,7 @@ func LoadPaths(reader io.Reader, source string) ([]Item, error) {
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
-		raw := strings.TrimSpace(scanner.Text())
-		if raw == "" || strings.HasPrefix(raw, "#") {
-			continue
-		}
-		if i := strings.Index(raw, "#"); i >= 0 {
-			raw = strings.TrimSpace(raw[:i])
-		}
+		raw := pathFileLinePath(scanner.Text())
 		if raw == "" {
 			continue
 		}
@@ -107,14 +101,7 @@ func AppendPathIfMissing(filePath, parameterPath string) (bool, error) {
 func pathFileContainsPath(content, parameterPath string) bool {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
-		raw := strings.TrimSpace(scanner.Text())
-		if raw == "" || strings.HasPrefix(raw, "#") {
-			continue
-		}
-		if i := strings.Index(raw, "#"); i >= 0 {
-			raw = strings.TrimSpace(raw[:i])
-		}
-		if raw == parameterPath {
+		if pathFileLinePath(scanner.Text()) == parameterPath {
 			return true
 		}
 	}
@@ -170,7 +157,7 @@ func RemovePathsIfPresent(filePath string, parameterPaths []string) (int, error)
 }
 
 func pathFileLinePath(line string) string {
-	raw := strings.TrimSpace(strings.TrimRight(line, "\r\n"))
+	raw := strings.TrimSpace(line)
 	if raw == "" || strings.HasPrefix(raw, "#") {
 		return ""
 	}
