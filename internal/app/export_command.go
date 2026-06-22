@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	crerr "github.com/cockroachdb/errors"
@@ -12,6 +13,15 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
+
+// Export loads statuses for the requested inventory and writes existing parameter values to stdout.
+func Export(ctx *CLIContext) error {
+	command, err := newExportCommand(ctx, os.Stdout)
+	if err != nil {
+		return err
+	}
+	return command.run()
+}
 
 // exportCommand owns the state and dependencies of one export invocation.
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.

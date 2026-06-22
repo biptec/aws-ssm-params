@@ -40,6 +40,13 @@ type importCommand struct {
 	recordErrors    []string
 }
 
+type importSummary struct {
+	Created int
+	Updated int
+	Skipped int
+	Failed  int
+}
+
 func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer) (*importCommand, error) {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
