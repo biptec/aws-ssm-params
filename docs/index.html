@@ -186,13 +186,16 @@ aws-ssm-params export --region eu-north-1
 aws-ssm-params --region eu-north-1 --region eu-central-1 export
 
 # Env lists may use commas:
-AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export</code></pre></div>
+AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export
+
+# Native AWS aliases are still supported as lower-priority fallbacks:
+AWS_REGION=eu-north-1 AWS_PROFILE=production aws-ssm-params export</code></pre></div>
     </section>
 
     <section class="section" id="globals">
       <div class="section-heading">
         <p class="eyebrow">Global options</p>
-        <h2>One flag, one tool-specific environment variable.</h2>
+        <h2>One primary tool-specific environment variable per flag, with native AWS aliases where useful.</h2>
       </div>
       <div class="table-wrap">
         <table>
@@ -200,9 +203,9 @@ AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export</code></pre>
             <tr><th>Flag</th><th>Environment</th><th>When to use it</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>--region</code></td><td><code>AWS_SSM_PARAMS_REGION</code></td><td>Target one or more known regions.</td></tr>
+            <tr><td><code>--region</code></td><td><code>AWS_SSM_PARAMS_REGION</code>, <code>AWS_REGION</code></td><td>Target one or more known regions. The tool-specific variable has priority.</td></tr>
             <tr><td><code>--all-regions</code></td><td><code>AWS_SSM_PARAMS_ALL_REGIONS</code></td><td>Audit every enabled region.</td></tr>
-            <tr><td><code>--profile</code></td><td><code>AWS_SSM_PARAMS_PROFILE</code></td><td>Select an AWS profile or SSO profile.</td></tr>
+            <tr><td><code>--profile</code></td><td><code>AWS_SSM_PARAMS_PROFILE</code>, <code>AWS_PROFILE</code></td><td>Select an AWS profile or SSO profile. The tool-specific variable has priority.</td></tr>
             <tr><td><code>--no-color</code></td><td><code>AWS_SSM_PARAMS_NO_COLOR</code></td><td>Disable color output for CI or plain logs.</td></tr>
             <tr><td><code>--keymap</code></td><td><code>AWS_SSM_PARAMS_KEYMAP</code></td><td>Choose <code>emacs</code> or <code>vi</code> navigation.</td></tr>
             <tr><td><code>--log-level</code></td><td><code>AWS_SSM_PARAMS_LOG_LEVEL</code></td><td>Enable <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code> logs.</td></tr>
@@ -220,8 +223,8 @@ AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export</code></pre>
         <p>
           The tool uses the AWS SDK for Go. Credentials may come from environment credentials,
           shared config files, SSO profiles, web identity, or instance metadata. Region selection
-          starts with <code>--region</code> or <code>AWS_SSM_PARAMS_REGION</code>, then falls back to standard
-          AWS region configuration.
+          starts with <code>--region</code>, then <code>AWS_SSM_PARAMS_REGION</code>, then the native
+          <code>AWS_REGION</code>/<code>AWS_DEFAULT_REGION</code> configuration.
         </p>
       </div>
       <div class="cards three">

@@ -336,11 +336,11 @@ func RejectCommaSeparatedFlagArgs(args []string, flagNames ...string) error {
 // CLI list values are provided by repeating flags; only environment variables may contain comma-separated lists.
 func ConfigFromCLI(ctx *CLIContext) (Config, error) {
 	allRegions := boolFlagValueAny(ctx, "all-regions", false, "AWS_SSM_PARAMS_ALL_REGIONS")
-	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGION"))
+	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGION", "AWS_REGION"))
 	if allRegions && len(regions) > 0 {
 		return Config{}, errors.New("--region and --all-regions cannot be used together")
 	}
-	profile := stringFlagValueAny(ctx, "profile", "", "AWS_SSM_PARAMS_PROFILE")
+	profile := stringFlagValueAny(ctx, "profile", "", "AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE")
 	region := ""
 	if len(regions) > 0 {
 		region = regions[0]

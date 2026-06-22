@@ -57,7 +57,6 @@ func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 		"AWS_SSM_PARAMS_SHOW_COLUMNS",
 		"AWS_SSM_PARAMS_OUTPUT_FIELDS",
 		"AWS_SSM_PARAMS_MAP_FIELDS",
-		"AWS_PROFILE",
 		"$NO_COLOR",
 	}
 
@@ -73,6 +72,21 @@ func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 			assert.NotContains(t, out.String(), legacyEnvName, strings.Join(args, " "))
 		}
 	}
+}
+
+func TestCLIHelpShowsNativeAWSRegionAndProfileAliases(t *testing.T) {
+	cliApp := newCLIApp([]string{"--help"})
+	var out bytes.Buffer
+	cliApp.Writer = &out
+
+	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "--help"})
+
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "AWS_SSM_PARAMS_REGION")
+	assert.Contains(t, out.String(), "AWS_REGION")
+	assert.Contains(t, out.String(), "AWS_SSM_PARAMS_PROFILE")
+	assert.Contains(t, out.String(), "AWS_PROFILE")
+	assert.NotContains(t, out.String(), "$NO_COLOR")
 }
 
 func TestInteractiveCommandIsRemoved(t *testing.T) {

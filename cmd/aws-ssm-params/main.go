@@ -13,9 +13,9 @@ import (
 
 func globalFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION"), Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
+		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION", "AWS_REGION"), Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
 		&cli.BoolFlag{Name: "all-regions", Sources: cli.EnvVars("AWS_SSM_PARAMS_ALL_REGIONS"), Usage: "search parameters across all enabled AWS regions"},
-		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE"), Usage: "AWS profile"},
+		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"), Usage: "AWS profile"},
 		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR"), Usage: "disable colored output"},
 		&cli.StringFlag{Name: "keymap", Value: "emacs", Sources: cli.EnvVars("AWS_SSM_PARAMS_KEYMAP"), Usage: "keyboard navigation style: emacs or vi"},
 		&cli.StringFlag{Name: "log-level", Value: "off", Sources: cli.EnvVars("AWS_SSM_PARAMS_LOG_LEVEL"), Usage: "log level: trace, debug, info, warn, error, or off"},

@@ -84,6 +84,34 @@ func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
 	assert.Empty(t, cfg.InventoryItems)
 }
 
+func TestConfigFromCLIPrefersToolEnvOverNativeAWSAliases(t *testing.T) {
+	t.Setenv("AWS_SSM_PARAMS_REGION", "eu-north-1,eu-central-1")
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_SSM_PARAMS_PROFILE", "tool-profile")
+	t.Setenv("AWS_PROFILE", "native-profile")
+
+	ctx := testCLIContext(t, nil)
+	cfg, err := ConfigFromCLI(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "eu-north-1", cfg.Region)
+	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
+	assert.Equal(t, "tool-profile", cfg.Profile)
+}
+
+func TestConfigFromCLIUsesNativeAWSAliasesWhenToolEnvIsUnset(t *testing.T) {
+	t.Setenv("AWS_REGION", "us-east-1")
+	t.Setenv("AWS_PROFILE", "native-profile")
+
+	ctx := testCLIContext(t, nil)
+	cfg, err := ConfigFromCLI(ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, "us-east-1", cfg.Region)
+	assert.Equal(t, []string{"us-east-1"}, cfg.Regions)
+	assert.Equal(t, "native-profile", cfg.Profile)
+}
+
 func TestPrepareItemsLoadsExplicitInventorySources(t *testing.T) {
 	cfg := Config{
 		Region: "eu-north-1",
@@ -412,9 +440,9 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 func testCLIContext(t *testing.T, args []string) *CLIContext {
 	t.Helper()
 	return testCommandContext(t, []cli.Flag{
-		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION")},
+		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION", "AWS_REGION")},
 		&cli.BoolFlag{Name: "all-regions", Sources: cli.EnvVars("AWS_SSM_PARAMS_ALL_REGIONS")},
-		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE")},
+		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE")},
 		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR")},
 		&cli.StringFlag{Name: "keymap", Value: "emacs", Sources: cli.EnvVars("AWS_SSM_PARAMS_KEYMAP")},
 		&cli.StringFlag{Name: "filters-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTER_FILE")},

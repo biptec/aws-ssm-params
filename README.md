@@ -102,10 +102,11 @@ Choose an AWS profile with:
 aws-ssm-params --profile production tui
 ```
 
-Or use the matching tool-specific environment variable:
+Or use the matching tool-specific environment variable. It has priority over the native AWS alias:
 
 ```bash
 AWS_SSM_PARAMS_PROFILE=production aws-ssm-params export --format json
+AWS_PROFILE=production aws-ssm-params export --format json
 ```
 
 Region resolution works like this:
@@ -230,7 +231,7 @@ Do not pass comma-separated values on the command line:
 aws-ssm-params --region eu-north-1,eu-central-1 export
 ```
 
-Comma-separated values are accepted in environment variables:
+Comma-separated values are accepted in list-style environment variables:
 
 ```bash
 AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export
@@ -242,9 +243,9 @@ Global options apply to all commands.
 
 | Flag | Environment | Description | Use when |
 | --- | --- | --- | --- |
-| `--region value` | `AWS_SSM_PARAMS_REGION` | AWS region. Repeat for multiple regions. | You know the exact region or want a controlled multi-region scan. |
+| `--region value` | `AWS_SSM_PARAMS_REGION`, `AWS_REGION` | AWS region. Repeat for multiple regions. The tool-specific env var has priority over the native AWS alias. | You know the exact region or want a controlled multi-region scan. |
 | `--all-regions` | `AWS_SSM_PARAMS_ALL_REGIONS` | Query all enabled AWS regions. | You are auditing an account and do not know where parameters exist. |
-| `--profile value` | `AWS_SSM_PARAMS_PROFILE` | AWS profile. | You use named AWS profiles or SSO. |
+| `--profile value` | `AWS_SSM_PARAMS_PROFILE`, `AWS_PROFILE` | AWS profile. The tool-specific env var has priority over the native AWS alias. | You use named AWS profiles or SSO. |
 | `--no-color` | `AWS_SSM_PARAMS_NO_COLOR` | Disable color output. | You are running in CI, logs, or a terminal with poor color support. |
 | `--keymap emacs\|vi` | `AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. | You prefer vi-style TUI navigation and editing. |
 | `--log-level value` | `AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. | You need diagnostics without polluting stdout. |

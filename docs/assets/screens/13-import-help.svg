@@ -26,9 +26,9 @@
 <text x="28" y="468" xml:space="preserve">   --help, -h                                 show help</text>
 <text x="28" y="488" xml:space="preserve"></text>
 <text x="28" y="508" xml:space="preserve">GLOBAL OPTIONS:</text>
-<text x="28" y="528" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGION]</text>
+<text x="28" y="528" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGION, $AWS_REGION]</text>
 <text x="28" y="548" xml:space="preserve">   --all-regions                        search parameters across all enabled AWS regions [$AWS_SSM_PARAMS_ALL_REGIONS]</text>
-<text x="28" y="568" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE]</text>
+<text x="28" y="568" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE, $AWS_PROFILE]</text>
 <text x="28" y="588" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR]</text>
 <text x="28" y="608" xml:space="preserve">   --keymap string                      keyboard navigation style: emacs or vi (default: &quot;emacs&quot;) [$AWS_SSM_PARAMS_KEYMAP]</text>
 <text x="28" y="628" xml:space="preserve">   --log-level string                   log level: trace, debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL]</text>
