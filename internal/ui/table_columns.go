@@ -7,6 +7,16 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type tableState struct {
+	columns        map[columnName]bool
+	columnsDraft   map[columnName]bool
+	columnCursor   int
+	sortBy         columnName
+	sortDescending bool
+	sortRules      []sortRule
+	sortCursor     int
+}
+
 type tableColumnsComponent struct {
 	model model
 }

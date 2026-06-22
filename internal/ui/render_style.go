@@ -7,144 +7,131 @@ import (
 )
 
 type styleRenderer struct {
-	model model
+	noColor        bool
+	query          string
+	effectiveQuery string
+	searchInvalid  bool
+	message        string
+	warningMessage string
+	errMessage     string
+	busyMessage    string
 }
 
-func (component styleRenderer) label(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func newStyleRenderer(m model) styleRenderer {
+	return styleRenderer{
+		noColor:        m.opts.NoColor,
+		query:          m.query,
+		effectiveQuery: m.effectiveQuery,
+		searchInvalid:  m.searchInvalid,
+		message:        m.message,
+		warningMessage: m.warningMessage,
+		errMessage:     m.errMessage,
+		busyMessage:    m.busyMessage,
+	}
+}
+
+func (renderer styleRenderer) label(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return labelStyle.Render(s)
 }
 
-func (component styleRenderer) value(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) value(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return valueStyle.Render(s)
 }
 
-func (component styleRenderer) muted(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) muted(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return mutedStyle.Render(s)
 }
 
-func (component styleRenderer) encryptedPlaceholder() string {
-	m := component.model
-	return m.muted(encryptedPlaceholderText)
+func (renderer styleRenderer) encryptedPlaceholder() string {
+	return renderer.muted(encryptedPlaceholderText)
 }
 
-func (component styleRenderer) divider(s string) string {
+func (renderer styleRenderer) divider(s string) string {
 	return strings.Repeat(" ", lipgloss.Width(s))
 }
 
-func (component styleRenderer) frame(s string) string {
+func (renderer styleRenderer) frame(s string) string {
 	return strings.Repeat(" ", lipgloss.Width(s))
 }
 
-func (component styleRenderer) selectedRow(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) selectedRow(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return selectedRowStyle.Render(s)
 }
 
-func (component styleRenderer) selectedMarker() string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) selectedMarker() string {
+	if renderer.noColor {
 		return "| "
 	}
 	return lipgloss.NewStyle().Foreground(selectedFg).Render("| ")
 }
 
-func (component styleRenderer) searchLine() string {
-	m := component.model
-	line := "Search > " + m.query
-	if m.searchInvalid {
-		return m.applyErr(line)
+func (renderer styleRenderer) searchLine() string {
+	line := "Search > " + renderer.query
+	if renderer.searchInvalid {
+		return renderer.applyErr(line)
 	}
-	return m.searchPrompt() + m.value(m.query)
+	return renderer.searchPrompt() + renderer.value(renderer.query)
 }
 
-func (component styleRenderer) filteredLine() string {
-	m := component.model
-	return m.filteredPrompt() + m.value(m.effectiveQuery)
+func (renderer styleRenderer) filteredLine() string {
+	return renderer.filteredPrompt() + renderer.value(renderer.effectiveQuery)
 }
 
-func (component styleRenderer) searchPrompt() string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) searchPrompt() string {
+	if renderer.noColor {
 		return "Search > "
 	}
 	return searchStyle.Render("Search > ")
 }
 
-func (component styleRenderer) filteredPrompt() string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) filteredPrompt() string {
+	if renderer.noColor {
 		return "Filtered > "
 	}
 	return searchStyle.Render("Filtered > ")
 }
 
-func (component styleRenderer) applyErr(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) applyErr(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return errorStyle.Render(s)
 }
 
-func (component styleRenderer) applyWarning(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer styleRenderer) applyWarning(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return warningStyle.Render(s)
-}
-
-func (component styleRenderer) renderFooterWithStatus(text string) string {
-	m := component.model
-	footer := m.renderFooter(text)
-	status := m.renderStatusMessage()
-	if status == "" {
-		return strings.Join([]string{" ", footer, " "}, "\n")
-	}
-	return strings.Join([]string{" ", status, " ", footer, " "}, "\n")
 }
 
 func quitConfirmationMessage(_ string) string {
 	return `Are you sure you want to quit? Press "y" to confirm.`
 }
 
-func (component styleRenderer) renderStatusMessage() string {
-	m := component.model
+func (renderer styleRenderer) renderStatusMessage() string {
 	switch {
-	case m.errMessage != "":
-		return m.applyErr(m.errMessage)
-	case m.warningMessage != "":
-		return m.applyWarning(m.warningMessage)
-	case m.busyMessage != "":
-		return m.muted(m.busyMessage)
-	case m.message != "":
-		return m.muted(m.message)
+	case renderer.errMessage != "":
+		return renderer.applyErr(renderer.errMessage)
+	case renderer.warningMessage != "":
+		return renderer.applyWarning(renderer.warningMessage)
+	case renderer.busyMessage != "":
+		return renderer.muted(renderer.busyMessage)
+	case renderer.message != "":
+		return renderer.muted(renderer.message)
 	default:
 		return ""
 	}
-}
-
-func (component *styleRenderer) clearTransientStatus() {
-	m := &component.model
-	m.message = ""
-	m.warningMessage = ""
-	m.errMessage = ""
-	m.pendingQuit = false
-	m.pendingQuitKey = ""
-	m.pendingFileWrite = fileWriteConfirmationNone
 }

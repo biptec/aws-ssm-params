@@ -3,17 +3,14 @@ package ui
 import (
 	"context"
 	"errors"
-	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	crerr "github.com/cockroachdb/errors"
 
-	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
-	"github.com/biptec/aws-ssm-params/internal/randomx"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -52,7 +49,7 @@ func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
 		m.warningMessage = ""
 		return m, nil
 	}
-	data, err := fileio.ReadFile(expandedPath)
+	data, err := backendFor(m).readFile(expandedPath)
 	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
@@ -100,13 +97,13 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 		m.openFileWriteConfirmation(fileWriteConfirmationSecure)
 		return m, nil
 	}
-	if _, err := os.Stat(expandedPath); err == nil && !overwriteConfirmed && !m.opts.NoConfirmOverwriteFile {
+	if _, err := backendFor(m).statFile(expandedPath); err == nil && !overwriteConfirmed && !m.opts.NoConfirmOverwriteFile {
 		m.errMessage = ""
 		m.message = ""
 		m.warningMessage = ""
 		m.openFileWriteConfirmation(fileWriteConfirmationOverwrite)
 		return m, nil
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		m.errMessage = err.Error()
 		m.message = ""
 		m.warningMessage = ""
@@ -114,7 +111,7 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 		return m, nil
 	}
 	contents := m.fileActionContents()
-	if err := fileio.WriteFile(expandedPath, []byte(contents), 0o600); err != nil {
+	if err := backendFor(m).writeFile(expandedPath, []byte(contents), 0o600); err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
 		m.warningMessage = ""
@@ -186,26 +183,7 @@ func (component editorIOComponent) generateRandomValueIntoEditor(kind string) (t
 
 func (component editorIOComponent) randomValue(kind string) (string, error) {
 	m := component.model
-	switch kind {
-	case "base64-32":
-		value, err := randomx.Base64(32)
-		return value, crerr.Wrap(err, "generate base64 random value")
-	case "hex-32":
-		value, err := randomx.Hex(32)
-		return value, crerr.Wrap(err, "generate hex random value")
-	case "uuid":
-		value, err := randomx.UUID()
-		return value, crerr.Wrap(err, "generate UUID random value")
-	case "base64-custom":
-		n, err := strconv.Atoi(strings.TrimSpace(m.input.Value()))
-		if err != nil || n <= 0 {
-			return "", errors.New("invalid byte length")
-		}
-		value, err := randomx.Base64(n)
-		return value, crerr.Wrap(err, "generate custom base64 random value")
-	default:
-		return "", errors.New("unknown random value generator")
-	}
+	return backendFor(m).randomValue(kind, m.input.Value())
 }
 
 // saveValue captures the current item/region and switches to the loading screen while the save command runs.
@@ -283,67 +261,30 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 	if description == "" {
 		description = strings.TrimSpace(m.editDescriptionInput.Value())
 	}
-	return m, saveValueCmd(m.ctx, m.client, item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	return m, saveValueCmdWithBackend(m.ctx, backendFor(m), item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
 // Wildcard items must be converted to a concrete region before saving, otherwise the command returns an inline error.
 func saveValueCmd(ctx context.Context, client ssm.Client, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+	return saveValueCmdWithBackend(ctx, newDefaultBackend(client), item, oldPath, value, parameterType, opts, pathsFile, allowNamesFileUpdate)
+}
+
+func saveValueCmdWithBackend(ctx context.Context, backend uiBackend, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
-		if item.Region == "*" {
-			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
-		}
-		regionalClient := client.ForRegion(item.Region)
-		if err := regionalClient.PutParameterWithOptions(ctx, item.Path, value, parameterType, opts); err != nil {
-			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: err}
-		}
-		appendedToNamesFile := false
-		if pathsFile != "" && allowNamesFileUpdate {
-			appended, err := inventory.AppendPathIfMissing(pathsFile, item.Path)
-			if err != nil {
-				st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
-				return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", item.Path, pathsFile, err)}
-			}
-			if appended {
-				appendedToNamesFile = true
-				item.Kind = "path-file"
-				item.Source = pathsFile
-			}
-		}
-		st := LoadStatuses(ctx, regionalClient, []inventory.Item{item}, true)[0]
-		message := "Updated " + item.Path
-		if appendedToNamesFile {
-			message += " and added it to " + pathsFile
-		}
-		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: message}
+		return backend.saveParameter(ctx, item, oldPath, value, parameterType, opts, pathsFile, allowNamesFileUpdate)
 	}
 }
 
 // deleteCmd groups selected items by concrete region and deletes them from SSM.
 // Wildcard missing rows are skipped because they do not represent a real parameter in one AWS region.
 func deleteCmd(ctx context.Context, client ssm.Client, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
-	return func() tea.Msg {
-		byRegion := map[string][]string{}
-		for _, item := range items {
-			if item.Region == "*" {
-				continue
-			}
-			byRegion[item.Region] = append(byRegion[item.Region], item.Path)
-		}
-		for region, paths := range byRegion {
-			if err := client.ForRegion(region).DeleteMany(ctx, paths); err != nil {
-				return deleteDoneMsg{items: items, err: err}
-			}
-		}
+	return deleteCmdWithBackend(ctx, newDefaultBackend(client), items, pathsFile, allowNamesFileUpdate)
+}
 
-		removeRows := pathsFile == ""
-		if pathsFile != "" && allowNamesFileUpdate {
-			if _, err := inventory.RemovePathsIfPresent(pathsFile, itemPaths(items)); err != nil {
-				return deleteDoneMsg{items: items, warning: fmt.Sprintf("Could not update %s after delete: %v", pathsFile, err)}
-			}
-			removeRows = true
-		}
-		return deleteDoneMsg{items: items, removeRows: removeRows}
+func deleteCmdWithBackend(ctx context.Context, backend uiBackend, items []inventory.Item, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+	return func() tea.Msg {
+		return backend.deleteParameters(ctx, items, pathsFile, allowNamesFileUpdate)
 	}
 }
 

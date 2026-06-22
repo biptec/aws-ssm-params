@@ -2,7 +2,38 @@ package ui
 
 import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 )
+
+type editorState struct {
+	input                textinput.Model
+	textArea             textarea.Model
+	editPoliciesArea     textarea.Model
+	editDescriptionArea  textarea.Model
+	editPathInput        textinput.Model
+	editDescriptionInput textinput.Model
+	editFileInput        textinput.Model
+
+	editField           editField
+	editDirection       editDirection
+	viInsertMode        bool
+	editRegionOptions   []string
+	pendingFileWrite    fileWriteConfirmation
+	editRegion          string
+	editType            ssm.ParameterType
+	editTier            ssm.ParameterTier
+	editDataType        ssm.ParameterDataType
+	editOverwrite       bool
+	editNewParameter    bool
+	editInitialSnapshot editSnapshot
+	typeReturnScreen    screen
+
+	expandedFields  map[editField]bool
+	showGutters     bool
+	fileActionMode  string
+	fileActionField editField
+}
 
 type editField int
 

@@ -1,7 +1,12 @@
 package ui
 
-type keymapComponent struct {
-	model model
+type keymap struct {
+	style        keymapStyle
+	viInsertMode bool
+}
+
+func newKeymap(m model) keymap {
+	return keymap{style: normalizeKeymapStyle(m.opts.Keymap), viInsertMode: m.viInsertMode}
 }
 
 type keymapStyle string
@@ -34,13 +39,11 @@ func normalizeKeymapStyle(value string) keymapStyle {
 	}
 }
 
-func (component keymapComponent) keymapStyle() keymapStyle {
-	m := component.model
-	return normalizeKeymapStyle(m.opts.Keymap)
+func (keys keymap) keymapStyle() keymapStyle {
+	return keys.style
 }
 
-func (component keymapComponent) navigationAction(key string) (navigationAction, bool) {
-	m := component.model
+func (keys keymap) navigationAction(key string) (navigationAction, bool) {
 	switch key {
 	case "up", "shift+tab":
 		return navPrevious, true
@@ -56,7 +59,7 @@ func (component keymapComponent) navigationAction(key string) (navigationAction,
 		return navLast, true
 	}
 
-	if m.keymapStyle() == keymapVi {
+	if keys.keymapStyle() == keymapVi {
 		switch key {
 		case "k":
 			return navPrevious, true
@@ -85,13 +88,12 @@ func (component keymapComponent) navigationAction(key string) (navigationAction,
 	return navNone, false
 }
 
-func (component keymapComponent) editorNavigationAction(key string) (navigationAction, bool) {
-	m := component.model
-	action, ok := m.navigationAction(key)
+func (keys keymap) editorNavigationAction(key string) (navigationAction, bool) {
+	action, ok := keys.navigationAction(key)
 	if !ok {
 		return navNone, false
 	}
-	if m.keymapStyle() == keymapVi && m.viInsertMode {
+	if keys.keymapStyle() == keymapVi && keys.viInsertMode {
 		switch key {
 		case "j", "k", "G":
 			return navNone, false
@@ -100,14 +102,11 @@ func (component keymapComponent) editorNavigationAction(key string) (navigationA
 	return action, true
 }
 
-func (component keymapComponent) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
-	m := component.model
-	if m.pendingKeySequence == "" {
+func (keys keymap) resolvePendingNavigationSequence(pending, key string) (navigationAction, bool, bool) {
+	if pending == "" {
 		return navNone, false, false
 	}
-	pending := m.pendingKeySequence
-	m.pendingKeySequence = ""
-	if m.keymapStyle() == keymapVi && pending == "g" && key == "g" {
+	if keys.keymapStyle() == keymapVi && pending == "g" && key == "g" {
 		return navFirst, true, true
 	}
 	return navNone, false, true

@@ -96,7 +96,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		if len(m.visible()) > 0 {
 			items := []inventory.Item{m.currentItem()}
 			if m.opts.NoConfirmDeleteOne {
-				return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 			}
 			m.startConfirm("Delete selected parameter?", "", items, screenMain)
 		}
@@ -104,7 +104,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		items := m.visibleItems()
 		if len(items) > 0 {
 			if m.opts.NoConfirmDeleteAll {
-				return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 			}
 			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "DELETE ALL", items, screenMain)
 		}

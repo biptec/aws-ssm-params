@@ -14,8 +14,28 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type runtimeComponent struct {
-	model model
+type runtimeState struct {
+	ctx    context.Context
+	items  []inventory.Item
+	loadCh chan tea.Msg
+
+	width  int
+	height int
+
+	screen       screen
+	returnScreen screen
+
+	message        string
+	warningMessage string
+	errMessage     string
+	busyMessage    string
+
+	loadingTitle        string
+	loadingLines        []string
+	loadingSpinnerFrame int
+
+	pendingQuit    bool
+	pendingQuitKey string
 }
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
@@ -79,30 +99,28 @@ func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, op
 	descriptionArea.MaxHeight = 0
 	descriptionArea.ShowLineNumbers = false
 
-	return model{
-		client:               client,
-		ctx:                  ctx,
-		items:                items,
-		statuses:             pendingStatuses(items),
-		opts:                 opts,
-		loadCh:               make(chan tea.Msg),
-		screen:               screenLoading,
-		shortcutsFor:         screenLoading,
-		loadingTitle:         "Loading parameters",
-		input:                input,
-		textArea:             area,
-		editPoliciesArea:     policiesArea,
-		editDescriptionArea:  descriptionArea,
-		editPathInput:        editPathInput,
-		editDescriptionInput: editDescriptionInput,
-		editFileInput:        editFileInput,
-		columns:              defaultColumnVisibility(opts.ShowColumns),
-		sortBy:               sortBy,
-		sortDescending:       sortDescending,
-		sortRules:            sortRules,
-		expandedFields:       map[editField]bool{},
-		showGutters:          true,
-	}
+	m := model{client: client, backend: newDefaultBackend(client), opts: opts}
+	m.ctx = ctx
+	m.items = items
+	m.statuses = pendingStatuses(items)
+	m.loadCh = make(chan tea.Msg)
+	m.screen = screenLoading
+	m.shortcutsFor = screenLoading
+	m.loadingTitle = "Loading parameters"
+	m.input = input
+	m.textArea = area
+	m.editPoliciesArea = policiesArea
+	m.editDescriptionArea = descriptionArea
+	m.editPathInput = editPathInput
+	m.editDescriptionInput = editDescriptionInput
+	m.editFileInput = editFileInput
+	m.columns = defaultColumnVisibility(opts.ShowColumns)
+	m.sortBy = sortBy
+	m.sortDescending = sortDescending
+	m.sortRules = sortRules
+	m.expandedFields = map[editField]bool{}
+	m.showGutters = true
+	return m
 }
 
 func configureTextInputStyles(input *textinput.Model, opts Options) {
@@ -114,15 +132,9 @@ func configureTextInputStyles(input *textinput.Model, opts Options) {
 	input.Cursor.Style = valueStyle
 }
 
-// Init starts the initial background status load and registers a command that waits for loader messages.
-func (component runtimeComponent) Init() tea.Cmd {
-	m := component.model
-	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh), tickLoadingSpinner())
-}
-
 // startLoadCmd launches the initial SSM status scan in a goroutine.
 // Progress and final results are sent through loadCh so the Bubble Tea event loop can render loading updates.
-func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item, groups []filter.Group, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
+func startLoadCmdWithBackend(ctx context.Context, backend uiBackend, items []inventory.Item, groups []filter.Group, regions []string, includeValues bool, ch chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
 			loader := func(done, total int, region string, chunk []inventory.Item) {
@@ -134,13 +146,7 @@ func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item
 					ch <- statusBatchMsg(append([]Status(nil), statuses...))
 				}
 			}
-			var statuses []Status
-			if len(groups) > 0 && len(items) == 0 {
-				statuses = LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, loader)
-			} else {
-				statuses = LoadStatusesBatchForRegionsStream(ctx, client, items, includeValues, regions, loader, emitBatch)
-				statuses = FilterStatusesByGroups(statuses, groups)
-			}
+			statuses := backend.loadStatuses(ctx, items, groups, regions, includeValues, loader, emitBatch)
 			ch <- loadedMsg(statuses)
 		}()
 		return nil

@@ -7,20 +7,71 @@ import (
 )
 
 type popupRenderer struct {
-	model model
+	noColor    bool
+	width      int
+	height     int
+	innerWidth int
+	layers     []popupKind
+	render     func(popupKind) string
 }
 
-func (component popupRenderer) renderPopupBoxWithActions(title string, lines []string, actions string) string {
-	m := component.model
-	if strings.TrimSpace(actions) != "" {
-		lines = append(append([]string(nil), lines...), "", m.popupActionLine(actions))
+func newPopupRenderer(m model) popupRenderer {
+	return popupRenderer{
+		noColor:    m.opts.NoColor,
+		width:      m.width,
+		height:     m.height,
+		innerWidth: m.boxInnerWidth(),
+		layers:     m.popupLayers(),
+		render: func(kind popupKind) string {
+			switch kind {
+			case popupNone:
+				return ""
+			case popupColumns:
+				return m.renderColumnsPopup()
+			case popupShortcuts:
+				return m.renderShortcutsPopup()
+			case popupConfirm:
+				return m.renderConfirmPopup()
+			case popupSort:
+				return m.renderSortPopup()
+			case popupRegionSelect:
+				return m.renderRegionSelectPopup()
+			case popupTypeSelect:
+				return m.renderTypeSelectPopup()
+			case popupTierSelect:
+				return m.renderTierSelectPopup()
+			case popupDataTypeSelect:
+				return m.renderDataTypeSelectPopup()
+			case popupOverwriteSelect:
+				return m.renderOverwriteSelectPopup()
+			case popupValueActions:
+				return m.renderValueActionsPopup()
+			case popupPoliciesActions:
+				return m.renderPoliciesActionsPopup()
+			case popupFileAction:
+				return m.renderFileActionPopup()
+			case popupFileWriteConfirm:
+				return m.renderFileWriteConfirmPopup()
+			case popupUnsavedChanges:
+				return m.renderUnsavedChangesPopup()
+			case popupRandomValue:
+				return m.renderRandomValuePopup()
+			default:
+				return ""
+			}
+		},
 	}
-	return m.renderPopupBox(title, lines)
 }
 
-func (component popupRenderer) popupActionLine(actions string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer popupRenderer) renderPopupBoxWithActions(title string, lines []string, actions string) string {
+	if strings.TrimSpace(actions) != "" {
+		lines = append(append([]string(nil), lines...), "", renderer.popupActionLine(actions))
+	}
+	return renderer.renderPopupBox(title, lines)
+}
+
+func (renderer popupRenderer) popupActionLine(actions string) string {
+	if renderer.noColor {
 		return actions
 	}
 	fields := strings.Fields(actions)
@@ -43,26 +94,25 @@ func (component popupRenderer) popupActionLine(actions string) string {
 	return strings.Join(parts, mutedStyle.Render("   "))
 }
 
-func (component popupRenderer) renderPopupBox(title string, lines []string) string {
-	m := component.model
+func (renderer popupRenderer) renderPopupBox(title string, lines []string) string {
 	lines = popupPaddedLines(lines)
 	maxLineWidth := 0
 	for _, line := range lines {
 		maxLineWidth = max(maxLineWidth, lipgloss.Width(line))
 	}
-	availableInner := m.boxInnerWidth() - 8
+	availableInner := renderer.innerWidth - 8
 	if availableInner <= 0 {
-		availableInner = m.boxInnerWidth()
+		availableInner = renderer.innerWidth
 	}
 	innerWidth := max(20, maxLineWidth)
 	innerWidth = min(innerWidth, 80)
 	innerWidth = min(innerWidth, max(10, availableInner))
 	out := make([]string, 0, 1+len(lines)+1)
-	out = append(out, m.popupBoxTop(title, innerWidth))
+	out = append(out, renderer.popupBoxTop(title, innerWidth))
 	for _, line := range lines {
-		out = append(out, m.popupBoxLine(line, innerWidth))
+		out = append(out, renderer.popupBoxLine(line, innerWidth))
 	}
-	out = append(out, m.popupBoxBottom(innerWidth))
+	out = append(out, renderer.popupBoxBottom(innerWidth))
 	return strings.Join(out, "\n")
 }
 
@@ -83,8 +133,7 @@ func popupPaddedLines(lines []string) []string {
 	return out
 }
 
-func (component popupRenderer) popupBoxTop(title string, innerWidth int) string {
-	m := component.model
+func (renderer popupRenderer) popupBoxTop(title string, innerWidth int) string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
@@ -100,19 +149,17 @@ func (component popupRenderer) popupBoxTop(title string, innerWidth int) string 
 		rightLen = 1
 	}
 	titleRendered := titleText
-	if !m.opts.NoColor {
+	if !renderer.noColor {
 		titleRendered = titleStyle.Render(titleText)
 	}
-	return m.popupFrame("╭") + m.popupFrame(strings.Repeat("─", left)) + titleRendered + m.popupFrame(strings.Repeat("─", rightLen)) + m.popupFrame("╮")
+	return renderer.popupFrame("╭") + renderer.popupFrame(strings.Repeat("─", left)) + titleRendered + renderer.popupFrame(strings.Repeat("─", rightLen)) + renderer.popupFrame("╮")
 }
 
-func (component popupRenderer) popupBoxBottom(innerWidth int) string {
-	m := component.model
-	return m.popupFrame("╰") + m.popupFrame(strings.Repeat("─", innerWidth)) + m.popupFrame("╯")
+func (renderer popupRenderer) popupBoxBottom(innerWidth int) string {
+	return renderer.popupFrame("╰") + renderer.popupFrame(strings.Repeat("─", innerWidth)) + renderer.popupFrame("╯")
 }
 
-func (component popupRenderer) popupBoxLine(content string, innerWidth int) string {
-	m := component.model
+func (renderer popupRenderer) popupBoxLine(content string, innerWidth int) string {
 	visible := lipgloss.Width(content)
 	if visible > innerWidth {
 		content = truncateStyled(content, innerWidth)
@@ -122,67 +169,28 @@ func (component popupRenderer) popupBoxLine(content string, innerWidth int) stri
 	if padWidth < 0 {
 		padWidth = 0
 	}
-	return m.popupFrame("│") + content + strings.Repeat(" ", padWidth) + m.popupFrame("│")
+	return renderer.popupFrame("│") + content + strings.Repeat(" ", padWidth) + renderer.popupFrame("│")
 }
 
-func (component popupRenderer) popupFrame(s string) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer popupRenderer) popupFrame(s string) string {
+	if renderer.noColor {
 		return s
 	}
 	return titleStyle.Render(s)
 }
 
-func (component popupRenderer) renderPopupStack(body string) string {
-	m := component.model
-	for _, kind := range m.popupLayers() {
-		body = m.overlayPopupOnBody(body, m.renderPopup(kind))
+func (renderer popupRenderer) renderPopupStack(body string) string {
+	for _, kind := range renderer.layers {
+		body = renderer.overlayPopupOnBody(body, renderer.renderPopup(kind))
 	}
 	return body
 }
 
-func (component popupRenderer) renderPopup(kind popupKind) string {
-	m := component.model
-	switch kind {
-	case popupNone:
-		return ""
-	case popupColumns:
-		return m.renderColumnsPopup()
-	case popupShortcuts:
-		return m.renderShortcutsPopup()
-	case popupConfirm:
-		return m.renderConfirmPopup()
-	case popupSort:
-		return m.renderSortPopup()
-	case popupRegionSelect:
-		return m.renderRegionSelectPopup()
-	case popupTypeSelect:
-		return m.renderTypeSelectPopup()
-	case popupTierSelect:
-		return m.renderTierSelectPopup()
-	case popupDataTypeSelect:
-		return m.renderDataTypeSelectPopup()
-	case popupOverwriteSelect:
-		return m.renderOverwriteSelectPopup()
-	case popupValueActions:
-		return m.renderValueActionsPopup()
-	case popupPoliciesActions:
-		return m.renderPoliciesActionsPopup()
-	case popupFileAction:
-		return m.renderFileActionPopup()
-	case popupFileWriteConfirm:
-		return m.renderFileWriteConfirmPopup()
-	case popupUnsavedChanges:
-		return m.renderUnsavedChangesPopup()
-	case popupRandomValue:
-		return m.renderRandomValuePopup()
-	default:
-		return ""
-	}
+func (renderer popupRenderer) renderPopup(kind popupKind) string {
+	return renderer.render(kind)
 }
 
-func (component popupRenderer) overlayPopupOnBody(body, popup string) string {
-	m := component.model
+func (renderer popupRenderer) overlayPopupOnBody(body, popup string) string {
 	if popup == "" {
 		return body
 	}
@@ -191,7 +199,7 @@ func (component popupRenderer) overlayPopupOnBody(body, popup string) string {
 	if len(popupLines) == 0 {
 		return body
 	}
-	contentHeight := m.height
+	contentHeight := renderer.height
 	if contentHeight <= 0 {
 		contentHeight = max(len(bodyLines), len(popupLines))
 	}
@@ -210,9 +218,9 @@ func (component popupRenderer) overlayPopupOnBody(body, popup string) string {
 	for _, line := range popupLines {
 		popupWidth = max(popupWidth, lipgloss.Width(line))
 	}
-	viewWidth := m.width
+	viewWidth := renderer.width
 	if viewWidth <= 0 {
-		viewWidth = max(popupWidth, m.boxInnerWidth()+2)
+		viewWidth = max(popupWidth, renderer.innerWidth+2)
 	}
 	top := max(0, (contentHeight-popupHeight)/2)
 	left := max(0, (viewWidth-popupWidth)/2)

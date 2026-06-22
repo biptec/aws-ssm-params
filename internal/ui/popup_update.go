@@ -97,7 +97,7 @@ func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, 
 		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
 		m.loadingTitle = ""
 		m.loadingLines = nil
-		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
@@ -223,7 +223,7 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 		m.loadingLines = nil
 		m.activePopup = popupNone
 		m.popupStack = nil
-		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	if m.confirmExpected == "" {
 		return m, nil

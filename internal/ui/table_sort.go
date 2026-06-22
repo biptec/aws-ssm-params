@@ -8,8 +8,28 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/natural"
 )
 
-type tableSortComponent struct {
-	model model
+type tableSorter struct {
+	*tableState
+	*listState
+	columnAllowedFn func(columnName) bool
+	cellValueFn     func(columnName, int, Status) string
+}
+
+func newTableSorter(m *model) tableSorter {
+	return tableSorter{
+		tableState:      &m.tableState,
+		listState:       &m.listState,
+		columnAllowedFn: m.columnAllowed,
+		cellValueFn:     m.tableCellValue,
+	}
+}
+
+func (component tableSorter) columnAllowed(column columnName) bool {
+	return component.columnAllowedFn(column)
+}
+
+func (component tableSorter) tableCellValue(column columnName, index int, status Status) string {
+	return component.cellValueFn(column, index, status)
 }
 
 type sortRule struct {
@@ -90,8 +110,8 @@ func sortItems() []sortItem {
 	}
 }
 
-func (component tableSortComponent) popupSortItems() []sortItem {
-	m := component.model
+func (component tableSorter) popupSortItems() []sortItem {
+	m := component
 	visible := map[columnName]bool{columnPath: true}
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -107,8 +127,8 @@ func (component tableSortComponent) popupSortItems() []sortItem {
 	return items
 }
 
-func (component tableSortComponent) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
-	m := component.model
+func (component tableSorter) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
+	m := component
 	for _, item := range m.popupSortItems() {
 		if item.hotkey == key {
 			return item.column, true
@@ -117,8 +137,8 @@ func (component tableSortComponent) popupSortColumnByLetterHotkey(key string) (c
 	return "", false
 }
 
-func (component tableSortComponent) visibleSortItems() []sortItem {
-	m := component.model
+func (component tableSorter) visibleSortItems() []sortItem {
+	m := component
 	cols := []columnName{columnPath}
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -140,8 +160,8 @@ func (component tableSortComponent) visibleSortItems() []sortItem {
 	return items
 }
 
-func (component tableSortComponent) visibleSortColumnByHotkey(key string) (columnName, bool) {
-	m := component.model
+func (component tableSorter) visibleSortColumnByHotkey(key string) (columnName, bool) {
+	m := component
 	for _, item := range m.visibleSortItems() {
 		if item.hotkey == key {
 			return item.column, true
@@ -150,8 +170,8 @@ func (component tableSortComponent) visibleSortColumnByHotkey(key string) (colum
 	return "", false
 }
 
-func (component tableSortComponent) sortCursorForCurrentSort() int {
-	m := component.model
+func (component tableSorter) sortCursorForCurrentSort() int {
+	m := component
 	items := m.popupSortItems()
 	primary, _ := primarySortRule(m.sortRules)
 	for i, item := range items {
@@ -198,16 +218,16 @@ func withSortRule(rules []sortRule, column columnName, descending bool) []sortRu
 	return updated
 }
 
-func (component tableSortComponent) sortRulesOrDefault() []sortRule {
-	m := component.model
+func (component tableSorter) sortRulesOrDefault() []sortRule {
+	m := component
 	if len(m.sortRules) == 0 {
 		return []sortRule{{column: columnPath}}
 	}
 	return m.sortRules
 }
 
-func (component *tableSortComponent) setSortRules(rules []sortRule) {
-	m := &component.model
+func (component *tableSorter) setSortRules(rules []sortRule) {
+	m := component
 	if len(rules) == 0 {
 		rules = []sortRule{{column: columnPath}}
 	}
@@ -215,8 +235,8 @@ func (component *tableSortComponent) setSortRules(rules []sortRule) {
 	m.sortBy, m.sortDescending = primarySortRule(m.sortRules)
 }
 
-func (component *tableSortComponent) applySort(column columnName) {
-	m := &component.model
+func (component *tableSorter) applySort(column columnName) {
+	m := component
 	if column == "" {
 		return
 	}
@@ -227,8 +247,8 @@ func (component *tableSortComponent) applySort(column columnName) {
 	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
 }
 
-func (component *tableSortComponent) toggleSortColumn(column columnName) {
-	m := &component.model
+func (component *tableSorter) toggleSortColumn(column columnName) {
+	m := component
 	if column == "" {
 		return
 	}
@@ -241,8 +261,8 @@ func (component *tableSortComponent) toggleSortColumn(column columnName) {
 	m.applySortWithRules(rules)
 }
 
-func (component *tableSortComponent) toggleSortDirection(column columnName) {
-	m := &component.model
+func (component *tableSorter) toggleSortDirection(column columnName) {
+	m := component
 	if column == "" {
 		return
 	}
@@ -256,16 +276,16 @@ func (component *tableSortComponent) toggleSortDirection(column columnName) {
 	m.applySortWithRules(rules)
 }
 
-func (component *tableSortComponent) applySortWithDirection(column columnName, descending bool) {
-	m := &component.model
+func (component *tableSorter) applySortWithDirection(column columnName, descending bool) {
+	m := component
 	if column == "" {
 		return
 	}
 	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
 }
 
-func (component *tableSortComponent) applySortWithRules(rules []sortRule) {
-	m := &component.model
+func (component *tableSorter) applySortWithRules(rules []sortRule) {
+	m := component
 	var selectedKey string
 	if len(m.visible()) > 0 && m.selected < len(m.visible()) {
 		st := m.statuses[m.visible()[m.selected]]
@@ -303,8 +323,8 @@ func (component *tableSortComponent) applySortWithRules(rules []sortRule) {
 	m.ensureSelection()
 }
 
-func (component tableSortComponent) columnHeader(c columnName) string {
-	m := component.model
+func (component tableSorter) columnHeader(c columnName) string {
+	m := component
 	if c == columnIndex {
 		return "#"
 	}
@@ -322,8 +342,8 @@ func sortDirectionArrow(descending bool) string {
 	return "↑"
 }
 
-func (component tableSortComponent) sortPopupLabel(item sortItem) string {
-	m := component.model
+func (component tableSorter) sortPopupLabel(item sortItem) string {
+	m := component
 	if rule, ok := sortRuleForColumn(m.sortRules, item.column); ok {
 		return item.label + " " + sortDirectionArrow(rule.descending)
 	}

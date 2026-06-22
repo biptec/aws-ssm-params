@@ -6,12 +6,17 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 )
 
-type editorCursorComponent struct {
-	model model
+type editorCursor struct {
+	state        *editorState
+	contentWidth int
 }
 
-func (component *editorCursorComponent) moveActiveTextCursor(delta int) {
-	m := &component.model
+func newEditorCursor(m *model) editorCursor {
+	return editorCursor{state: &m.editorState, contentWidth: m.multilineContentWidth()}
+}
+
+func (component *editorCursor) moveActiveTextCursor(delta int) {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -19,16 +24,16 @@ func (component *editorCursorComponent) moveActiveTextCursor(delta int) {
 	case editFieldFilePath:
 		m.editFileInput.SetCursor(m.editFileInput.Position() + delta)
 	case editFieldDescription:
-		m.setDescriptionAreaCursorAbs(m.descriptionAreaCursorAbs() + delta)
+		component.setDescriptionAreaCursorAbs(component.descriptionAreaCursorAbs() + delta)
 	case editFieldPolicies:
-		m.setPoliciesAreaCursorAbs(m.policiesAreaCursorAbs() + delta)
+		component.setPoliciesAreaCursorAbs(component.policiesAreaCursorAbs() + delta)
 	case editFieldValue:
-		m.setTextAreaCursorAbs(m.textAreaCursorAbs() + delta)
+		component.setTextAreaCursorAbs(component.textAreaCursorAbs() + delta)
 	}
 }
 
-func (component *editorCursorComponent) moveActiveTextLine(delta int) {
-	m := &component.model
+func (component *editorCursor) moveActiveTextLine(delta int) {
+	m := component.state
 	if !isMultilineEditField(m.editField) {
 		return
 	}
@@ -40,19 +45,18 @@ func (component *editorCursorComponent) moveActiveTextLine(delta int) {
 		step = -1
 	}
 	for i := 0; i < absInt(delta); i++ {
-		m.moveActiveWrappedLine(step)
+		component.moveActiveWrappedLine(step)
 	}
 }
 
-func (component *editorCursorComponent) moveActiveWrappedLine(delta int) {
-	m := &component.model
-	value := m.activeTextValue()
-	width := m.multilineContentWidth()
+func (component *editorCursor) moveActiveWrappedLine(delta int) {
+	value := component.activeTextValue()
+	width := component.contentWidth
 	lines, segments := multilineVisualSegments(value, width)
 	if len(segments) == 0 {
 		return
 	}
-	line, offset := m.activeTextCursorLineOffset()
+	line, offset := component.activeTextCursorLineOffset()
 	currentVisual := cursorVisualSegmentIndex(lines, segments, line, offset, width)
 	currentSegment := segments[currentVisual]
 	visualColumn := max(0, offset-currentSegment.start)
@@ -60,11 +64,11 @@ func (component *editorCursorComponent) moveActiveWrappedLine(delta int) {
 	targetSegment := segments[targetVisual]
 	targetWidth := targetSegment.end - targetSegment.start
 	newOffset := targetSegment.start + min(visualColumn, targetWidth)
-	m.setActiveTextCursorAbs(multilineAbsPosition(lines, targetSegment.logical, newOffset))
+	component.setActiveTextCursorAbs(multilineAbsPosition(lines, targetSegment.logical, newOffset))
 }
 
-func (component *editorCursorComponent) activeTextCursorLineOffset() (line, offset int) {
-	m := &component.model
+func (component *editorCursor) activeTextCursorLineOffset() (line, offset int) {
+	m := component.state
 	switch m.editField {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return 0, 0
@@ -106,8 +110,8 @@ func multilineAbsPosition(lines []string, line, offset int) int {
 	return abs + offset
 }
 
-func (component *editorCursorComponent) activeTextLineStart() {
-	m := &component.model
+func (component *editorCursor) activeTextLineStart() {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -123,8 +127,8 @@ func (component *editorCursorComponent) activeTextLineStart() {
 	}
 }
 
-func (component *editorCursorComponent) activeTextLineEnd() {
-	m := &component.model
+func (component *editorCursor) activeTextLineEnd() {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -140,43 +144,37 @@ func (component *editorCursorComponent) activeTextLineEnd() {
 	}
 }
 
-func (component *editorCursorComponent) activeTextStart() {
-	m := &component.model
-	m.setActiveTextCursorAbs(0)
+func (component *editorCursor) activeTextStart() {
+	component.setActiveTextCursorAbs(0)
 }
 
-func (component *editorCursorComponent) activeTextEnd() {
-	m := &component.model
-	m.setActiveTextCursorAbs(len([]rune(m.activeTextValue())))
+func (component *editorCursor) activeTextEnd() {
+	component.setActiveTextCursorAbs(len([]rune(component.activeTextValue())))
 }
 
-func (component *editorCursorComponent) activeTextWordForward() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	m.setActiveTextCursorAbs(wordForwardIndex(value, m.activeTextCursorAbs()))
+func (component *editorCursor) activeTextWordForward() {
+	value := []rune(component.activeTextValue())
+	component.setActiveTextCursorAbs(wordForwardIndex(value, component.activeTextCursorAbs()))
 }
 
-func (component *editorCursorComponent) activeTextWordBackward() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	m.setActiveTextCursorAbs(wordBackwardIndex(value, m.activeTextCursorAbs()))
+func (component *editorCursor) activeTextWordBackward() {
+	value := []rune(component.activeTextValue())
+	component.setActiveTextCursorAbs(wordBackwardIndex(value, component.activeTextCursorAbs()))
 }
 
-func (component *editorCursorComponent) activeTextDeleteChar() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	pos := m.activeTextCursorAbs()
+func (component *editorCursor) activeTextDeleteChar() {
+	value := []rune(component.activeTextValue())
+	pos := component.activeTextCursorAbs()
 	if pos < 0 || pos >= len(value) {
 		return
 	}
 	value = append(value[:pos], value[pos+1:]...)
-	m.setActiveTextValueAndCursor(string(value), pos)
+	component.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (component *editorCursorComponent) activeTextDeleteToLineEnd() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	pos := m.activeTextCursorAbs()
+func (component *editorCursor) activeTextDeleteToLineEnd() {
+	value := []rune(component.activeTextValue())
+	pos := component.activeTextCursorAbs()
 	if pos < 0 || pos > len(value) {
 		return
 	}
@@ -191,13 +189,12 @@ func (component *editorCursorComponent) activeTextDeleteToLineEnd() {
 		return
 	}
 	value = append(value[:pos], value[end:]...)
-	m.setActiveTextValueAndCursor(string(value), pos)
+	component.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (component *editorCursorComponent) activeTextDeleteWordForward() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	pos := m.activeTextCursorAbs()
+func (component *editorCursor) activeTextDeleteWordForward() {
+	value := []rune(component.activeTextValue())
+	pos := component.activeTextCursorAbs()
 	end := wordForwardIndex(value, pos)
 	if end <= pos && pos < len(value) {
 		end = pos + 1
@@ -206,23 +203,22 @@ func (component *editorCursorComponent) activeTextDeleteWordForward() {
 		return
 	}
 	value = append(value[:pos], value[end:]...)
-	m.setActiveTextValueAndCursor(string(value), pos)
+	component.setActiveTextValueAndCursor(string(value), pos)
 }
 
-func (component *editorCursorComponent) activeTextDeleteWordBackward() {
-	m := &component.model
-	value := []rune(m.activeTextValue())
-	pos := m.activeTextCursorAbs()
+func (component *editorCursor) activeTextDeleteWordBackward() {
+	value := []rune(component.activeTextValue())
+	pos := component.activeTextCursorAbs()
 	start := wordBackwardIndex(value, pos)
 	if start < 0 || start >= pos || pos > len(value) {
 		return
 	}
 	value = append(value[:start], value[pos:]...)
-	m.setActiveTextValueAndCursor(string(value), start)
+	component.setActiveTextValueAndCursor(string(value), start)
 }
 
-func (component *editorCursorComponent) activeTextValue() string {
-	m := &component.model
+func (component *editorCursor) activeTextValue() string {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 		return ""
@@ -241,8 +237,8 @@ func (component *editorCursorComponent) activeTextValue() string {
 	}
 }
 
-func (component *editorCursorComponent) activeTextCursorAbs() int {
-	m := &component.model
+func (component *editorCursor) activeTextCursorAbs() int {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 		return 0
@@ -251,18 +247,18 @@ func (component *editorCursorComponent) activeTextCursorAbs() int {
 	case editFieldFilePath:
 		return m.editFileInput.Position()
 	case editFieldDescription:
-		return m.descriptionAreaCursorAbs()
+		return component.descriptionAreaCursorAbs()
 	case editFieldPolicies:
-		return m.policiesAreaCursorAbs()
+		return component.policiesAreaCursorAbs()
 	case editFieldValue:
-		return m.textAreaCursorAbs()
+		return component.textAreaCursorAbs()
 	default:
 		return 0
 	}
 }
 
-func (component *editorCursorComponent) setActiveTextCursorAbs(pos int) {
-	m := &component.model
+func (component *editorCursor) setActiveTextCursorAbs(pos int) {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -270,16 +266,16 @@ func (component *editorCursorComponent) setActiveTextCursorAbs(pos int) {
 	case editFieldFilePath:
 		m.editFileInput.SetCursor(pos)
 	case editFieldDescription:
-		m.setDescriptionAreaCursorAbs(pos)
+		component.setDescriptionAreaCursorAbs(pos)
 	case editFieldPolicies:
-		m.setPoliciesAreaCursorAbs(pos)
+		component.setPoliciesAreaCursorAbs(pos)
 	case editFieldValue:
-		m.setTextAreaCursorAbs(pos)
+		component.setTextAreaCursorAbs(pos)
 	}
 }
 
-func (component *editorCursorComponent) setActiveTextValueAndCursor(value string, pos int) {
-	m := &component.model
+func (component *editorCursor) setActiveTextValueAndCursor(value string, pos int) {
+	m := component.state
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -290,28 +286,28 @@ func (component *editorCursorComponent) setActiveTextValueAndCursor(value string
 		m.editFileInput.SetCursor(pos)
 	case editFieldDescription:
 		m.editDescriptionArea.SetValue(value)
-		m.setDescriptionAreaCursorAbs(pos)
+		component.setDescriptionAreaCursorAbs(pos)
 	case editFieldPolicies:
 		m.editPoliciesArea.SetValue(value)
-		m.setPoliciesAreaCursorAbs(pos)
+		component.setPoliciesAreaCursorAbs(pos)
 	case editFieldValue:
 		m.textArea.SetValue(value)
-		m.setTextAreaCursorAbs(pos)
+		component.setTextAreaCursorAbs(pos)
 	}
 }
 
-func (component *editorCursorComponent) textAreaCursorAbs() int {
-	m := &component.model
+func (component *editorCursor) textAreaCursorAbs() int {
+	m := component.state
 	return textAreaCursorAbs(m.textArea)
 }
 
-func (component *editorCursorComponent) descriptionAreaCursorAbs() int {
-	m := &component.model
+func (component *editorCursor) descriptionAreaCursorAbs() int {
+	m := component.state
 	return textAreaCursorAbs(m.editDescriptionArea)
 }
 
-func (component *editorCursorComponent) policiesAreaCursorAbs() int {
-	m := &component.model
+func (component *editorCursor) policiesAreaCursorAbs() int {
+	m := component.state
 	return textAreaCursorAbs(m.editPoliciesArea)
 }
 
@@ -332,18 +328,18 @@ func textAreaCursorAbs(area interface {
 	return abs + col
 }
 
-func (component *editorCursorComponent) setTextAreaCursorAbs(pos int) {
-	m := &component.model
+func (component *editorCursor) setTextAreaCursorAbs(pos int) {
+	m := component.state
 	setTextAreaAbsPosition(&m.textArea, pos)
 }
 
-func (component *editorCursorComponent) setDescriptionAreaCursorAbs(pos int) {
-	m := &component.model
+func (component *editorCursor) setDescriptionAreaCursorAbs(pos int) {
+	m := component.state
 	setTextAreaAbsPosition(&m.editDescriptionArea, pos)
 }
 
-func (component *editorCursorComponent) setPoliciesAreaCursorAbs(pos int) {
-	m := &component.model
+func (component *editorCursor) setPoliciesAreaCursorAbs(pos int) {
+	m := component.state
 	setTextAreaAbsPosition(&m.editPoliciesArea, pos)
 }
 

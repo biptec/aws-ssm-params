@@ -7,11 +7,15 @@ import (
 )
 
 type pageRenderer struct {
-	model model
+	height int
+	styleRenderer
 }
 
-func (component pageRenderer) boxTop(title string, innerWidth int) string {
-	m := component.model
+func newPageRenderer(m model) pageRenderer {
+	return pageRenderer{height: m.height, styleRenderer: newStyleRenderer(m)}
+}
+
+func (renderer pageRenderer) boxTop(title string, innerWidth int) string {
 	if innerWidth < 10 {
 		innerWidth = 10
 	}
@@ -27,19 +31,17 @@ func (component pageRenderer) boxTop(title string, innerWidth int) string {
 		rightLen = 1
 	}
 	titleRendered := titleText
-	if !m.opts.NoColor {
+	if !renderer.noColor {
 		titleRendered = titleStyle.Render(titleText)
 	}
-	return m.frame("┌") + m.frame(strings.Repeat("─", left)) + titleRendered + m.frame(strings.Repeat("─", rightLen)) + m.frame("┐")
+	return renderer.frame("┌") + renderer.frame(strings.Repeat("─", left)) + titleRendered + renderer.frame(strings.Repeat("─", rightLen)) + renderer.frame("┐")
 }
 
-func (component pageRenderer) boxBottom(innerWidth int) string {
-	m := component.model
-	return m.frame("└") + m.frame(strings.Repeat("─", innerWidth)) + m.frame("┘")
+func (renderer pageRenderer) boxBottom(innerWidth int) string {
+	return renderer.frame("└") + renderer.frame(strings.Repeat("─", innerWidth)) + renderer.frame("┘")
 }
 
-func (component pageRenderer) boxLine(content string, innerWidth int) string {
-	m := component.model
+func (renderer pageRenderer) boxLine(content string, innerWidth int) string {
 	rawLeft := strings.HasPrefix(content, rawLeftLinePrefix)
 	if rawLeft {
 		content = strings.TrimPrefix(content, rawLeftLinePrefix)
@@ -54,17 +56,16 @@ func (component pageRenderer) boxLine(content string, innerWidth int) string {
 	if padWidth < 0 {
 		padWidth = 0
 	}
-	leftFrame := m.frame("│")
+	leftFrame := renderer.frame("│")
 	if rawLeft {
 		leftFrame = ""
 	}
-	return leftFrame + content + strings.Repeat(" ", padWidth) + m.frame("│")
+	return leftFrame + content + strings.Repeat(" ", padWidth) + renderer.frame("│")
 }
 
 // renderFooter formats the fixed bottom hotkey/status line.
-func (component pageRenderer) renderFooter(text string) string {
-	m := component.model
-	if m.opts.NoColor || text == "" {
+func (renderer pageRenderer) renderFooter(text string) string {
+	if renderer.noColor || text == "" {
 		return text
 	}
 	parts := strings.Split(text, " • ")
@@ -80,11 +81,10 @@ func (component pageRenderer) renderFooter(text string) string {
 }
 
 // renderFullscreen combines a screen body and footer, padding vertical space so the footer stays at the bottom.
-func (component pageRenderer) renderFullscreen(body, footer string) string {
-	m := component.model
+func (renderer pageRenderer) renderFullscreen(body, footer string) string {
 	body = indentBlock(body, 0)
 	footer = indentBlock(footer, 0)
-	if m.height <= 0 {
+	if renderer.height <= 0 {
 		if footer == "" {
 			return body
 		}
@@ -93,13 +93,13 @@ func (component pageRenderer) renderFullscreen(body, footer string) string {
 
 	bodyLines := renderLines(body)
 	footerLines := renderLines(footer)
-	bodyHeight := max(0, m.height-len(footerLines))
+	bodyHeight := max(0, renderer.height-len(footerLines))
 	if len(bodyLines) > bodyHeight {
 		bodyLines = bodyLines[:bodyHeight]
 	}
 
-	padLines := max(0, m.height-len(bodyLines)-len(footerLines))
-	out := make([]string, 0, m.height)
+	padLines := max(0, renderer.height-len(bodyLines)-len(footerLines))
+	out := make([]string, 0, renderer.height)
 	out = append(out, bodyLines...)
 	for i := 0; i < padLines; i++ {
 		out = append(out, "")

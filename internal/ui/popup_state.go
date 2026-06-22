@@ -1,7 +1,26 @@
 package ui
 
-type popupStateComponent struct {
-	model model
+import "github.com/biptec/aws-ssm-params/internal/inventory"
+
+type popupState struct {
+	activePopup popupKind
+	popupStack  []popupKind
+
+	regionCursor      int
+	typeCursor        int
+	tierCursor        int
+	dataTypeCursor    int
+	overwriteCursor   int
+	randomCursor      int
+	valueActionCursor int
+
+	confirmPrompt   string
+	confirmExpected string
+	confirmItems    []inventory.Item
+
+	shortcutsFor       screen
+	shortcutsPopupFor  popupKind
+	pendingKeySequence string
 }
 
 type popupKind int
@@ -25,29 +44,25 @@ const (
 	popupRandomValue
 )
 
-func (component *popupStateComponent) openShortcuts(from screen) {
-	m := &component.model
+func (m *popupState) openShortcuts(from screen) {
 	m.shortcutsFor = from
 	m.shortcutsPopupFor = popupNone
 	m.pushPopup(popupShortcuts)
 }
 
-func (component *popupStateComponent) openPopupShortcuts(from screen, popup popupKind) {
-	m := &component.model
+func (m *popupState) openPopupShortcuts(from screen, popup popupKind) {
 	m.shortcutsFor = from
 	m.shortcutsPopupFor = popup
 	m.pushPopup(popupShortcuts)
 }
 
-func (component *popupStateComponent) pushPopup(kind popupKind) {
-	m := &component.model
+func (m *popupState) pushPopup(kind popupKind) {
 	m.popupStack = nil
 	m.activePopup = kind
 	m.pendingKeySequence = ""
 }
 
-func (component *popupStateComponent) pushNestedPopup(kind popupKind) {
-	m := &component.model
+func (m *popupState) pushNestedPopup(kind popupKind) {
 	m.popupStack = nil
 	if m.activePopup != popupNone {
 		m.popupStack = append(m.popupStack, m.activePopup)
@@ -56,8 +71,7 @@ func (component *popupStateComponent) pushNestedPopup(kind popupKind) {
 	m.pendingKeySequence = ""
 }
 
-func (component *popupStateComponent) popPopup() {
-	m := &component.model
+func (m *popupState) popPopup() {
 	if len(m.popupStack) == 0 {
 		m.activePopup = popupNone
 		m.pendingKeySequence = ""
@@ -69,15 +83,13 @@ func (component *popupStateComponent) popPopup() {
 	m.pendingKeySequence = ""
 }
 
-func (component *popupStateComponent) clearPopupStack() {
-	m := &component.model
+func (m *popupState) clearPopupStack() {
 	m.activePopup = popupNone
 	m.popupStack = nil
 	m.pendingKeySequence = ""
 }
 
-func (component popupStateComponent) popupLayers() []popupKind {
-	m := component.model
+func (m popupState) popupLayers() []popupKind {
 	layers := append([]popupKind(nil), m.popupStack...)
 	if m.activePopup != popupNone {
 		layers = append(layers, m.activePopup)

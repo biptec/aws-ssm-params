@@ -151,10 +151,10 @@ func TestSaveValueCmdWritesSelectedParameterType(t *testing.T) {
 }
 
 func TestReplaceStatusPrefersMatchingRegion(t *testing.T) {
-	m := model{statuses: []Status{
+	m := model{listState: listState{statuses: []Status{
 		{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "eu"},
 		{Item: inventory.Item{Path: "/app/value", Region: "us-east-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "us"},
-	}}
+	}}}
 
 	m.replaceStatus("/app/value", Status{Item: inventory.Item{Path: "/app/value", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
 
@@ -164,7 +164,7 @@ func TestReplaceStatusPrefersMatchingRegion(t *testing.T) {
 }
 
 func TestDisplayValueShowsSecureStringWhenDecrypted(t *testing.T) {
-	m := model{width: 100}
+	m := model{runtimeState: runtimeState{width: 100}}
 
 	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
 	assert.Equal(t, "plain", m.displayValue(Status{Type: ssm.ParameterTypeString.String(), Value: "plain"}, false))
@@ -172,7 +172,7 @@ func TestDisplayValueShowsSecureStringWhenDecrypted(t *testing.T) {
 }
 
 func TestDisplayValueShowsEncryptedPlaceholderWithoutDecryption(t *testing.T) {
-	m := model{width: 100}
+	m := model{runtimeState: runtimeState{width: 100}}
 
 	assert.Equal(t, "(encrypted)", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String()}, false))
 }
@@ -192,7 +192,7 @@ func TestEncryptedPlaceholderUsesMutedValueStyleOnly(t *testing.T) {
 }
 
 func TestDisplayValueRendersMultilineAsSingleLinePreview(t *testing.T) {
-	m := model{width: 80}
+	m := model{runtimeState: runtimeState{width: 80}}
 	st := Status{Type: ssm.ParameterTypeString.String(), Value: "one\ntwo\nthree"}
 
 	preview := m.displayValue(st, true)
@@ -751,10 +751,10 @@ func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
 }
 
 func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
-	m := model{statuses: []Status{
+	m := model{listState: listState{statuses: []Status{
 		{Item: inventory.Item{Path: "/old/path", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "eu"},
 		{Item: inventory.Item{Path: "/old/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "us"},
-	}}
+	}}}
 
 	m.replaceStatus("/old/path", Status{Item: inventory.Item{Path: "/new/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
 

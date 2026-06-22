@@ -8,12 +8,25 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
-type editorOptionsComponent struct {
-	model model
+type editorOptions struct {
+	opts Options
+	editorState
+	current Status
 }
 
-func (component editorOptionsComponent) fieldAllowed(field string) bool {
-	m := component.model
+func newEditorOptions(m model) editorOptions {
+	return editorOptions{opts: m.opts, editorState: m.editorState, current: m.currentStatus()}
+}
+
+func (m editorOptions) currentStatus() Status {
+	return m.current
+}
+
+func (m editorOptions) currentItem() inventory.Item {
+	return m.current.Item
+}
+
+func (m editorOptions) fieldAllowed(field string) bool {
 	if field == "name" || len(m.opts.Fields) == 0 {
 		return true
 	}
@@ -25,8 +38,7 @@ func (component editorOptionsComponent) fieldAllowed(field string) bool {
 	return false
 }
 
-func (component editorOptionsComponent) editFieldAllowed(field editField) bool {
-	m := component.model
+func (m editorOptions) editFieldAllowed(field editField) bool {
 	switch field {
 	case editFieldFilePath:
 		return true
@@ -104,8 +116,7 @@ func overwriteItems() []overwriteItem {
 
 // initialEditType chooses the type shown when opening an editor.
 // Existing parameters preserve their AWS type, while missing/new parameters default to SecureString.
-func (component editorOptionsComponent) initialEditType() ssm.ParameterType {
-	m := component.model
+func (m editorOptions) initialEditType() ssm.ParameterType {
 	current := m.currentStatus().Type
 	if parameterType, err := ssm.ParseParameterType(current); err == nil {
 		return parameterType
@@ -114,8 +125,7 @@ func (component editorOptionsComponent) initialEditType() ssm.ParameterType {
 }
 
 // normalizedEditType returns a valid parameter type even if edit state has not been initialized yet.
-func (component editorOptionsComponent) normalizedEditType() ssm.ParameterType {
-	m := component.model
+func (m editorOptions) normalizedEditType() ssm.ParameterType {
 	if m.editType.IsValid() {
 		return m.editType
 	}
@@ -140,8 +150,7 @@ func parameterTypeIndexByHotkey(items []parameterTypeItem, key string) (int, boo
 	return 0, false
 }
 
-func (component editorOptionsComponent) initialEditTier() ssm.ParameterTier {
-	m := component.model
+func (m editorOptions) initialEditTier() ssm.ParameterTier {
 	current := m.currentStatus().Tier
 	if tier, err := ssm.ParseParameterTier(current); err == nil {
 		return tier
@@ -149,21 +158,18 @@ func (component editorOptionsComponent) initialEditTier() ssm.ParameterTier {
 	return ssm.DefaultParameterTier
 }
 
-func (component editorOptionsComponent) normalizedEditTier() ssm.ParameterTier {
-	m := component.model
+func (m editorOptions) normalizedEditTier() ssm.ParameterTier {
 	if m.editTier.IsValid() {
 		return m.editTier
 	}
 	return ssm.DefaultParameterTier
 }
 
-func (component editorOptionsComponent) shouldShowPoliciesField() bool {
-	m := component.model
+func (m editorOptions) shouldShowPoliciesField() bool {
 	return m.editFieldAllowed(editFieldPolicies) && m.normalizedEditTier() == ssm.ParameterTierAdvanced
 }
 
-func (component editorOptionsComponent) shouldShowOverwriteField() bool {
-	m := component.model
+func (m editorOptions) shouldShowOverwriteField() bool {
 	return m.editFieldAllowed(editFieldOverwrite) && (m.editNewParameter || !m.currentStatus().Exists)
 }
 
@@ -185,8 +191,7 @@ func parameterTierIndexByHotkey(items []parameterTierItem, key string) (int, boo
 	return 0, false
 }
 
-func (component editorOptionsComponent) initialEditDataType() ssm.ParameterDataType {
-	m := component.model
+func (m editorOptions) initialEditDataType() ssm.ParameterDataType {
 	current := m.currentStatus().DataType
 	if dataType, err := ssm.ParseParameterDataType(current); err == nil {
 		return dataType
@@ -194,8 +199,7 @@ func (component editorOptionsComponent) initialEditDataType() ssm.ParameterDataT
 	return ssm.DefaultParameterDataType
 }
 
-func (component editorOptionsComponent) normalizedEditDataType() ssm.ParameterDataType {
-	m := component.model
+func (m editorOptions) normalizedEditDataType() ssm.ParameterDataType {
 	if m.editDataType.IsValid() {
 		return m.editDataType
 	}
@@ -240,8 +244,7 @@ func overwriteIndexByHotkey(items []overwriteItem, key string) (int, bool) {
 
 // initialEditRegion chooses the default concrete region when editing a parameter.
 // For wildcard rows it prefers the first configured region so saving never targets "*" accidentally.
-func (component editorOptionsComponent) initialEditRegion() string {
-	m := component.model
+func (m editorOptions) initialEditRegion() string {
 	item := m.currentItem()
 	if item.Region != "" && item.Region != "*" {
 		return item.Region
@@ -257,8 +260,7 @@ func (component editorOptionsComponent) initialEditRegion() string {
 }
 
 // regionOptions returns the concrete regions available for saving the current value.
-func (component editorOptionsComponent) regionOptions() []string {
-	m := component.model
+func (m editorOptions) regionOptions() []string {
 	if len(m.opts.Regions) > 0 {
 		return append([]string(nil), m.opts.Regions...)
 	}

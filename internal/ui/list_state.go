@@ -7,12 +7,19 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
-type listStateComponent struct {
-	model model
+type listState struct {
+	statuses []Status
+
+	selected         int
+	selectedExpanded bool
+
+	searchMode     bool
+	query          string
+	effectiveQuery string
+	searchInvalid  bool
 }
 
-func (component listStateComponent) currentStatus() Status {
-	m := component.model
+func (m listState) currentStatus() Status {
 	vis := m.visible()
 	if len(vis) == 0 || m.selected < 0 || m.selected >= len(vis) {
 		return Status{}
@@ -20,18 +27,15 @@ func (component listStateComponent) currentStatus() Status {
 	return m.statuses[vis[m.selected]]
 }
 
-func (component listStateComponent) currentItem() inventory.Item {
-	m := component.model
+func (m listState) currentItem() inventory.Item {
 	return m.currentStatus().Item
 }
 
-func (component listStateComponent) visible() []int {
-	m := component.model
+func (m listState) visible() []int {
 	return m.matchesFor(m.effectiveQuery)
 }
 
-func (component listStateComponent) matchesFor(query string) []int {
-	m := component.model
+func (m listState) matchesFor(query string) []int {
 	q := strings.ToLower(query)
 	out := []int{}
 	for i := range m.statuses {
@@ -43,8 +47,7 @@ func (component listStateComponent) matchesFor(query string) []int {
 }
 
 // applySearchQuery updates the search query, validates it against visible rows, and keeps selection in range.
-func (component *listStateComponent) applySearchQuery(query string) {
-	m := &component.model
+func (m *listState) applySearchQuery(query string) {
 	m.query = query
 	if query == "" {
 		m.effectiveQuery = ""
@@ -62,8 +65,7 @@ func (component *listStateComponent) applySearchQuery(query string) {
 	m.ensureSelection()
 }
 
-func (component listStateComponent) visiblePaths() []string {
-	m := component.model
+func (m listState) visiblePaths() []string {
 	vis := m.visible()
 	out := make([]string, 0, len(vis))
 	for _, idx := range vis {
@@ -72,8 +74,7 @@ func (component listStateComponent) visiblePaths() []string {
 	return out
 }
 
-func (component listStateComponent) visibleItems() []inventory.Item {
-	m := component.model
+func (m listState) visibleItems() []inventory.Item {
 	vis := m.visible()
 	out := make([]inventory.Item, 0, len(vis))
 	for _, idx := range vis {
@@ -83,8 +84,7 @@ func (component listStateComponent) visibleItems() []inventory.Item {
 }
 
 // ensureSelection clamps the selected row so it always points at a visible item when possible.
-func (component *listStateComponent) ensureSelection() {
-	m := &component.model
+func (m *listState) ensureSelection() {
 	vis := m.visible()
 	if len(vis) == 0 {
 		m.selected = 0
@@ -99,8 +99,7 @@ func (component *listStateComponent) ensureSelection() {
 }
 
 // move changes the selected row by delta within the currently visible result set.
-func (component *listStateComponent) move(delta int) {
-	m := &component.model
+func (m *listState) move(delta int) {
 	vis := m.visible()
 	if len(vis) == 0 {
 		return
@@ -119,8 +118,7 @@ func (component *listStateComponent) move(delta int) {
 // replaceStatus updates the status list after saving a value.
 // It prefers the exact path+region row so multi-region screens do not replace the wrong regional value;
 // when a wildcard missing row was saved to a concrete region, it replaces that wildcard row as a fallback.
-func (component *listStateComponent) replaceStatus(path string, st Status) {
-	m := &component.model
+func (m *listState) replaceStatus(path string, st Status) {
 	fallback := -1
 	for i := range m.statuses {
 		if m.statuses[i].Item.Path != path {
@@ -146,8 +144,7 @@ func (component *listStateComponent) replaceStatus(path string, st Status) {
 	m.selected = len(m.statuses) - 1
 }
 
-func (component *listStateComponent) removeItemRows(items []inventory.Item) {
-	m := &component.model
+func (m *listState) removeItemRows(items []inventory.Item) {
 	targets := map[string]bool{}
 	for _, item := range items {
 		targets[itemKey(item.Region, item.Path)] = true
@@ -163,8 +160,7 @@ func (component *listStateComponent) removeItemRows(items []inventory.Item) {
 }
 
 // markMissingItem updates the UI after deletion by replacing matching concrete rows with a missing status.
-func (component *listStateComponent) markMissingItem(item inventory.Item) {
-	m := &component.model
+func (m *listState) markMissingItem(item inventory.Item) {
 	for i := range m.statuses {
 		if sameItem(m.statuses[i].Item, item) {
 			m.statuses[i] = Status{Item: item, Type: ssm.DefaultParameterType.String()}

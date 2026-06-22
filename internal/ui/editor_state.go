@@ -263,7 +263,7 @@ func (component editorStateComponent) ensureRegionSelectOptions() model {
 	if len(m.editRegionOptions) > 0 || m.client == nil {
 		return m
 	}
-	regions, err := m.client.ListRegions(m.ctx)
+	regions, err := backendFor(m).listRegions(m.ctx)
 	if err != nil {
 		m.errMessage = err.Error()
 		return m

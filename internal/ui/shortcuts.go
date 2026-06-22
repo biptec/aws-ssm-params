@@ -5,8 +5,40 @@ import (
 	"strings"
 )
 
-type shortcutsComponent struct {
-	model model
+type shortcuts struct {
+	screen             screen
+	shortcutsFor       screen
+	shortcutsPopupFor  popupKind
+	fileActionMode     string
+	viInsertMode       bool
+	keys               keymap
+	popupSortOptions   []sortItem
+	visibleSortOptions []sortItem
+}
+
+func newShortcuts(m model) shortcuts {
+	return shortcuts{
+		screen:             m.screen,
+		shortcutsFor:       m.shortcutsFor,
+		shortcutsPopupFor:  m.shortcutsPopupFor,
+		fileActionMode:     m.fileActionMode,
+		viInsertMode:       m.viInsertMode,
+		keys:               newKeymap(m),
+		popupSortOptions:   m.popupSortItems(),
+		visibleSortOptions: m.visibleSortItems(),
+	}
+}
+
+func (m shortcuts) keymapStyle() keymapStyle {
+	return m.keys.keymapStyle()
+}
+
+func (m shortcuts) popupSortItems() []sortItem {
+	return m.popupSortOptions
+}
+
+func (m shortcuts) visibleSortItems() []sortItem {
+	return m.visibleSortOptions
 }
 
 // mainFooterText returns shortcuts for the main table screen.
@@ -22,8 +54,7 @@ func searchFooterText() string {
 	return "ctrl+/ help • esc close"
 }
 
-func (component shortcutsComponent) popupFooterText(kind popupKind) string {
-	m := component.model
+func (m shortcuts) popupFooterText(kind popupKind) string {
 	switch kind {
 	case popupNone:
 		return ""
@@ -71,8 +102,7 @@ func (component shortcutsComponent) popupFooterText(kind popupKind) string {
 	}
 }
 
-func (component shortcutsComponent) sortPopupScreenFooter() string {
-	m := component.model
+func (m shortcuts) sortPopupScreenFooter() string {
 	sortItems := m.popupSortItems()
 	parts := make([]string, 0, 2+len(sortItems)+1)
 	parts = append(parts, "ctrl+/ help", "d direction")
@@ -84,8 +114,7 @@ func (component shortcutsComponent) sortPopupScreenFooter() string {
 }
 
 // shortcutsText returns the context-sensitive shortcut reference shown by the Shortcuts screen.
-func (component shortcutsComponent) shortcutsText() string {
-	m := component.model
+func (m shortcuts) shortcutsText() string {
 	forScreen := m.shortcutsFor
 	if forScreen == 0 && m.screen == screenHelp {
 		forScreen = screenMain
@@ -108,8 +137,7 @@ func (component shortcutsComponent) shortcutsText() string {
 	return strings.Join(out, "\n")
 }
 
-func (component shortcutsComponent) popupShortcutsText(kind popupKind) string {
-	m := component.model
+func (m shortcuts) popupShortcutsText(kind popupKind) string {
 	sections := []string{m.popupActionsShortcuts(kind), m.popupSortShortcuts(kind), m.popupNavigationShortcuts(kind), globalShortcuts(m.shortcutsFor)}
 	out := []string{}
 	for _, section := range sections {
@@ -125,7 +153,7 @@ func (component shortcutsComponent) popupShortcutsText(kind popupKind) string {
 	return strings.Join(out, "\n")
 }
 
-func (component shortcutsComponent) popupActionsShortcuts(kind popupKind) string {
+func (m shortcuts) popupActionsShortcuts(kind popupKind) string {
 	switch kind {
 	case popupNone, popupShortcuts, popupConfirm:
 		return ""
@@ -212,8 +240,7 @@ func (component shortcutsComponent) popupActionsShortcuts(kind popupKind) string
 	}
 }
 
-func (component shortcutsComponent) popupSortShortcuts(kind popupKind) string {
-	m := component.model
+func (m shortcuts) popupSortShortcuts(kind popupKind) string {
 	if kind != popupSort {
 		return ""
 	}
@@ -225,8 +252,7 @@ func (component shortcutsComponent) popupSortShortcuts(kind popupKind) string {
 	return strings.Join(lines, "\n")
 }
 
-func (component shortcutsComponent) popupNavigationShortcuts(kind popupKind) string {
-	m := component.model
+func (m shortcuts) popupNavigationShortcuts(kind popupKind) string {
 	switch kind {
 	case popupNone, popupShortcuts, popupConfirm, popupFileAction, popupFileWriteConfirm, popupUnsavedChanges:
 		return ""
@@ -237,8 +263,7 @@ func (component shortcutsComponent) popupNavigationShortcuts(kind popupKind) str
 	}
 }
 
-func (component shortcutsComponent) actionsShortcuts(forScreen screen) string {
-	m := component.model
+func (m shortcuts) actionsShortcuts(forScreen screen) string {
 	switch forScreen {
 	case screenHelp:
 		return ""
@@ -298,8 +323,7 @@ func (component shortcutsComponent) actionsShortcuts(forScreen screen) string {
 	}
 }
 
-func (component shortcutsComponent) sortShortcuts(forScreen screen) string {
-	m := component.model
+func (m shortcuts) sortShortcuts(forScreen screen) string {
 	if forScreen != screenMain {
 		return ""
 	}
@@ -314,8 +338,7 @@ func (component shortcutsComponent) sortShortcuts(forScreen screen) string {
 	return strings.Join(lines, "\n")
 }
 
-func (component shortcutsComponent) navigationShortcuts(forScreen screen) string {
-	m := component.model
+func (m shortcuts) navigationShortcuts(forScreen screen) string {
 	if forScreen == screenMain || forScreen == screenColumns || forScreen == screenRegionSelect || forScreen == screenTypeSelect {
 		if m.keymapStyle() == keymapVi {
 			return strings.TrimSpace(`Navigation

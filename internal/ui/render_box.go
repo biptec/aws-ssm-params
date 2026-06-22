@@ -7,44 +7,50 @@ import (
 )
 
 type boxRenderer struct {
-	model model
+	innerWidth int
+	styleRenderer
+	pageRenderer
+}
+
+func newBoxRenderer(m model) boxRenderer {
+	return boxRenderer{
+		innerWidth:    m.boxInnerWidth(),
+		styleRenderer: newStyleRenderer(m),
+		pageRenderer:  newPageRenderer(m),
+	}
 }
 
 // renderFieldPairs converts name/value metadata pairs into aligned lines for boxed detail views.
-func (component boxRenderer) renderFieldPairs(fields [][2]string, labelWidth int) []string {
-	m := component.model
+func (renderer boxRenderer) renderFieldPairs(fields [][2]string, labelWidth int) []string {
 	lines := make([]string, 0, len(fields))
 	for _, f := range fields {
 		value := f[1]
 		if f[0] == "Status" {
-			lines = append(lines, "  "+m.fieldLine(f[0], value, labelWidth))
+			lines = append(lines, "  "+renderer.fieldLine(f[0], value, labelWidth))
 			continue
 		}
-		renderedValue := m.value(value)
+		renderedValue := renderer.value(value)
 		if f[0] == "Value" && value == encryptedPlaceholderText {
-			renderedValue = m.encryptedPlaceholder()
+			renderedValue = renderer.encryptedPlaceholder()
 		}
-		lines = append(lines, "  "+m.fieldLine(f[0], renderedValue, labelWidth))
+		lines = append(lines, "  "+renderer.fieldLine(f[0], renderedValue, labelWidth))
 	}
 	return lines
 }
 
-func (component boxRenderer) fieldLine(name, renderedValue string, labelWidth int) string {
-	m := component.model
-	label := m.label(padMin(name+":", labelWidth+1))
+func (renderer boxRenderer) fieldLine(name, renderedValue string, labelWidth int) string {
+	label := renderer.label(padMin(name+":", labelWidth+1))
 	return label + " " + renderedValue
 }
 
 // renderBox draws a bordered box, truncating or padding content so screens keep stable heights.
-func (component boxRenderer) renderBox(title string, lines []string, preferredHeight int) string {
-	m := component.model
-	return m.renderBoxWithInnerWidth(title, lines, m.boxInnerWidth(), preferredHeight)
+func (renderer boxRenderer) renderBox(title string, lines []string, preferredHeight int) string {
+	return renderer.renderBoxWithInnerWidth(title, lines, renderer.innerWidth, preferredHeight)
 }
 
-func (component boxRenderer) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
-	m := component.model
-	top := m.boxTop(title, innerWidth)
-	bottom := m.boxBottom(innerWidth)
+func (renderer boxRenderer) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
+	top := renderer.boxTop(title, innerWidth)
+	bottom := renderer.boxBottom(innerWidth)
 
 	if preferredHeight <= 0 {
 		preferredHeight = len(lines) + 2
@@ -58,64 +64,58 @@ func (component boxRenderer) renderBoxWithInnerWidth(title string, lines []strin
 		if i < len(lines) {
 			line = lines[i]
 		}
-		out = append(out, m.boxLine(line, innerWidth))
+		out = append(out, renderer.boxLine(line, innerWidth))
 	}
 	out = append(out, bottom)
 	return strings.Join(out, "\n")
 }
 
-func (component boxRenderer) singleSelectLine(label string, selected, focused bool) string {
-	m := component.model
+func (renderer boxRenderer) singleSelectLine(label string, selected, focused bool) string {
 	marker := "( )"
 	if selected {
 		marker = "(*)"
 	}
-	return m.optionLine(marker+" "+label, focused)
+	return renderer.optionLine(marker+" "+label, focused)
 }
 
-func (component boxRenderer) multiSelectLine(label string, checked, focused bool) string {
-	m := component.model
+func (renderer boxRenderer) multiSelectLine(label string, checked, focused bool) string {
 	marker := "[ ]"
 	if checked {
 		marker = "[x]"
 	}
-	return m.optionLine(marker+" "+label, focused)
+	return renderer.optionLine(marker+" "+label, focused)
 }
 
-func (component boxRenderer) optionLine(content string, focused bool) string {
-	m := component.model
+func (renderer boxRenderer) optionLine(content string, focused bool) string {
 	if focused {
-		return m.selectedMarker() + m.selectedRow(content)
+		return renderer.selectedMarker() + renderer.selectedRow(content)
 	}
 	return "  " + content
 }
 
-func (component boxRenderer) popupInputLine(label string, input textinput.Model, inputWidth int) string {
-	m := component.model
+func (renderer boxRenderer) popupInputLine(label string, input textinput.Model, inputWidth int) string {
 	value := input.Value()
 	pos := min(max(0, input.Position()), len([]rune(value)))
-	inputText := m.inputValueWithCursor(value, pos, inputWidth)
+	inputText := renderer.inputValueWithCursor(value, pos, inputWidth)
 	separator := " "
 	if strings.HasSuffix(label, " ") {
 		separator = ""
 	}
-	return m.label(label) + separator + inputText
+	return renderer.label(label) + separator + inputText
 }
 
-func (component boxRenderer) popupInputLinePlainPrefix(prefix string, input textinput.Model, inputWidth int) string {
-	m := component.model
+func (renderer boxRenderer) popupInputLinePlainPrefix(prefix string, input textinput.Model, inputWidth int) string {
 	value := input.Value()
 	pos := min(max(0, input.Position()), len([]rune(value)))
-	return prefix + m.inputValueWithCursor(value, pos, inputWidth)
+	return prefix + renderer.inputValueWithCursor(value, pos, inputWidth)
 }
 
-func (component boxRenderer) inputValueWithCursor(value string, pos, width int) string {
-	m := component.model
+func (renderer boxRenderer) inputValueWithCursor(value string, pos, width int) string {
 	runes := []rune(value)
 	pos = min(max(0, pos), len(runes))
 	width = max(1, width)
 	if len(runes) == 0 {
-		return m.value(m.inputCursor())
+		return renderer.value(renderer.inputCursor())
 	}
 	start := 0
 	if pos >= len(runes) {
@@ -124,7 +124,7 @@ func (component boxRenderer) inputValueWithCursor(value string, pos, width int) 
 			start = len(runes) - textWidth
 		}
 		end := min(len(runes), start+textWidth)
-		return m.value(string(runes[start:end]) + m.inputCursor())
+		return renderer.value(string(runes[start:end]) + renderer.inputCursor())
 	}
 	if len(runes) > width {
 		start = pos - width + 1
@@ -139,25 +139,23 @@ func (component boxRenderer) inputValueWithCursor(value string, pos, width int) 
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		if i == pos {
-			b.WriteString(m.inputCursorForRune(runes[i]))
+			b.WriteString(renderer.inputCursorForRune(runes[i]))
 			continue
 		}
 		b.WriteRune(runes[i])
 	}
-	return m.value(b.String())
+	return renderer.value(b.String())
 }
 
-func (component boxRenderer) inputCursor() string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer boxRenderer) inputCursor() string {
+	if renderer.noColor {
 		return "█"
 	}
 	return cursorStyle.Render(" ")
 }
 
-func (component boxRenderer) inputCursorForRune(r rune) string {
-	m := component.model
-	if m.opts.NoColor {
+func (renderer boxRenderer) inputCursorForRune(r rune) string {
+	if renderer.noColor {
 		return "█"
 	}
 	return cursorStyle.Render(string(r))

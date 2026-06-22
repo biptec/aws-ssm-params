@@ -7,12 +7,39 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
+	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
+type interactiveCommand struct {
+	ctx         *CLIContext
+	cfg         Config
+	useTTYInput bool
+}
+
 // Interactive opens the terminal UI.
 func Interactive(ctx *CLIContext) error {
-	cfg, err := ConfigFromCLI(ctx)
+	command := interactiveCommand{ctx: ctx}
+	return command.run()
+}
+
+func (command *interactiveCommand) run() error {
+	if err := command.prepare(); err != nil {
+		return err
+	}
+	client := NewClient(command.cfg)
+	if err := client.CheckAccess(command.ctx.Context); err != nil {
+		return crerr.Wrap(err, "check AWS access")
+	}
+	regionLabel, regions, err := command.regionSelection(client)
+	if err != nil {
+		return err
+	}
+	return crerr.Wrap(ui.RunInteractive(command.ctx.Context, client, command.cfg.InventoryItems, command.options(regionLabel, regions)), "run interactive")
+}
+
+func (command *interactiveCommand) prepare() error {
+	cfg, err := ConfigFromCLI(command.ctx)
 	if err != nil {
 		return err
 	}
@@ -21,26 +48,34 @@ func Interactive(ctx *CLIContext) error {
 		return err
 	}
 	cfg.InventoryItems = append(cfg.InventoryItems, stdinItems...)
-	items, err := PrepareItems(ctx.Context, &cfg)
+	items, err := PrepareItems(command.ctx.Context, &cfg)
 	if err != nil {
 		return err
 	}
-	client := NewClient(cfg)
-	if err := client.CheckAccess(ctx.Context); err != nil {
-		return crerr.Wrap(err, "check AWS access")
-	}
-	regionLabel := cfg.Region
-	regions := append([]string(nil), cfg.Regions...)
-	if cfg.AllRegions {
+	cfg.InventoryItems = items
+	command.cfg = cfg
+	command.useTTYInput = useTTYInput
+	return nil
+}
+
+func (command interactiveCommand) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
+	regionLabel = command.cfg.Region
+	regions = append([]string(nil), command.cfg.Regions...)
+	if command.cfg.AllRegions {
 		regionLabel = "all regions"
-		regions, err = client.ListRegions(ctx.Context)
+		regions, err = client.ListRegions(command.ctx.Context)
 		if err != nil {
-			return crerr.Wrap(err, "list AWS regions")
+			return "", nil, crerr.Wrap(err, "list AWS regions")
 		}
 	} else if len(regions) > 1 {
 		regionLabel = strings.Join(regions, ", ")
 	}
-	return crerr.Wrap(ui.RunInteractive(ctx.Context, client, items, ui.Options{
+	return regionLabel, regions, nil
+}
+
+func (command interactiveCommand) options(regionLabel string, regions []string) ui.Options {
+	cfg := command.cfg
+	return ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,
 		Profile:                   cfg.Profile,
@@ -56,8 +91,8 @@ func Interactive(ctx *CLIContext) error {
 		NoConfirmWriteSecureValue: cfg.NoConfirmWriteSecureValue,
 		NoConfirmDeleteOne:        cfg.NoConfirmDeleteOne,
 		NoConfirmDeleteAll:        cfg.NoConfirmDeleteAll,
-		UseInputTTY:               useTTYInput,
-	}), "run interactive")
+		UseInputTTY:               command.useTTYInput,
+	}
 }
 
 func loadInteractiveInventoryFromStdin() ([]inventory.Item, bool, error) {

@@ -21,21 +21,42 @@ type mergedPrefilterGroup struct {
 
 const awsPrefilterValueBatchSize = 50
 
+type filteredStatusLoader struct {
+	statusLoader
+	groups []filter.Group
+}
+
+func newFilteredStatusLoader(ctx context.Context, client ssm.Client, groups []filter.Group, includeValues bool, progress LoadProgress) filteredStatusLoader {
+	return filteredStatusLoader{
+		statusLoader: newStatusLoader(ctx, client, includeValues, progress, nil),
+		groups:       groups,
+	}
+}
+
+func (loader filteredStatusLoader) withClient(client ssm.Client) filteredStatusLoader {
+	loader.statusLoader = loader.statusLoader.withClient(client)
+	return loader
+}
+
 // LoadFilteredStatusesBatchForRegions discovers parameter metadata with DescribeParameters prefilters,
 // enriches matching rows with GetParameters values, then applies exact local filter matching.
 func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssm.Client, groups []filter.Group, includeValues bool, regions []string, progress LoadProgress) []Status {
-	if len(groups) == 0 {
-		return LoadStatusesBatchForRegions(ctx, client, nil, includeValues, regions, progress)
+	return newFilteredStatusLoader(ctx, client, groups, includeValues, progress).load(regions)
+}
+
+func (loader filteredStatusLoader) load(regions []string) []Status {
+	if len(loader.groups) == 0 {
+		return loader.statusLoader.load(nil, regions)
 	}
 	if len(regions) == 0 {
-		if region := client.DefaultRegion(); region != "" {
+		if region := loader.client.DefaultRegion(); region != "" {
 			regions = []string{region}
 		} else {
 			regions = []string{""}
 		}
 	}
 
-	exactGroups, remainingGroups := splitExactNameFilterGroups(groups)
+	exactGroups, remainingGroups := splitExactNameFilterGroups(loader.groups)
 	mergedGroups, scanGroups := splitMergeablePrefilterGroups(remainingGroups)
 	statuses := make([]Status, 0, len(regions)*64)
 	seen := map[string]bool{}
@@ -51,15 +72,15 @@ func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssm.Client,
 	}
 
 	for _, region := range regions {
-		regionalClient := client.ForRegion(region)
+		regionalLoader := loader.withClient(loader.client.ForRegion(region))
 		if len(exactGroups) > 0 {
-			appendStatuses(loadExactNameFilteredStatusesRegion(ctx, regionalClient, region, exactGroups, includeValues, progress))
+			appendStatuses(regionalLoader.loadExactNames(region, exactGroups))
 		}
 		for _, mergedGroup := range mergedGroups {
-			appendStatuses(loadMergedPrefilterStatusesRegion(ctx, regionalClient, region, mergedGroup, includeValues, progress))
+			appendStatuses(regionalLoader.loadMergedPrefilter(region, mergedGroup))
 		}
 		for _, group := range scanGroups {
-			appendStatuses(loadFilteredStatusesRegion(ctx, regionalClient, region, group, includeValues, progress))
+			appendStatuses(regionalLoader.loadGroup(region, group))
 		}
 	}
 	sort.Slice(statuses, func(i, j int) bool {
@@ -138,14 +159,14 @@ func appendUniqueStrings(values []string, additions ...string) []string {
 	return values
 }
 
-func loadExactNameFilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, groups []exactNameFilterGroup, includeValues bool, progress LoadProgress) []Status {
+func (loader filteredStatusLoader) loadExactNames(region string, groups []exactNameFilterGroup) []Status {
 	if len(groups) == 0 {
 		return nil
 	}
 	groupsByName := make(map[string][]filter.Group, len(groups))
 	items := make([]inventory.Item, 0, len(groups))
 	seen := map[string]bool{}
-	fetchValues := includeValues
+	fetchValues := loader.includeValues
 	for _, group := range groups {
 		groupsByName[group.Name] = append(groupsByName[group.Name], group.Group)
 		if group.Group.HasField(filter.FieldValue) {
@@ -159,7 +180,9 @@ func loadExactNameFilteredStatusesRegion(ctx context.Context, client ssm.Client,
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 
-	loaded := loadStatusesByItemRegion(ctx, client, items, fetchValues, progress, nil)
+	valueLoader := loader.statusLoader
+	valueLoader.includeValues = fetchValues
+	loaded := valueLoader.loadByItemRegion(items)
 	statuses := make([]Status, 0, len(loaded))
 	for idx := range loaded {
 		status := loaded[idx]
@@ -167,7 +190,7 @@ func loadExactNameFilteredStatusesRegion(ctx context.Context, client ssm.Client,
 			continue
 		}
 		matchStatus := status
-		if !includeValues {
+		if !loader.includeValues {
 			status.Value = ""
 			status.Length = 0
 			status.SHA256Prefix = ""
@@ -182,9 +205,9 @@ func loadExactNameFilteredStatusesRegion(ctx context.Context, client ssm.Client,
 	return statuses
 }
 
-func loadMergedPrefilterStatusesRegion(ctx context.Context, client ssm.Client, region string, mergedGroup mergedPrefilterGroup, includeValues bool, progress LoadProgress) []Status {
+func (loader filteredStatusLoader) loadMergedPrefilter(region string, mergedGroup mergedPrefilterGroup) []Status {
 	if len(mergedGroup.Filter.Values) <= awsPrefilterValueBatchSize {
-		return loadPrefilteredStatusesRegion(ctx, client, region, mergedGroup.Groups, []ssm.ParameterFilter{mergedGroup.Filter}, includeValues, progress)
+		return loader.loadPrefiltered(region, mergedGroup.Groups, []ssm.ParameterFilter{mergedGroup.Filter})
 	}
 	statuses := []Status{}
 	for start := 0; start < len(mergedGroup.Filter.Values); start += awsPrefilterValueBatchSize {
@@ -194,20 +217,20 @@ func loadMergedPrefilterStatusesRegion(ctx context.Context, client ssm.Client, r
 		}
 		filterChunk := mergedGroup.Filter
 		filterChunk.Values = append([]string(nil), mergedGroup.Filter.Values[start:end]...)
-		statuses = append(statuses, loadPrefilteredStatusesRegion(ctx, client, region, mergedGroup.Groups, []ssm.ParameterFilter{filterChunk}, includeValues, progress)...)
+		statuses = append(statuses, loader.loadPrefiltered(region, mergedGroup.Groups, []ssm.ParameterFilter{filterChunk})...)
 	}
 	return statuses
 }
 
-func loadFilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, group filter.Group, includeValues bool, progress LoadProgress) []Status {
-	return loadPrefilteredStatusesRegion(ctx, client, region, []filter.Group{group}, ssmFiltersFromGroup(group), includeValues, progress)
+func (loader filteredStatusLoader) loadGroup(region string, group filter.Group) []Status {
+	return loader.loadPrefiltered(region, []filter.Group{group}, ssmFiltersFromGroup(group))
 }
 
-func loadPrefilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, groups []filter.Group, awsFilters []ssm.ParameterFilter, includeValues bool, progress LoadProgress) []Status {
-	if progress != nil {
-		progress(0, 0, region, nil)
+func (loader filteredStatusLoader) loadPrefiltered(region string, groups []filter.Group, awsFilters []ssm.ParameterFilter) []Status {
+	if loader.progress != nil {
+		loader.progress(0, 0, region, nil)
 	}
-	metas, err := client.ListParameterMetadataWithFilters(ctx, awsFilters)
+	metas, err := loader.client.ListParameterMetadataWithFilters(loader.ctx, awsFilters)
 	if err != nil {
 		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
 	}
@@ -229,7 +252,7 @@ func loadPrefilteredStatusesRegion(ctx context.Context, client ssm.Client, regio
 
 	values := map[string]ssm.Parameter{}
 	errs := map[string]error{}
-	fetchValues := includeValues || filter.GroupsHaveField(groups, filter.FieldValue)
+	fetchValues := loader.includeValues || filter.GroupsHaveField(groups, filter.FieldValue)
 	if fetchValues {
 		for start := 0; start < len(items); start += 10 {
 			end := start + 10
@@ -237,14 +260,14 @@ func loadPrefilteredStatusesRegion(ctx context.Context, client ssm.Client, regio
 				end = len(items)
 			}
 			chunkItems := items[start:end]
-			if progress != nil {
-				progress(start, len(items), region, chunkItems)
+			if loader.progress != nil {
+				loader.progress(start, len(items), region, chunkItems)
 			}
 			paths := make([]string, 0, len(chunkItems))
 			for _, item := range chunkItems {
 				paths = append(paths, item.Path)
 			}
-			chunkValues, chunkErrs := client.GetMany(ctx, paths)
+			chunkValues, chunkErrs := loader.client.GetMany(loader.ctx, paths)
 			for path, value := range chunkValues {
 				if value.Region == "" {
 					value.Region = region
@@ -256,14 +279,14 @@ func loadPrefilteredStatusesRegion(ctx context.Context, client ssm.Client, regio
 			}
 		}
 	}
-	if progress != nil {
-		progress(len(items), len(items), region, nil)
+	if loader.progress != nil {
+		loader.progress(len(items), len(items), region, nil)
 	}
 
 	statuses := make([]Status, 0, len(items))
 	for _, item := range items {
 		status := statusFromMaps(item, item.Region, metaByKey, values, errs, fetchValues)
-		if !includeValues {
+		if !loader.includeValues {
 			status.Value = ""
 			status.Length = 0
 			status.SHA256Prefix = ""

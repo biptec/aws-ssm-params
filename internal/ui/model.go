@@ -2,7 +2,8 @@
 package ui
 
 import (
-	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
@@ -67,88 +68,15 @@ type loadingTickMsg struct{}
 // It stores immutable inputs such as the SSM client and inventory, dynamic data such as loaded statuses/search state,
 // and per-screen state such as cursors, text inputs, confirmation prompts, and loading messages.
 type model struct {
-	client   ssm.Client
-	ctx      context.Context
-	opts     Options
-	items    []inventory.Item
-	statuses []Status
-	loadCh   chan tea.Msg
+	client  ssm.Client
+	backend uiBackend
+	opts    Options
 
-	width  int
-	height int
-
-	screen       screen
-	returnScreen screen
-	activePopup  popupKind
-	popupStack   []popupKind
-
-	selected         int
-	selectedExpanded bool
-
-	searchMode     bool
-	query          string
-	effectiveQuery string
-	searchInvalid  bool
-
-	message        string
-	warningMessage string
-	errMessage     string
-	busyMessage    string
-
-	loadingTitle        string
-	loadingLines        []string
-	loadingSpinnerFrame int
-
-	input                textinput.Model
-	textArea             textarea.Model
-	editPoliciesArea     textarea.Model
-	editDescriptionArea  textarea.Model
-	editPathInput        textinput.Model
-	editDescriptionInput textinput.Model
-	editFileInput        textinput.Model
-	editField            editField
-	editDirection        editDirection
-	viInsertMode         bool
-	editRegionOptions    []string
-	pendingFileWrite     fileWriteConfirmation
-	pendingQuit          bool
-	pendingQuitKey       string
-	editRegion           string
-	editType             ssm.ParameterType
-	editTier             ssm.ParameterTier
-	editDataType         ssm.ParameterDataType
-	editOverwrite        bool
-	editNewParameter     bool
-	editInitialSnapshot  editSnapshot
-	regionCursor         int
-	typeCursor           int
-	tierCursor           int
-	dataTypeCursor       int
-	overwriteCursor      int
-	typeReturnScreen     screen
-
-	columns        map[columnName]bool
-	columnsDraft   map[columnName]bool
-	expandedFields map[editField]bool
-	showGutters    bool
-	columnCursor   int
-	sortBy         columnName
-	sortDescending bool
-	sortRules      []sortRule
-	sortCursor     int
-
-	randomCursor      int
-	valueActionCursor int
-	fileActionMode    string
-	fileActionField   editField
-
-	confirmPrompt   string
-	confirmExpected string
-	confirmItems    []inventory.Item
-
-	shortcutsFor       screen
-	shortcutsPopupFor  popupKind
-	pendingKeySequence string
+	runtimeState
+	listState
+	editorState
+	tableState
+	popupState
 }
 
 // progressMsg is sent from the background status loader to update the loading screen with the current region/chunk.
@@ -299,147 +227,88 @@ func (m model) updateRandomValuePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) moveActiveTextCursor(delta int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.moveActiveTextCursor(delta)
 }
 
 func (m *model) moveActiveTextLine(delta int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.moveActiveTextLine(delta)
 }
 
-func (m *model) moveActiveWrappedLine(delta int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.moveActiveWrappedLine(delta)
-}
-
-func (m *model) activeTextCursorLineOffset() (line, offset int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	return component.activeTextCursorLineOffset()
-}
-
 func (m *model) activeTextLineStart() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextLineStart()
 }
 
 func (m *model) activeTextLineEnd() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextLineEnd()
 }
 
 func (m *model) activeTextStart() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextStart()
 }
 
 func (m *model) activeTextEnd() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextEnd()
 }
 
 func (m *model) activeTextWordForward() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextWordForward()
 }
 
 func (m *model) activeTextWordBackward() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextWordBackward()
 }
 
 func (m *model) activeTextDeleteChar() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextDeleteChar()
 }
 
 func (m *model) activeTextDeleteToLineEnd() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextDeleteToLineEnd()
 }
 
 func (m *model) activeTextDeleteWordForward() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextDeleteWordForward()
 }
 
 func (m *model) activeTextDeleteWordBackward() {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.activeTextDeleteWordBackward()
 }
 
 func (m *model) activeTextValue() string {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	return component.activeTextValue()
 }
 
 func (m *model) activeTextCursorAbs() int {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	return component.activeTextCursorAbs()
 }
 
-func (m *model) setActiveTextCursorAbs(pos int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.setActiveTextCursorAbs(pos)
-}
-
 func (m *model) setActiveTextValueAndCursor(value string, pos int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.setActiveTextValueAndCursor(value, pos)
 }
 
 func (m *model) textAreaCursorAbs() int {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	return component.textAreaCursorAbs()
 }
 
-func (m *model) descriptionAreaCursorAbs() int {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	return component.descriptionAreaCursorAbs()
-}
-
-func (m *model) policiesAreaCursorAbs() int {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	return component.policiesAreaCursorAbs()
-}
-
 func (m *model) setTextAreaCursorAbs(pos int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newEditorCursor(m)
 	component.setTextAreaCursorAbs(pos)
-}
-
-func (m *model) setDescriptionAreaCursorAbs(pos int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.setDescriptionAreaCursorAbs(pos)
-}
-
-func (m *model) setPoliciesAreaCursorAbs(pos int) {
-	component := editorCursorComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.setPoliciesAreaCursorAbs(pos)
 }
 
 func (m *model) openFileWriteConfirmation(kind fileWriteConfirmation) {
@@ -511,62 +380,62 @@ func (m *model) handlePendingEditSequence(key string) (handled, consumed bool) {
 }
 
 func (m model) fieldAllowed(field string) bool {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.fieldAllowed(field)
 }
 
 func (m model) editFieldAllowed(field editField) bool {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.editFieldAllowed(field)
 }
 
 func (m model) initialEditType() ssm.ParameterType {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.initialEditType()
 }
 
 func (m model) normalizedEditType() ssm.ParameterType {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.normalizedEditType()
 }
 
 func (m model) initialEditTier() ssm.ParameterTier {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.initialEditTier()
 }
 
 func (m model) normalizedEditTier() ssm.ParameterTier {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.normalizedEditTier()
 }
 
 func (m model) shouldShowPoliciesField() bool {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.shouldShowPoliciesField()
 }
 
 func (m model) shouldShowOverwriteField() bool {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.shouldShowOverwriteField()
 }
 
 func (m model) initialEditDataType() ssm.ParameterDataType {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.initialEditDataType()
 }
 
 func (m model) normalizedEditDataType() ssm.ParameterDataType {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.normalizedEditDataType()
 }
 
 func (m model) initialEditRegion() string {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.initialEditRegion()
 }
 
 func (m model) regionOptions() []string {
-	component := editorOptionsComponent{model: m}
+	component := newEditorOptions(m)
 	return component.regionOptions()
 }
 
@@ -806,110 +675,22 @@ func (m model) textAreaFooterText() string {
 	return component.textAreaFooterText()
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	component := interactiveComponent{model: m}
-	return component.Update(msg)
-}
-
-func (m model) View() string {
-	component := interactiveComponent{model: m}
-	return component.View()
-}
-
-func (m model) renderPage(footerText string, renderBody func(model) string) string {
-	component := interactiveComponent{model: m}
-	return component.renderPage(footerText, renderBody)
-}
-
-func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	component := interactiveComponent{model: m}
-	return component.updateLoading(msg)
-}
-
 func (m model) keymapStyle() keymapStyle {
-	component := keymapComponent{model: m}
-	return component.keymapStyle()
+	return newKeymap(m).keymapStyle()
 }
 
 func (m model) navigationAction(key string) (navigationAction, bool) {
-	component := keymapComponent{model: m}
-	return component.navigationAction(key)
+	return newKeymap(m).navigationAction(key)
 }
 
 func (m model) editorNavigationAction(key string) (navigationAction, bool) {
-	component := keymapComponent{model: m}
-	return component.editorNavigationAction(key)
+	return newKeymap(m).editorNavigationAction(key)
 }
 
 func (m model) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
-	component := keymapComponent{model: m}
-	return component.handlePendingNavigationSequence(key)
-}
-
-func (m model) currentStatus() Status {
-	component := listStateComponent{model: m}
-	return component.currentStatus()
-}
-
-func (m model) currentItem() inventory.Item {
-	component := listStateComponent{model: m}
-	return component.currentItem()
-}
-
-func (m model) visible() []int {
-	component := listStateComponent{model: m}
-	return component.visible()
-}
-
-func (m model) matchesFor(query string) []int {
-	component := listStateComponent{model: m}
-	return component.matchesFor(query)
-}
-
-func (m *model) applySearchQuery(query string) {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.applySearchQuery(query)
-}
-
-func (m model) visiblePaths() []string {
-	component := listStateComponent{model: m}
-	return component.visiblePaths()
-}
-
-func (m model) visibleItems() []inventory.Item {
-	component := listStateComponent{model: m}
-	return component.visibleItems()
-}
-
-func (m *model) ensureSelection() {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.ensureSelection()
-}
-
-func (m *model) move(delta int) {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.move(delta)
-}
-
-func (m *model) replaceStatus(path string, st Status) {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.replaceStatus(path, st)
-}
-
-func (m *model) removeItemRows(items []inventory.Item) {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.removeItemRows(items)
-}
-
-func (m *model) markMissingItem(item inventory.Item) {
-	component := listStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.markMissingItem(item)
+	pending := m.pendingKeySequence
+	m.pendingKeySequence = ""
+	return newKeymap(m).resolvePendingNavigationSequence(pending, key)
 }
 
 func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -946,47 +727,6 @@ func (m model) renderLoading() string {
 func (m model) renderLoadingPopup() string {
 	component := mainScreenComponent{model: m}
 	return component.renderLoadingPopup()
-}
-
-func (m *model) openShortcuts(from screen) {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.openShortcuts(from)
-}
-
-func (m *model) openPopupShortcuts(from screen, popup popupKind) {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.openPopupShortcuts(from, popup)
-}
-
-func (m *model) pushPopup(kind popupKind) {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.pushPopup(kind)
-}
-
-func (m *model) pushNestedPopup(kind popupKind) {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.pushNestedPopup(kind)
-}
-
-func (m *model) popPopup() {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.popPopup()
-}
-
-func (m *model) clearPopupStack() {
-	component := popupStateComponent{model: *m}
-	defer func() { *m = component.model }()
-	component.clearPopupStack()
-}
-
-func (m model) popupLayers() []popupKind {
-	component := popupStateComponent{model: m}
-	return component.popupLayers()
 }
 
 func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1160,279 +900,146 @@ func (m model) overwriteSelectLines() []string {
 }
 
 func (m model) renderFieldPairs(fields [][2]string, labelWidth int) []string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.renderFieldPairs(fields, labelWidth)
 }
 
 func (m model) fieldLine(name, renderedValue string, labelWidth int) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.fieldLine(name, renderedValue, labelWidth)
 }
 
 func (m model) renderBox(title string, lines []string, preferredHeight int) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.renderBox(title, lines, preferredHeight)
 }
 
-func (m model) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
-	component := boxRenderer{model: m}
-	return component.renderBoxWithInnerWidth(title, lines, innerWidth, preferredHeight)
-}
-
 func (m model) singleSelectLine(label string, selected, focused bool) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.singleSelectLine(label, selected, focused)
 }
 
 func (m model) multiSelectLine(label string, checked, focused bool) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.multiSelectLine(label, checked, focused)
 }
 
-func (m model) optionLine(content string, focused bool) string {
-	component := boxRenderer{model: m}
-	return component.optionLine(content, focused)
-}
-
 func (m model) popupInputLine(label string, input textinput.Model, inputWidth int) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.popupInputLine(label, input, inputWidth)
 }
 
 func (m model) popupInputLinePlainPrefix(prefix string, input textinput.Model, inputWidth int) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.popupInputLinePlainPrefix(prefix, input, inputWidth)
 }
 
 func (m model) inputValueWithCursor(value string, pos, width int) string {
-	component := boxRenderer{model: m}
+	component := newBoxRenderer(m)
 	return component.inputValueWithCursor(value, pos, width)
 }
 
-func (m model) inputCursor() string {
-	component := boxRenderer{model: m}
-	return component.inputCursor()
-}
-
-func (m model) inputCursorForRune(r rune) string {
-	component := boxRenderer{model: m}
-	return component.inputCursorForRune(r)
-}
-
-func (m model) boxTop(title string, innerWidth int) string {
-	component := pageRenderer{model: m}
-	return component.boxTop(title, innerWidth)
-}
-
-func (m model) boxBottom(innerWidth int) string {
-	component := pageRenderer{model: m}
-	return component.boxBottom(innerWidth)
-}
-
-func (m model) boxLine(content string, innerWidth int) string {
-	component := pageRenderer{model: m}
-	return component.boxLine(content, innerWidth)
-}
-
 func (m model) renderFooter(text string) string {
-	component := pageRenderer{model: m}
+	component := newPageRenderer(m)
 	return component.renderFooter(text)
 }
 
 func (m model) renderFullscreen(body, footer string) string {
-	component := pageRenderer{model: m}
+	component := newPageRenderer(m)
 	return component.renderFullscreen(body, footer)
 }
 
 func (m model) renderPopupBoxWithActions(title string, lines []string, actions string) string {
-	component := popupRenderer{model: m}
+	component := newPopupRenderer(m)
 	return component.renderPopupBoxWithActions(title, lines, actions)
 }
 
 func (m model) popupActionLine(actions string) string {
-	component := popupRenderer{model: m}
+	component := newPopupRenderer(m)
 	return component.popupActionLine(actions)
 }
 
 func (m model) renderPopupBox(title string, lines []string) string {
-	component := popupRenderer{model: m}
+	component := newPopupRenderer(m)
 	return component.renderPopupBox(title, lines)
 }
 
-func (m model) popupBoxTop(title string, innerWidth int) string {
-	component := popupRenderer{model: m}
-	return component.popupBoxTop(title, innerWidth)
-}
-
-func (m model) popupBoxBottom(innerWidth int) string {
-	component := popupRenderer{model: m}
-	return component.popupBoxBottom(innerWidth)
-}
-
-func (m model) popupBoxLine(content string, innerWidth int) string {
-	component := popupRenderer{model: m}
-	return component.popupBoxLine(content, innerWidth)
-}
-
-func (m model) popupFrame(s string) string {
-	component := popupRenderer{model: m}
-	return component.popupFrame(s)
-}
-
 func (m model) renderPopupStack(body string) string {
-	component := popupRenderer{model: m}
+	component := newPopupRenderer(m)
 	return component.renderPopupStack(body)
 }
 
-func (m model) renderPopup(kind popupKind) string {
-	component := popupRenderer{model: m}
-	return component.renderPopup(kind)
-}
-
 func (m model) overlayPopupOnBody(body, popup string) string {
-	component := popupRenderer{model: m}
+	component := newPopupRenderer(m)
 	return component.overlayPopupOnBody(body, popup)
 }
 
 func (m model) label(s string) string {
-	component := styleRenderer{model: m}
-	return component.label(s)
+	return newStyleRenderer(m).label(s)
 }
 
 func (m model) value(s string) string {
-	component := styleRenderer{model: m}
-	return component.value(s)
+	return newStyleRenderer(m).value(s)
 }
 
 func (m model) muted(s string) string {
-	component := styleRenderer{model: m}
-	return component.muted(s)
+	return newStyleRenderer(m).muted(s)
 }
 
 func (m model) encryptedPlaceholder() string {
-	component := styleRenderer{model: m}
-	return component.encryptedPlaceholder()
+	return newStyleRenderer(m).encryptedPlaceholder()
 }
 
 func (m model) divider(s string) string {
-	component := styleRenderer{model: m}
-	return component.divider(s)
-}
-
-func (m model) frame(s string) string {
-	component := styleRenderer{model: m}
-	return component.frame(s)
+	return newStyleRenderer(m).divider(s)
 }
 
 func (m model) selectedRow(s string) string {
-	component := styleRenderer{model: m}
-	return component.selectedRow(s)
+	return newStyleRenderer(m).selectedRow(s)
 }
 
 func (m model) selectedMarker() string {
-	component := styleRenderer{model: m}
-	return component.selectedMarker()
+	return newStyleRenderer(m).selectedMarker()
 }
 
 func (m model) searchLine() string {
-	component := styleRenderer{model: m}
-	return component.searchLine()
+	return newStyleRenderer(m).searchLine()
 }
 
 func (m model) filteredLine() string {
-	component := styleRenderer{model: m}
-	return component.filteredLine()
-}
-
-func (m model) searchPrompt() string {
-	component := styleRenderer{model: m}
-	return component.searchPrompt()
-}
-
-func (m model) filteredPrompt() string {
-	component := styleRenderer{model: m}
-	return component.filteredPrompt()
-}
-
-func (m model) applyErr(s string) string {
-	component := styleRenderer{model: m}
-	return component.applyErr(s)
-}
-
-func (m model) applyWarning(s string) string {
-	component := styleRenderer{model: m}
-	return component.applyWarning(s)
+	return newStyleRenderer(m).filteredLine()
 }
 
 func (m model) renderFooterWithStatus(text string) string {
-	component := styleRenderer{model: m}
-	return component.renderFooterWithStatus(text)
+	footer := m.renderFooter(text)
+	status := m.renderStatusMessage()
+	if status == "" {
+		return strings.Join([]string{" ", footer, " "}, "\n")
+	}
+	return strings.Join([]string{" ", status, " ", footer, " "}, "\n")
 }
 
 func (m model) renderStatusMessage() string {
-	component := styleRenderer{model: m}
-	return component.renderStatusMessage()
+	return newStyleRenderer(m).renderStatusMessage()
 }
 
 func (m *model) clearTransientStatus() {
-	component := styleRenderer{model: *m}
-	defer func() { *m = component.model }()
-	component.clearTransientStatus()
-}
-
-func (m model) Init() tea.Cmd {
-	component := runtimeComponent{model: m}
-	return component.Init()
+	m.message = ""
+	m.warningMessage = ""
+	m.errMessage = ""
+	m.pendingQuit = false
+	m.pendingQuitKey = ""
+	m.pendingFileWrite = fileWriteConfirmationNone
 }
 
 func (m model) popupFooterText(kind popupKind) string {
-	component := shortcutsComponent{model: m}
+	component := newShortcuts(m)
 	return component.popupFooterText(kind)
 }
 
-func (m model) sortPopupScreenFooter() string {
-	component := shortcutsComponent{model: m}
-	return component.sortPopupScreenFooter()
-}
-
 func (m model) shortcutsText() string {
-	component := shortcutsComponent{model: m}
+	component := newShortcuts(m)
 	return component.shortcutsText()
-}
-
-func (m model) popupShortcutsText(kind popupKind) string {
-	component := shortcutsComponent{model: m}
-	return component.popupShortcutsText(kind)
-}
-
-func (m model) popupActionsShortcuts(kind popupKind) string {
-	component := shortcutsComponent{model: m}
-	return component.popupActionsShortcuts(kind)
-}
-
-func (m model) popupSortShortcuts(kind popupKind) string {
-	component := shortcutsComponent{model: m}
-	return component.popupSortShortcuts(kind)
-}
-
-func (m model) popupNavigationShortcuts(kind popupKind) string {
-	component := shortcutsComponent{model: m}
-	return component.popupNavigationShortcuts(kind)
-}
-
-func (m model) actionsShortcuts(forScreen screen) string {
-	component := shortcutsComponent{model: m}
-	return component.actionsShortcuts(forScreen)
-}
-
-func (m model) sortShortcuts(forScreen screen) string {
-	component := shortcutsComponent{model: m}
-	return component.sortShortcuts(forScreen)
-}
-
-func (m model) navigationShortcuts(forScreen screen) string {
-	component := shortcutsComponent{model: m}
-	return component.navigationShortcuts(forScreen)
 }
 
 func (m *model) openColumnsPopup() {
@@ -1482,78 +1089,72 @@ func (m model) columnsForRendering() map[columnName]bool {
 }
 
 func (m model) popupSortItems() []sortItem {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.popupSortItems()
 }
 
 func (m model) popupSortColumnByLetterHotkey(key string) (columnName, bool) {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.popupSortColumnByLetterHotkey(key)
 }
 
 func (m model) visibleSortItems() []sortItem {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.visibleSortItems()
 }
 
 func (m model) visibleSortColumnByHotkey(key string) (columnName, bool) {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.visibleSortColumnByHotkey(key)
 }
 
 func (m model) sortCursorForCurrentSort() int {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.sortCursorForCurrentSort()
 }
 
 func (m model) sortRulesOrDefault() []sortRule {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.sortRulesOrDefault()
 }
 
 func (m *model) setSortRules(rules []sortRule) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.setSortRules(rules)
 }
 
 func (m *model) applySort(column columnName) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.applySort(column)
 }
 
 func (m *model) toggleSortColumn(column columnName) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.toggleSortColumn(column)
 }
 
 func (m *model) toggleSortDirection(column columnName) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.toggleSortDirection(column)
 }
 
 func (m *model) applySortWithDirection(column columnName, descending bool) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.applySortWithDirection(column, descending)
 }
 
 func (m *model) applySortWithRules(rules []sortRule) {
-	component := tableSortComponent{model: *m}
-	defer func() { *m = component.model }()
+	component := newTableSorter(m)
 	component.applySortWithRules(rules)
 }
 
 func (m model) columnHeader(c columnName) string {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.columnHeader(c)
 }
 
 func (m model) sortPopupLabel(item sortItem) string {
-	component := tableSortComponent{model: m}
+	component := newTableSorter(&m)
 	return component.sortPopupLabel(item)
 }
 
@@ -1650,4 +1251,241 @@ func (m model) selectedParameterBlockHeight() int {
 func (m model) listBodyHeight() int {
 	component := tableViewComponent{model: m}
 	return component.listBodyHeight()
+}
+
+// Init starts the asynchronous status load and the loading spinner.
+func (m model) Init() tea.Cmd {
+	return tea.Batch(
+		startLoadCmdWithBackend(m.ctx, backendFor(m), m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh),
+		waitForLoad(m.loadCh),
+		tickLoadingSpinner(),
+	)
+}
+
+// Update is the root Bubble Tea state machine. Domain-specific input is delegated
+// after root-level window, asynchronous operation, and popup routing is handled.
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.input.Width = max(20, msg.Width-12)
+		m.editPathInput.Width = max(20, msg.Width-18)
+		m.editDescriptionInput.Width = max(20, msg.Width-18)
+		m.editFileInput.Width = max(20, msg.Width-18)
+		m.textArea.SetWidth(max(20, msg.Width-14))
+		m.textArea.SetHeight(max(8, msg.Height-10))
+		m.editPoliciesArea.SetWidth(max(20, msg.Width-14))
+		m.editPoliciesArea.SetHeight(max(1, msg.Height-10))
+		m.editDescriptionArea.SetWidth(max(20, msg.Width-14))
+		m.editDescriptionArea.SetHeight(max(1, msg.Height-10))
+		return m, nil
+
+	case progressMsg:
+		m.loadingTitle = "Loading parameters"
+		m.loadingLines = nil
+		if msg.region != "" {
+			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d from %s region...", msg.done, msg.total, msg.region)
+		} else {
+			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d...", msg.done, msg.total)
+		}
+		return m, waitForLoad(m.loadCh)
+
+	case loadingTickMsg:
+		if m.screen == screenLoading {
+			m.loadingSpinnerFrame = (m.loadingSpinnerFrame + 1) % len(loadingSpinnerFrames)
+			return m, tickLoadingSpinner()
+		}
+		return m, nil
+
+	case statusBatchMsg:
+		m.mergeStatusBatch([]Status(msg))
+		return m, waitForLoad(m.loadCh)
+
+	case loadedMsg:
+		m.statuses = []Status(msg)
+		m.applySortWithRules(m.sortRulesOrDefault())
+		m.screen = screenMain
+		m.busyMessage = ""
+		m.loadingTitle = ""
+		m.loadingLines = nil
+		m.ensureSelection()
+		return m, nil
+
+	case statusUpdatedMsg:
+		m.busyMessage = ""
+		if msg.err != nil {
+			m.errMessage = msg.err.Error()
+			m.screen = m.returnScreen
+			return m, nil
+		}
+		matchPath := msg.oldPath
+		if matchPath == "" {
+			matchPath = msg.path
+		}
+		m.replaceStatus(matchPath, msg.status)
+		m.ensureSelection()
+		m.message = msg.message
+		m.warningMessage = msg.warning
+		m.errMessage = ""
+		m.screen = m.returnScreen
+		return m, nil
+
+	case deleteDoneMsg:
+		m.busyMessage = ""
+		if msg.err != nil {
+			m.errMessage = msg.err.Error()
+			m.screen = m.returnScreen
+			return m, nil
+		}
+		if msg.removeRows {
+			m.removeItemRows(msg.items)
+		} else {
+			for _, item := range msg.items {
+				m.markMissingItem(item)
+			}
+		}
+		m.message = fmt.Sprintf("Deleted %d parameter(s)", len(msg.items))
+		m.warningMessage = msg.warning
+		m.errMessage = ""
+		m.screen = m.returnScreen
+		m.ensureSelection()
+		return m, nil
+
+	case tea.KeyMsg:
+		key := msg.String()
+		if m.pendingQuit && key == "y" {
+			return m, tea.Quit
+		}
+		if key == "ctrl+c" || key == "ctrl+q" {
+			m.message = ""
+			m.errMessage = ""
+			m.warningMessage = quitConfirmationMessage(key)
+			m.pendingQuit = true
+			m.pendingQuitKey = key
+			m.pendingFileWrite = fileWriteConfirmationNone
+			return m, nil
+		}
+		fileWriteConfirmKey := m.pendingFileWrite != fileWriteConfirmationNone && (key == "y" || key == "enter" || key == "ctrl+j" || key == "esc" || key == "q" || key == "ctrl+g" || m.activePopup == popupFileWriteConfirm)
+		if !fileWriteConfirmKey {
+			m.clearTransientStatus()
+		}
+		if m.activePopup != popupNone {
+			switch m.activePopup {
+			case popupNone:
+			case popupColumns:
+				return m.updateColumnsPopup(msg)
+			case popupShortcuts:
+				return m.updateShortcutsPopup(msg)
+			case popupConfirm:
+				return m.updateConfirmPopup(msg)
+			case popupSort:
+				return m.updateSortPopup(msg)
+			case popupRegionSelect:
+				return m.updateRegionSelectPopup(msg)
+			case popupTypeSelect:
+				return m.updateTypeSelectPopup(msg)
+			case popupTierSelect:
+				return m.updateTierSelectPopup(msg)
+			case popupDataTypeSelect:
+				return m.updateDataTypeSelectPopup(msg)
+			case popupOverwriteSelect:
+				return m.updateOverwriteSelectPopup(msg)
+			case popupValueActions:
+				return m.updateValueActionsPopup(msg)
+			case popupPoliciesActions:
+				return m.updatePoliciesActionsPopup(msg)
+			case popupFileAction:
+				return m.updateFileActionPopup(msg)
+			case popupFileWriteConfirm:
+				return m.updateFileWriteConfirmPopup(msg)
+			case popupUnsavedChanges:
+				return m.updateUnsavedChangesPopup(msg)
+			case popupRandomValue:
+				return m.updateRandomValuePopup(msg)
+			}
+		}
+
+		switch m.screen {
+		case screenMain:
+			return m.updateMain(msg)
+		case screenTextArea:
+			return m.updateTextArea(msg)
+		case screenColumns:
+			return m.updateColumns(msg)
+		case screenConfirm:
+			return m.updateConfirm(msg)
+		case screenRegionSelect:
+			return m.updateRegionSelect(msg)
+		case screenTypeSelect:
+			return m.updateTypeSelect(msg)
+		case screenHelp:
+			return m.updateHelp(msg)
+		case screenLoading:
+			return m.updateLoading(msg)
+		}
+	}
+
+	if m.screen == screenTextArea {
+		var cmd tea.Cmd
+		if m.editField == editFieldPolicies {
+			m.editPoliciesArea, cmd = m.editPoliciesArea.Update(msg)
+		} else {
+			m.textArea, cmd = m.textArea.Update(msg)
+		}
+		return m, cmd
+	}
+	return m, nil
+}
+
+// View renders the active screen and its context-specific footer.
+func (m model) View() string {
+	switch m.screen {
+	case screenLoading:
+		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
+	case screenMain:
+		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "")
+		if m.searchMode {
+			footer = searchFooterText()
+		}
+		return m.renderPage(footer, func(content model) string { return content.renderMainScreen() })
+	case screenTextArea:
+		return m.renderPage(m.textAreaFooterText(), func(content model) string { return content.renderTextAreaScreen() })
+	case screenColumns:
+		return m.renderPage("ctrl+/ help • space/enter toggle • a show all • x hide all • esc back", func(content model) string { return content.renderColumnsScreen() })
+	case screenConfirm:
+		return m.renderPage("ctrl+/ help • enter confirm • esc back", func(content model) string { return content.renderConfirmScreen() })
+	case screenRegionSelect:
+		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderRegionSelectScreen() })
+	case screenTypeSelect:
+		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderTypeSelectScreen() })
+	case screenHelp:
+		return m.renderPage("esc back", func(content model) string { return content.renderHelpScreen() })
+	default:
+		return ""
+	}
+}
+
+func (m model) renderPage(footerText string, renderBody func(model) string) string {
+	if m.activePopup != popupNone {
+		footerText = m.popupFooterText(m.activePopup)
+	}
+	bottom := m.renderFooterWithStatus(footerText)
+	content := m
+	if m.height > 0 {
+		content.height = max(1, m.height-countLines(bottom))
+	}
+	body := renderBody(content)
+	body = content.renderPopupStack(body)
+	return m.renderFullscreen(body, bottom)
+}
+
+func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+_", "ctrl+/":
+		m.openShortcuts(screenLoading)
+		return m, nil
+	case "q", "esc":
+		return m, tea.Quit
+	}
+	return m, nil
 }
