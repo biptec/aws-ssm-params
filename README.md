@@ -10,12 +10,12 @@ Homebrew users can install the release from the Biptec tap:
 
 ```bash
 brew tap biptec/tools https://github.com/biptec/homebrew-tools
-brew install --cask biptec/tools/aws-ssm-params
+brew install biptec/tools/aws-ssm-params
 ```
 
 ## Releases
 
-Version tags matching `v*` are released by GitHub Actions with GoReleaser. The release workflow builds the GitHub Release artifacts and publishes the Homebrew Cask Ruby file to `biptec/homebrew-tools`.
+Version tags matching `v*` are released by GitHub Actions with GoReleaser. The release workflow builds the GitHub Release artifacts and publishes the Homebrew Formula Ruby file to `biptec/homebrew-tools`.
 
 For cross-repository Homebrew publication, configure a repository secret named `HOMEBREW_TAP_GITHUB_TOKEN`. The token must have contents write access to `biptec/homebrew-tools`; the default workflow `GITHUB_TOKEN` is only used for the source repository release and is not enough for writing to the tap repository.
 

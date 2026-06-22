@@ -48,24 +48,24 @@ release:
     owner: biptec
     name: aws-ssm-params
 
-homebrew_casks:
+brews:
   - name: aws-ssm-params
     ids:
       - aws-ssm-params
-    binaries:
-      - aws-ssm-params
-    directory: Casks
+    directory: Formula
     homepage: "https://github.com/biptec/aws-ssm-params"
-    description: "CLI/TUI for AWS SSM Parameter Store values"
+    description: "Terminal UI and CLI for AWS SSM Parameter Store"
     license: MIT
-    commit_msg_template: "chore(homebrew): update {{ .ProjectName }} to {{ .Tag }}"
+    commit_msg_template: "chore(homebrew): update {{ .ProjectName }} formula to {{ .Tag }}"
     repository:
       owner: biptec
       name: homebrew-tools
+      branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
       email: bot@goreleaser.com
-    caveats: |
-      To get started:
-        aws-ssm-params --help
+    install: |
+      bin.install "aws-ssm-params"
+    test: |
+      system "#{bin}/aws-ssm-params", "--help"
