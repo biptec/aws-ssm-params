@@ -14,10 +14,12 @@ type editorOptions struct {
 	current Status
 }
 
-type parameterTypeOptions []parameterTypeItem
-type parameterTierOptions []parameterTierItem
-type parameterDataTypeOptions []parameterDataTypeItem
-type overwriteOptions []overwriteItem
+type (
+	parameterTypeOptions     []parameterTypeItem
+	parameterTierOptions     []parameterTierItem
+	parameterDataTypeOptions []parameterDataTypeItem
+	overwriteOptions         []overwriteItem
+)
 
 func newEditorOptions(m model) editorOptions {
 	return editorOptions{opts: m.opts, editorState: m.editorState, current: m.currentStatus()}

@@ -199,11 +199,21 @@ func (*JSON) recordFields(raw json.RawMessage) (Fields, error) {
 		jsonName string
 		field    string
 	}{
-		{"region", "region"}, {"type", "type"}, {"tier", "tier"},
-		{"dataType", "data-type"}, {"data_type", "data-type"}, {"data-type", "data-type"},
-		{"policies", "policies"}, {"description", "description"}, {"value", "value"},
-		{"date", "date"}, {"version", "version"}, {"len", "len"}, {"length", "len"},
-		{"sha256", "sha256"}, {"user", "user"},
+		{"region", "region"},
+		{"type", "type"},
+		{"tier", "tier"},
+		{"dataType", "data-type"},
+		{"data_type", "data-type"},
+		{"data-type", "data-type"},
+		{"policies", "policies"},
+		{"description", "description"},
+		{"value", "value"},
+		{"date", "date"},
+		{"version", "version"},
+		{"len", "len"},
+		{"length", "len"},
+		{"sha256", "sha256"},
+		{"user", "user"},
 	} {
 		if _, ok := object[field.jsonName]; ok {
 			fields = fields.With(field.field)
