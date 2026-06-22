@@ -11,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"unicode"
 
 	crerr "github.com/cockroachdb/errors"
 	"github.com/urfave/cli/v3"
@@ -21,6 +20,7 @@ import (
 	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/logging"
+	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
@@ -1028,7 +1028,7 @@ func sortStatusesForExport(statuses []ui.Status, values []string) {
 		left := statuses[i]
 		right := statuses[j]
 		for _, rule := range rules {
-			cmp := naturalExportCompare(exportStatusSortValue(left, rule.field), exportStatusSortValue(right, rule.field))
+			cmp := natural.Compare(exportStatusSortValue(left, rule.field), exportStatusSortValue(right, rule.field))
 			if cmp == 0 {
 				continue
 			}
@@ -1037,10 +1037,10 @@ func sortStatusesForExport(statuses []ui.Status, values []string) {
 			}
 			return cmp < 0
 		}
-		if cmp := naturalExportCompare(left.Item.Region, right.Item.Region); cmp != 0 {
+		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
 			return cmp < 0
 		}
-		return naturalExportCompare(left.Item.Path, right.Item.Path) < 0
+		return natural.Compare(left.Item.Path, right.Item.Path) < 0
 	})
 }
 
@@ -1075,76 +1075,6 @@ func exportStatusSortValue(status ui.Status, field string) string {
 	default:
 		return ""
 	}
-}
-
-func naturalExportCompare(left, right string) int {
-	leftRunes := []rune(strings.ToLower(strings.TrimSpace(left)))
-	rightRunes := []rune(strings.ToLower(strings.TrimSpace(right)))
-	i, j := 0, 0
-	for i < len(leftRunes) && j < len(rightRunes) {
-		if unicode.IsDigit(leftRunes[i]) && unicode.IsDigit(rightRunes[j]) {
-			li, rj := i, j
-			for i < len(leftRunes) && unicode.IsDigit(leftRunes[i]) {
-				i++
-			}
-			for j < len(rightRunes) && unicode.IsDigit(rightRunes[j]) {
-				j++
-			}
-			if cmp := compareExportDigitRuns(leftRunes[li:i], rightRunes[rj:j]); cmp != 0 {
-				return cmp
-			}
-			continue
-		}
-		if leftRunes[i] < rightRunes[j] {
-			return -1
-		}
-		if leftRunes[i] > rightRunes[j] {
-			return 1
-		}
-		i++
-		j++
-	}
-	if len(leftRunes)-i < len(rightRunes)-j {
-		return -1
-	}
-	if len(leftRunes)-i > len(rightRunes)-j {
-		return 1
-	}
-	return 0
-}
-
-func compareExportDigitRuns(left, right []rune) int {
-	leftTrimmed := trimExportLeadingZeroes(left)
-	rightTrimmed := trimExportLeadingZeroes(right)
-	if len(leftTrimmed) < len(rightTrimmed) {
-		return -1
-	}
-	if len(leftTrimmed) > len(rightTrimmed) {
-		return 1
-	}
-	for i := range leftTrimmed {
-		if leftTrimmed[i] < rightTrimmed[i] {
-			return -1
-		}
-		if leftTrimmed[i] > rightTrimmed[i] {
-			return 1
-		}
-	}
-	if len(left) < len(right) {
-		return -1
-	}
-	if len(left) > len(right) {
-		return 1
-	}
-	return 0
-}
-
-func trimExportLeadingZeroes(value []rune) []rune {
-	idx := 0
-	for idx < len(value)-1 && value[idx] == '0' {
-		idx++
-	}
-	return value[idx:]
 }
 
 var allExportFields = []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}

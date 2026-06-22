@@ -11,13 +11,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
+	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/randomx"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -4741,7 +4741,7 @@ func (m *model) applySortWithRules(rules []sortRule) {
 		left := m.statuses[i]
 		right := m.statuses[j]
 		for _, rule := range rules {
-			cmp := naturalCompare(m.tableCellValue(rule.column, 0, left), m.tableCellValue(rule.column, 0, right))
+			cmp := natural.Compare(m.tableCellValue(rule.column, 0, left), m.tableCellValue(rule.column, 0, right))
 			if cmp == 0 {
 				continue
 			}
@@ -4750,10 +4750,10 @@ func (m *model) applySortWithRules(rules []sortRule) {
 			}
 			return cmp < 0
 		}
-		if cmp := naturalCompare(left.Item.Region, right.Item.Region); cmp != 0 {
+		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
 			return cmp < 0
 		}
-		return naturalCompare(left.Item.Path, right.Item.Path) < 0
+		return natural.Compare(left.Item.Path, right.Item.Path) < 0
 	})
 	if selectedKey != "" {
 		for idx, visIdx := range m.visible() {
@@ -4765,76 +4765,6 @@ func (m *model) applySortWithRules(rules []sortRule) {
 		}
 	}
 	m.ensureSelection()
-}
-
-func naturalCompare(left, right string) int {
-	leftRunes := []rune(strings.ToLower(strings.TrimSpace(left)))
-	rightRunes := []rune(strings.ToLower(strings.TrimSpace(right)))
-	i, j := 0, 0
-	for i < len(leftRunes) && j < len(rightRunes) {
-		if unicode.IsDigit(leftRunes[i]) && unicode.IsDigit(rightRunes[j]) {
-			li, rj := i, j
-			for i < len(leftRunes) && unicode.IsDigit(leftRunes[i]) {
-				i++
-			}
-			for j < len(rightRunes) && unicode.IsDigit(rightRunes[j]) {
-				j++
-			}
-			if cmp := compareDigitRuns(leftRunes[li:i], rightRunes[rj:j]); cmp != 0 {
-				return cmp
-			}
-			continue
-		}
-		if leftRunes[i] < rightRunes[j] {
-			return -1
-		}
-		if leftRunes[i] > rightRunes[j] {
-			return 1
-		}
-		i++
-		j++
-	}
-	if len(leftRunes)-i < len(rightRunes)-j {
-		return -1
-	}
-	if len(leftRunes)-i > len(rightRunes)-j {
-		return 1
-	}
-	return 0
-}
-
-func compareDigitRuns(left, right []rune) int {
-	leftTrimmed := trimLeadingZeroes(left)
-	rightTrimmed := trimLeadingZeroes(right)
-	if len(leftTrimmed) < len(rightTrimmed) {
-		return -1
-	}
-	if len(leftTrimmed) > len(rightTrimmed) {
-		return 1
-	}
-	for i := range leftTrimmed {
-		if leftTrimmed[i] < rightTrimmed[i] {
-			return -1
-		}
-		if leftTrimmed[i] > rightTrimmed[i] {
-			return 1
-		}
-	}
-	if len(left) < len(right) {
-		return -1
-	}
-	if len(left) > len(right) {
-		return 1
-	}
-	return 0
-}
-
-func trimLeadingZeroes(value []rune) []rune {
-	idx := 0
-	for idx < len(value)-1 && value[idx] == '0' {
-		idx++
-	}
-	return value[idx:]
 }
 
 func (m model) columnHeader(c columnName) string {
