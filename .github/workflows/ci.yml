@@ -26,9 +26,12 @@ jobs:
           go-version: '1.26.4'
           cache: true
 
+      - name: Remove local vendor tree
+        run: rm -rf vendor
+
       - name: Run Makefile quality gate
         env:
-          GOLANGCI_MODULES_DOWNLOAD_MODE: vendor
+          GOLANGCI_MODULES_DOWNLOAD_MODE: mod
         run: make ci-check
 
   build:
