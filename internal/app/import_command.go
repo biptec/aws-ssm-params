@@ -4,13 +4,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	crerr "github.com/cockroachdb/errors"
 
 	secretfmt "github.com/biptec/aws-ssm-params/internal/format"
+	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
+
+// Import reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
+func Import(ctx *CLIContext) error {
+	command, err := newImportCommand(ctx, nil, os.Stderr)
+	if err != nil {
+		return err
+	}
+	return command.run()
+}
 
 // importCommand owns the mutable state and dependencies of one import invocation.
 type importCommand struct {
@@ -199,4 +210,29 @@ func (command *importCommand) writeSummary() {
 		command.summary.Skipped,
 		command.summary.Failed,
 	)
+}
+
+// parseImport dispatches import parsing by format while keeping the Import command handler format-agnostic.
+func parseImport(format string, reader io.Reader, items []inventory.Item, mappings []secretfmt.FieldMapping, jsonKeyField string) ([]secretfmt.Record, error) {
+	switch format {
+	case "dotenv":
+		records, err := secretfmt.ImportDotenv(reader, items)
+		return records, crerr.Wrap(err, "import dotenv")
+	case "json":
+		records, err := secretfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
+		return records, crerr.Wrap(err, "import JSON")
+	case "yaml", "yml":
+		records, err := secretfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
+		return records, crerr.Wrap(err, "import YAML")
+	default:
+		return nil, fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+func stdinReader() (io.Reader, error) {
+	info, err := os.Stdin.Stat()
+	if err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		return nil, errors.New("import requires data from stdin")
+	}
+	return os.Stdin, nil
 }
