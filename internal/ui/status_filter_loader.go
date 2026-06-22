@@ -1,0 +1,286 @@
+package ui
+
+import (
+	"context"
+	"sort"
+
+	"github.com/biptec/aws-ssm-params/internal/filter"
+	"github.com/biptec/aws-ssm-params/internal/inventory"
+	"github.com/biptec/aws-ssm-params/internal/ssm"
+)
+
+type exactNameFilterGroup struct {
+	Name  string
+	Group filter.Group
+}
+
+type mergedPrefilterGroup struct {
+	Filter ssm.ParameterFilter
+	Groups []filter.Group
+}
+
+const awsPrefilterValueBatchSize = 50
+
+// LoadFilteredStatusesBatchForRegions discovers parameter metadata with DescribeParameters prefilters,
+// enriches matching rows with GetParameters values, then applies exact local filter matching.
+func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssm.Client, groups []filter.Group, includeValues bool, regions []string, progress LoadProgress) []Status {
+	if len(groups) == 0 {
+		return LoadStatusesBatchForRegions(ctx, client, nil, includeValues, regions, progress)
+	}
+	if len(regions) == 0 {
+		if region := client.DefaultRegion(); region != "" {
+			regions = []string{region}
+		} else {
+			regions = []string{""}
+		}
+	}
+
+	exactGroups, remainingGroups := splitExactNameFilterGroups(groups)
+	mergedGroups, scanGroups := splitMergeablePrefilterGroups(remainingGroups)
+	statuses := make([]Status, 0, len(regions)*64)
+	seen := map[string]bool{}
+	appendStatuses := func(groupStatuses []Status) {
+		for i := range groupStatuses {
+			key := itemKey(groupStatuses[i].Item.Region, groupStatuses[i].Item.Path)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			statuses = append(statuses, groupStatuses[i])
+		}
+	}
+
+	for _, region := range regions {
+		regionalClient := client.ForRegion(region)
+		if len(exactGroups) > 0 {
+			appendStatuses(loadExactNameFilteredStatusesRegion(ctx, regionalClient, region, exactGroups, includeValues, progress))
+		}
+		for _, mergedGroup := range mergedGroups {
+			appendStatuses(loadMergedPrefilterStatusesRegion(ctx, regionalClient, region, mergedGroup, includeValues, progress))
+		}
+		for _, group := range scanGroups {
+			appendStatuses(loadFilteredStatusesRegion(ctx, regionalClient, region, group, includeValues, progress))
+		}
+	}
+	sort.Slice(statuses, func(i, j int) bool {
+		if statuses[i].Item.Region != statuses[j].Item.Region {
+			return statuses[i].Item.Region < statuses[j].Item.Region
+		}
+		return statuses[i].Item.Path < statuses[j].Item.Path
+	})
+	return statuses
+}
+
+func splitExactNameFilterGroups(groups []filter.Group) ([]exactNameFilterGroup, []filter.Group) {
+	exactGroups := make([]exactNameFilterGroup, 0, len(groups))
+	scanGroups := make([]filter.Group, 0, len(groups))
+	for _, group := range groups {
+		name, ok := group.ExactName()
+		if !ok {
+			scanGroups = append(scanGroups, group)
+			continue
+		}
+		exactGroups = append(exactGroups, exactNameFilterGroup{Name: name, Group: group})
+	}
+	return exactGroups, scanGroups
+}
+
+func splitMergeablePrefilterGroups(groups []filter.Group) ([]mergedPrefilterGroup, []filter.Group) {
+	mergedByKey := map[string]int{}
+	mergedGroups := []mergedPrefilterGroup{}
+	scanGroups := make([]filter.Group, 0, len(groups))
+	for _, group := range groups {
+		awsFilter, ok := mergeablePrefilter(group)
+		if !ok {
+			scanGroups = append(scanGroups, group)
+			continue
+		}
+		key := awsFilter.Key + "\x00" + awsFilter.Option
+		idx, ok := mergedByKey[key]
+		if !ok {
+			mergedByKey[key] = len(mergedGroups)
+			mergedGroups = append(mergedGroups, mergedPrefilterGroup{Filter: awsFilter, Groups: []filter.Group{group}})
+			continue
+		}
+		mergedGroups[idx].Filter.Values = appendUniqueStrings(mergedGroups[idx].Filter.Values, awsFilter.Values...)
+		mergedGroups[idx].Groups = append(mergedGroups[idx].Groups, group)
+	}
+	return mergedGroups, scanGroups
+}
+
+func mergeablePrefilter(group filter.Group) (ssm.ParameterFilter, bool) {
+	if len(group.Conditions) != 1 {
+		return ssm.ParameterFilter{}, false
+	}
+	awsFilters := group.AWSFilters()
+	if len(awsFilters) != 1 {
+		return ssm.ParameterFilter{}, false
+	}
+	awsFilter := awsFilters[0]
+	if len(awsFilter.Values) == 0 {
+		return ssm.ParameterFilter{}, false
+	}
+	return ssm.ParameterFilter{Key: awsFilter.Key, Option: awsFilter.Option, Values: append([]string(nil), awsFilter.Values...)}, true
+}
+
+func appendUniqueStrings(values []string, additions ...string) []string {
+	seen := make(map[string]bool, len(values)+len(additions))
+	for _, value := range values {
+		seen[value] = true
+	}
+	for _, value := range additions {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func loadExactNameFilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, groups []exactNameFilterGroup, includeValues bool, progress LoadProgress) []Status {
+	if len(groups) == 0 {
+		return nil
+	}
+	groupsByName := make(map[string][]filter.Group, len(groups))
+	items := make([]inventory.Item, 0, len(groups))
+	seen := map[string]bool{}
+	fetchValues := includeValues
+	for _, group := range groups {
+		groupsByName[group.Name] = append(groupsByName[group.Name], group.Group)
+		if group.Group.HasField(filter.FieldValue) {
+			fetchValues = true
+		}
+		if seen[group.Name] {
+			continue
+		}
+		seen[group.Name] = true
+		items = append(items, inventory.Item{Path: group.Name, Region: region, Kind: "ssm", Source: "filter", SecretName: pathBase(group.Name)})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+
+	loaded := loadStatusesByItemRegion(ctx, client, items, fetchValues, progress, nil)
+	statuses := make([]Status, 0, len(loaded))
+	for idx := range loaded {
+		status := loaded[idx]
+		if !status.Exists {
+			continue
+		}
+		matchStatus := status
+		if !includeValues {
+			status.Value = ""
+			status.Length = 0
+			status.SHA256Prefix = ""
+		}
+		for _, group := range groupsByName[status.Item.Path] {
+			if group.Match(matchStatus.FilterRecord()) {
+				statuses = append(statuses, status)
+				break
+			}
+		}
+	}
+	return statuses
+}
+
+func loadMergedPrefilterStatusesRegion(ctx context.Context, client ssm.Client, region string, mergedGroup mergedPrefilterGroup, includeValues bool, progress LoadProgress) []Status {
+	if len(mergedGroup.Filter.Values) <= awsPrefilterValueBatchSize {
+		return loadPrefilteredStatusesRegion(ctx, client, region, mergedGroup.Groups, []ssm.ParameterFilter{mergedGroup.Filter}, includeValues, progress)
+	}
+	statuses := []Status{}
+	for start := 0; start < len(mergedGroup.Filter.Values); start += awsPrefilterValueBatchSize {
+		end := start + awsPrefilterValueBatchSize
+		if end > len(mergedGroup.Filter.Values) {
+			end = len(mergedGroup.Filter.Values)
+		}
+		filterChunk := mergedGroup.Filter
+		filterChunk.Values = append([]string(nil), mergedGroup.Filter.Values[start:end]...)
+		statuses = append(statuses, loadPrefilteredStatusesRegion(ctx, client, region, mergedGroup.Groups, []ssm.ParameterFilter{filterChunk}, includeValues, progress)...)
+	}
+	return statuses
+}
+
+func loadFilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, group filter.Group, includeValues bool, progress LoadProgress) []Status {
+	return loadPrefilteredStatusesRegion(ctx, client, region, []filter.Group{group}, ssmFiltersFromGroup(group), includeValues, progress)
+}
+
+func loadPrefilteredStatusesRegion(ctx context.Context, client ssm.Client, region string, groups []filter.Group, awsFilters []ssm.ParameterFilter, includeValues bool, progress LoadProgress) []Status {
+	if progress != nil {
+		progress(0, 0, region, nil)
+	}
+	metas, err := client.ListParameterMetadataWithFilters(ctx, awsFilters)
+	if err != nil {
+		return []Status{{Item: inventory.Item{Path: "(scan error)", Region: region}, Type: ssm.DefaultParameterType.String(), Error: err.Error()}}
+	}
+	items := make([]inventory.Item, 0, len(metas))
+	metaByKey := map[string]ssm.Metadata{}
+	for i := range metas {
+		meta := metas[i]
+		if meta.Name == "" {
+			continue
+		}
+		if meta.Region == "" {
+			meta.Region = region
+		}
+		item := inventory.Item{Path: meta.Name, Region: meta.Region, Kind: "ssm", Source: "aws:ssm", SecretName: pathBase(meta.Name)}
+		items = append(items, item)
+		metaByKey[itemKey(item.Region, item.Path)] = meta
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+
+	values := map[string]ssm.Parameter{}
+	errs := map[string]error{}
+	fetchValues := includeValues || filter.GroupsHaveField(groups, filter.FieldValue)
+	if fetchValues {
+		for start := 0; start < len(items); start += 10 {
+			end := start + 10
+			if end > len(items) {
+				end = len(items)
+			}
+			chunkItems := items[start:end]
+			if progress != nil {
+				progress(start, len(items), region, chunkItems)
+			}
+			paths := make([]string, 0, len(chunkItems))
+			for _, item := range chunkItems {
+				paths = append(paths, item.Path)
+			}
+			chunkValues, chunkErrs := client.GetMany(ctx, paths)
+			for path, value := range chunkValues {
+				if value.Region == "" {
+					value.Region = region
+				}
+				values[itemKey(region, path)] = value
+			}
+			for path, err := range chunkErrs {
+				errs[itemKey(region, path)] = err
+			}
+		}
+	}
+	if progress != nil {
+		progress(len(items), len(items), region, nil)
+	}
+
+	statuses := make([]Status, 0, len(items))
+	for _, item := range items {
+		status := statusFromMaps(item, item.Region, metaByKey, values, errs, fetchValues)
+		if !includeValues {
+			status.Value = ""
+			status.Length = 0
+			status.SHA256Prefix = ""
+		}
+		matchStatus := statusFromMaps(item, item.Region, metaByKey, values, errs, fetchValues)
+		if filter.MatchAny(groups, matchStatus.FilterRecord()) {
+			statuses = append(statuses, status)
+		}
+	}
+	return statuses
+}
+
+func ssmFiltersFromGroup(group filter.Group) []ssm.ParameterFilter {
+	awsFilters := group.AWSFilters()
+	filters := make([]ssm.ParameterFilter, 0, len(awsFilters))
+	for _, awsFilter := range awsFilters {
+		filters = append(filters, ssm.ParameterFilter{Key: awsFilter.Key, Option: awsFilter.Option, Values: append([]string(nil), awsFilter.Values...)})
+	}
+	return filters
+}
