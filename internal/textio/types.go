@@ -1,10 +1,8 @@
-// Package format imports and exports SSM parameters in dotenv, JSON, and YAML formats.
-package format
+// Package textio imports and exports SSM parameters in dotenv, JSON, and YAML formats.
+package textio
 
 import (
 	"strconv"
-
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 )
 
 // FieldMapping maps an AWS field name to a file field name.
@@ -57,11 +55,10 @@ func (fields Fields) RequiresValues() bool {
 }
 
 // Record is the import/export representation of one SSM parameter.
-// Path is the canonical SSM name, Alias is the human-friendly dotenv variable name, Value is the parameter value,
-// and Type optionally carries the AWS SSM parameter type when an import/export format preserves it.
+// Path is the canonical or relative SSM name, Value is the parameter value, and Type optionally carries the AWS SSM
+// parameter type when an import/export format preserves it.
 type Record struct {
 	Path        string
-	Alias       string
 	Fields      Fields
 	Region      string
 	Value       string
@@ -79,50 +76,6 @@ type Record struct {
 
 // Records is an ordered collection of import/export records.
 type Records []Record
-
-func (r Record) exportJSONRecord() exportJSONRecord {
-	out := exportJSONRecord{}
-	if r.includesField("region") {
-		out.Region = r.Region
-	}
-	if r.includesField("type") {
-		out.Type = r.Type
-	}
-	if r.includesField("tier") {
-		out.Tier = r.Tier
-	}
-	if r.includesField("data-type") {
-		out.DataType = r.DataType
-	}
-	if r.includesField("policies") {
-		out.Policies = r.Policies
-	}
-	if r.includesField("description") {
-		out.Description = r.Description
-	}
-	if r.includesField("value") {
-		value := r.Value
-		out.Value = &value
-	}
-	if r.includesField("date") {
-		out.Date = r.Date
-	}
-	if r.includesField("version") {
-		version := r.Version
-		out.Version = &version
-	}
-	if r.includesField("len") {
-		length := r.Len
-		out.Len = &length
-	}
-	if r.includesField("sha256") {
-		out.SHA256 = r.SHA256
-	}
-	if r.includesField("user") {
-		out.User = r.User
-	}
-	return out
-}
 
 func (r Record) includesField(field string) bool {
 	return r.Fields.Includes(field)
@@ -190,9 +143,6 @@ func (r *Record) setFieldValue(field, value string) {
 	switch field {
 	case "name":
 		r.Path = value
-		if r.Alias == "" && value != "" {
-			r.Alias = AliasForPath(value, inventory.Item{})
-		}
 	case "region":
 		r.Region = value
 	case "type":

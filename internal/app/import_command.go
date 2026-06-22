@@ -9,9 +9,8 @@ import (
 
 	crerr "github.com/cockroachdb/errors"
 
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
 // Import reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
@@ -62,10 +61,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 	if len(cfg.Regions) > 1 {
 		return nil, errors.New("multiple --region values are only supported for tui and export")
 	}
-
-	format := ctx.String("format")
-	items, err := PrepareImportItems(ctx.Context, &cfg, format)
-	if err != nil {
+	if err := ensureRegions(ctx.Context, &cfg); err != nil {
 		return nil, err
 	}
 	if input == nil {
@@ -74,17 +70,15 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 			return nil, err
 		}
 	}
-	records, err := parseImport(
-		format,
-		input,
-		items,
+	reader := textio.NewReader(textio.FormatType(ctx.String("format")), input)
+	parsedRecords, err := reader.Import(
 		cfg.FieldMappings.WithDefaults(),
 		strings.TrimSpace(ctx.String("key-field")),
 	)
 	if err != nil {
-		return nil, err
+		return nil, crerr.Wrap(err, "read import")
 	}
-	records, err = records.withRootPath(ctx.String("root-path"))
+	records, err := importRecords(parsedRecords).withRootPath(ctx.String("root-path"))
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +131,7 @@ func (command *importCommand) run() error {
 	return nil
 }
 
-func (command *importCommand) processRecord(record outputfmt.Record) error {
+func (command *importCommand) processRecord(record textio.Record) error {
 	region := recordRegion(record, command.cfg)
 	key := recordKey(region, record.Path)
 	existing, exists := command.metadata[key]
@@ -210,23 +204,6 @@ func (command *importCommand) writeSummary() {
 		command.summary.Skipped,
 		command.summary.Failed,
 	)
-}
-
-// parseImport dispatches import parsing by format while keeping the Import command handler format-agnostic.
-func parseImport(format string, reader io.Reader, items inventory.Items, mappings outputfmt.FieldMappings, jsonKeyField string) (importRecords, error) {
-	switch format {
-	case "dotenv":
-		records, err := outputfmt.ImportDotenv(reader, items)
-		return importRecords(records), crerr.Wrap(err, "import dotenv")
-	case "json":
-		records, err := outputfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
-		return importRecords(records), crerr.Wrap(err, "import JSON")
-	case "yaml", "yml":
-		records, err := outputfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
-		return importRecords(records), crerr.Wrap(err, "import YAML")
-	default:
-		return nil, fmt.Errorf("unsupported format: %s", format)
-	}
 }
 
 func stdinReader() (io.Reader, error) {

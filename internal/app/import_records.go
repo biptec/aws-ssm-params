@@ -9,16 +9,15 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
 type strictMetadataDescriber interface {
 	DescribeManyStrict(context.Context, []string) (map[string]ssm.Metadata, map[string]error)
 }
 
-type importRecords []outputfmt.Record
+type importRecords []textio.Record
 
 func (records importRecords) withRootPath(rootPath string) (importRecords, error) {
 	rootPath = strings.TrimSpace(rootPath)
@@ -50,9 +49,6 @@ func (records importRecords) withRootPath(rootPath string) (importRecords, error
 			record.Path = "/" + strings.TrimLeft(path, "/")
 		} else {
 			record.Path = rootPath + "/" + strings.TrimLeft(path, "/")
-		}
-		if record.Alias == "" {
-			record.Alias = outputfmt.AliasForPath(record.Path, inventory.Item{})
 		}
 		resolved = append(resolved, record)
 	}
@@ -113,19 +109,7 @@ func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.Paramete
 	return parameterType, nil
 }
 
-// PrepareImportItems resolves regions before import. Dotenv imports may still use # ssm comments or exact aliases.
-func PrepareImportItems(ctx context.Context, cfg *Config, _ string) (inventory.Items, error) {
-	if cfg.AllRegions {
-		return nil, errors.New("--all-regions is not supported for import; specify --region")
-	}
-	if err := ensureRegions(ctx, cfg); err != nil {
-		return nil, err
-	}
-	items := cfg.InventoryItems.UniqueByPath()
-	return items.WithDefaultRegion(cfg.Region), nil
-}
-
-func recordRegion(record outputfmt.Record, cfg Config) string {
+func recordRegion(record textio.Record, cfg Config) string {
 	if cfg.Fields.Allows("region") && record.HasField("region") && strings.TrimSpace(record.Region) != "" {
 		return strings.TrimSpace(record.Region)
 	}
@@ -163,7 +147,7 @@ func (resolver importMetadataResolver) resolve() (metadataByKey map[string]ssm.M
 	return metadata, errs
 }
 
-func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record outputfmt.Record, cfg Config) (ssm.ParameterType, error) {
+func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record textio.Record, cfg Config) (ssm.ParameterType, error) {
 	recordType := ""
 	if cfg.Fields.Allows("type") && record.HasField("type") && strings.TrimSpace(record.Type) != "" {
 		recordType = record.Type

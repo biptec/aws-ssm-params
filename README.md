@@ -903,15 +903,18 @@ Exported dotenv includes SSM comments when possible:
 ```dotenv
 # ssm: /app/prod/api/token
 # type: SecureString
-API_TOKEN="secret"
+APP_PROD_API_TOKEN="secret"
 ```
 
 During import:
 
 - `# ssm: /absolute/path` sets the exact SSM name for the next variable;
 - `# type: SecureString` can provide parameter type metadata;
-- without `# ssm:`, the dotenv key becomes a relative name unless it can be matched to a known inventory alias;
+- without `# ssm:`, the dotenv key always becomes a relative name;
 - relative names require `--root-path`.
+
+During export, the SSM path is converted mechanically to an uppercase dotenv key: surrounding slashes are removed and
+non-alphanumeric runs become underscores. No secret-kind-specific aliases are applied.
 
 Use dotenv for local development files, simple secret sets, and compatibility with `.env` tooling.
 

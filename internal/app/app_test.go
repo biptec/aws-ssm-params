@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -56,8 +56,8 @@ func TestConfigFromCLIParsesRepeatedRegionsFiltersAndFields(t *testing.T) {
 	assert.Equal(t, []string{"path", "value"}, cfg.ShowColumns)
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
-	assert.Equal(t, outputfmt.Fields{"name", "value"}, cfg.Fields)
-	assert.Equal(t, outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, textio.Fields{"name", "value"}, cfg.Fields)
+	assert.Equal(t, textio.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	require.Len(t, cfg.FilterGroups, 1)
 	assert.True(t, cfg.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
 }
@@ -77,8 +77,8 @@ func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
 	assert.Equal(t, "eu-north-1", cfg.Region)
 	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, cfg.Regions)
 	assert.True(t, cfg.WithDecryption)
-	assert.Equal(t, outputfmt.Fields{"name", "value"}, cfg.Fields)
-	assert.Equal(t, outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
+	assert.Equal(t, textio.Fields{"name", "value"}, cfg.Fields)
+	assert.Equal(t, textio.FieldMappings{{AWSName: "name", FileName: "title"}, {AWSName: "value", FileName: "text"}}, cfg.FieldMappings)
 	assert.Equal(t, []string{"path", "value"}, cfg.ShowColumns)
 	assert.Equal(t, []string{"name:asc", "type:desc"}, cfg.SortColumns)
 	assert.Empty(t, cfg.InventoryItems)
@@ -214,25 +214,23 @@ func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
 }
 
 func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
-	records := importRecords{{Path: "DATABASE_URL", Alias: "DATABASE_URL", Value: "postgres://localhost/app"}}
+	records := importRecords{{Path: "DATABASE_URL", Value: "postgres://localhost/app"}}
 
 	resolved, err := records.withRootPath("/app/prod/api/")
 
 	require.NoError(t, err)
 	records = resolved
 	assert.Equal(t, "/app/prod/api/DATABASE_URL", records[0].Path)
-	assert.Equal(t, "DATABASE_URL", records[0].Alias)
 }
 
 func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
-	records := importRecords{{Path: "/explicit/path", Alias: "EXPLICIT_PATH"}}
+	records := importRecords{{Path: "/explicit/path"}}
 
 	resolved, err := records.withRootPath("/app/prod")
 
 	require.NoError(t, err)
 	records = resolved
 	assert.Equal(t, "/explicit/path", records[0].Path)
-	assert.Equal(t, "EXPLICIT_PATH", records[0].Alias)
 }
 
 func TestApplyRootPathToRecordsRejectsRelativeNamesWithoutRoot(t *testing.T) {
@@ -324,11 +322,11 @@ func TestValidateKeyFieldOutputFieldsAllowsImplicitAllFields(t *testing.T) {
 }
 
 func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
-	mappings := outputfmt.FieldMappings{{AWSName: "name", FileName: "title"}}.
+	mappings := textio.FieldMappings{{AWSName: "name", FileName: "title"}}.
 		WithDefaults().
-		ForFields(outputfmt.Fields{"name", "value", "type"})
+		ForFields(textio.Fields{"name", "value", "type"})
 
-	assert.Equal(t, outputfmt.FieldMappings{
+	assert.Equal(t, textio.FieldMappings{
 		{AWSName: "name", FileName: "title"},
 		{AWSName: "value", FileName: "value"},
 		{AWSName: "type", FileName: "type"},
@@ -338,7 +336,7 @@ func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
 func TestExportRecordFieldsIncludesScalarAndKeyFields(t *testing.T) {
 	fields := exportRecordFields([]string{"value"}, "value", "region")
 
-	assert.Equal(t, outputfmt.Fields{"value", "region"}, fields)
+	assert.Equal(t, textio.Fields{"value", "region"}, fields)
 }
 
 func TestSortStatusesForExportUsesMultipleColumns(t *testing.T) {
@@ -365,7 +363,7 @@ func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 
 	fields := exportFields(Config{})
 
-	assert.Equal(t, outputfmt.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, fields)
+	assert.Equal(t, textio.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}, fields)
 }
 
 func TestExportDefaultFieldsWithKeyFieldStillRequestValues(t *testing.T) {
@@ -390,7 +388,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 
 	record := exportRecordFromStatus(status, []string{"name", "value"})
 
-	assert.Equal(t, outputfmt.Fields{"name", "value"}, record.Fields)
+	assert.Equal(t, textio.Fields{"name", "value"}, record.Fields)
 	assert.Equal(t, "secret", record.Value)
 	assert.Empty(t, record.Region)
 	assert.Empty(t, record.Type)
@@ -398,7 +396,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 }
 
 func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T) {
-	record := outputfmt.Record{Path: "/app/value", Fields: []string{"name", "value"}, Value: "secret"}
+	record := textio.Record{Path: "/app/value", Fields: []string{"name", "value"}, Value: "secret"}
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
@@ -409,7 +407,7 @@ func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T
 }
 
 func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
-	record := outputfmt.Record{Path: "/app/value", Fields: []string{"name", "value", "policies"}, Value: "secret", Policies: ""}
+	record := textio.Record{Path: "/app/value", Fields: []string{"name", "value", "policies"}, Value: "secret", Policies: ""}
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierAdvanced.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: `[{"Type":"Expiration"}]`}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
@@ -421,7 +419,7 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 }
 
 func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
-	record := outputfmt.Record{
+	record := textio.Record{
 		Fields:      []string{"name", "tier", "data-type", "description", "policies"},
 		Tier:        "Advanced",
 		DataType:    "aws:ec2:image",

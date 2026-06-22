@@ -6,8 +6,8 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
 type importOptionsResolver struct {
@@ -48,7 +48,7 @@ func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions,
 	return opts, nil
 }
 
-func (resolver importOptionsResolver) forRecord(record outputfmt.Record, cloud ssm.Metadata, exists bool) (ssm.PutParameterOptions, error) {
+func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.Metadata, exists bool) (ssm.PutParameterOptions, error) {
 	opts := resolver.defaults
 	cfg := resolver.cfg
 	if exists {

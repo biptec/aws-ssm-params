@@ -1,11 +1,10 @@
-package format
+package textio
 
 import (
 	"bytes"
 	"strings"
 	"testing"
 
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,41 +12,41 @@ import (
 func TestExportDotenvWritesSSMCommentsAndQuotedValues(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{
-		{Path: "/app/prod/api/password", Alias: "PASSWORD", Value: "secret with spaces"},
-		{Path: "/app/prod/api/multiline", Alias: "MULTILINE", Value: "line1\nline2"},
+		{Path: "/app/prod/api/password", Value: "secret with spaces"},
+		{Path: "/app/prod/api/multiline", Value: "line1\nline2"},
 	}
 
-	err := ExportDotenv(&out, records)
+	err := (&DotEnv{writer: &out}).Export(records, nil, "")
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "# ssm: /app/prod/api/password\nPASSWORD=\"secret with spaces\"")
-	assert.Contains(t, out.String(), "# ssm: /app/prod/api/multiline\nMULTILINE=\"line1\\nline2\"")
+	assert.Contains(t, out.String(), "# ssm: /app/prod/api/password\nAPP_PROD_API_PASSWORD=\"secret with spaces\"")
+	assert.Contains(t, out.String(), "# ssm: /app/prod/api/multiline\nAPP_PROD_API_MULTILINE=\"line1\\nline2\"")
 }
 
 func TestExportDotenvPreservesParameterTypeMetadata(t *testing.T) {
 	var out bytes.Buffer
-	records := []Record{{Path: "/app/prod/api/log-level", Alias: "LOG_LEVEL", Value: "debug", Type: "String"}}
+	records := []Record{{Path: "/app/prod/api/log-level", Value: "debug", Type: "String"}}
 
-	err := ExportDotenv(&out, records)
+	err := (&DotEnv{writer: &out}).Export(records, nil, "")
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "# ssm: /app/prod/api/log-level\n# type: String\nLOG_LEVEL=\"debug\"")
+	assert.Contains(t, out.String(), "# ssm: /app/prod/api/log-level\n# type: String\nAPP_PROD_API_LOG_LEVEL=\"debug\"")
 }
 
-func TestImportDotenvUsesExplicitSSMCommentBeforeAliasResolution(t *testing.T) {
+func TestImportDotenvUsesExplicitSSMCommentBeforeKeyFallback(t *testing.T) {
 	input := strings.NewReader("# ssm: /explicit/path\nANY_ALIAS='secret value'\n")
 
-	records, err := ImportDotenv(input, nil)
+	records, err := (&DotEnv{reader: input}).Import(nil, "")
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
-	assert.Equal(t, Record{Path: "/explicit/path", Alias: "ANY_ALIAS", Fields: []string{"name", "value"}, Value: "secret value"}, records[0])
+	assert.Equal(t, Record{Path: "/explicit/path", Fields: []string{"name", "value"}, Value: "secret value"}, records[0])
 }
 
 func TestImportDotenvPreservesTypeComment(t *testing.T) {
 	input := strings.NewReader("# ssm: /app/prod/api/log-level\n# type: String\nLOG_LEVEL=debug\n")
 
-	records, err := ImportDotenv(input, nil)
+	records, err := (&DotEnv{reader: input}).Import(nil, "")
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -55,44 +54,70 @@ func TestImportDotenvPreservesTypeComment(t *testing.T) {
 	assert.Equal(t, "debug", records[0].Value)
 }
 
-func TestImportDotenvResolvesAliasFromInventory(t *testing.T) {
-	items := []inventory.Item{{Path: "/app/prod/api/password", Kind: "app-secret"}}
-
-	records, err := ImportDotenv(strings.NewReader("PASSWORD=\"secret\"\n"), items)
-
-	require.NoError(t, err)
-	require.Len(t, records, 1)
-	assert.Equal(t, "/app/prod/api/password", records[0].Path)
-	assert.Equal(t, "secret", records[0].Value)
-}
-
-func TestImportDotenvUsesUnresolvedKeysAsRelativeNames(t *testing.T) {
+func TestImportDotenvUsesKeysAsRelativeNames(t *testing.T) {
 	input := strings.NewReader("DATABASE_URL=postgres://localhost/app\n")
 
-	records, err := ImportDotenv(input, nil)
+	records, err := (&DotEnv{reader: input}).Import(nil, "")
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
 	assert.Equal(t, "DATABASE_URL", records[0].Path)
-	assert.Equal(t, "DATABASE_URL", records[0].Alias)
 	assert.Equal(t, "postgres://localhost/app", records[0].Value)
 }
 
-func TestImportDotenvRejectsAmbiguousAliases(t *testing.T) {
-	items := []inventory.Item{
-		{Path: "/app/prod/api/password", Kind: "app-secret"},
-		{Path: "/app/prod/worker/password", Kind: "app-secret"},
-	}
+func TestDotenvKeyUsesOnlyGenericPathNormalization(t *testing.T) {
+	assert.Equal(t, "APP_PROD_API_PASSWORD", (&DotEnv{}).key("/app/prod/api/password"))
+	assert.Equal(t, "APP_INFRA_PROD_GHCR_TOKEN", (&DotEnv{}).key("/app-infra/prod/ghcr/token"))
+	assert.Equal(t, "FLUX_GITHUB_TOKEN", (&DotEnv{}).key("/flux/github/token"))
+	assert.Equal(t, "APP_INFRA_PROD_TLS_EXAMPLE_COM_TLS_CRT", (&DotEnv{}).key("/app-infra/prod/tls/example.com/tls.crt"))
+	assert.Equal(t, "APP_INFRA_PROD_TLS_EXAMPLE_COM_TLS_KEY", (&DotEnv{}).key("/app-infra/prod/tls/example.com/tls.key"))
+}
 
-	records, err := ImportDotenv(strings.NewReader("PASSWORD=secret\n"), items)
+func TestFactoriesBindFormatImplementations(t *testing.T) {
+	assert.IsType(t, &DotEnv{}, NewReader(FormatDotenv, nil))
+	assert.IsType(t, &JSON{}, NewReader(FormatJSON, nil))
+	assert.IsType(t, &YAML{}, NewWriter(FormatYAML, nil))
+	assert.IsType(t, &YAML{}, NewWriter(FormatYML, nil))
+}
+
+func TestNewUnsupportedFormatReportsOperationError(t *testing.T) {
+	reader := NewReader(FormatType("toml"), strings.NewReader(""))
+
+	_, err := reader.Import(nil, "")
 
 	require.Error(t, err)
-	assert.Nil(t, records)
-	assert.ErrorContains(t, err, "ambiguous")
+	assert.EqualError(t, err, "unsupported format: toml")
+}
+
+func TestTextIOImportUsesBoundDotenvFormat(t *testing.T) {
+	records, err := NewReader(FormatDotenv, strings.NewReader("API_TOKEN=secret\n")).Import(nil, "")
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "API_TOKEN", records[0].Path)
+	assert.Equal(t, "secret", records[0].Value)
+}
+
+func TestNewWriterUsesBoundJSONOutput(t *testing.T) {
+	var output bytes.Buffer
+	writer := NewWriter(FormatJSON, &output)
+
+	err := writer.Export(Records{{Path: "/app/token", Fields: Fields{"name", "value"}, Value: "secret"}}, nil, "name")
+
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"/app/token":{"value":"secret"}}`, output.String())
+}
+
+func TestCodecReportsMissingBoundStream(t *testing.T) {
+	_, err := NewReader(FormatJSON, nil).Import(nil, "")
+	assert.EqualError(t, err, "JSON reader is not configured")
+
+	err = NewWriter(FormatYAML, nil).Export(nil, nil, "")
+	assert.EqualError(t, err, "YAML writer is not configured")
 }
 
 func TestImportJSONSortsRecordsByPath(t *testing.T) {
-	records, err := ImportJSON(strings.NewReader(`{"/z/path":"last","/a/path":"first"}`))
+	records, err := (&JSON{reader: strings.NewReader(`{"/z/path":"last","/a/path":"first"}`)}).importLegacyRecords()
 
 	require.NoError(t, err)
 	require.Len(t, records, 2)
@@ -102,7 +127,7 @@ func TestImportJSONSortsRecordsByPath(t *testing.T) {
 }
 
 func TestImportJSONSupportsTypedRecordObjects(t *testing.T) {
-	records, err := ImportJSON(strings.NewReader(`{"/app/prod/api/log-level":{"type":"String","value":"debug"}}`))
+	records, err := (&JSON{reader: strings.NewReader(`{"/app/prod/api/log-level":{"type":"String","value":"debug"}}`)}).importLegacyRecords()
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -129,7 +154,7 @@ func TestImportJSONSupportsFullRecordObjects(t *testing.T) {
 		}
 	}`)
 
-	records, err := ImportJSON(input)
+	records, err := (&JSON{reader: input}).importLegacyRecords()
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -149,21 +174,21 @@ func TestImportJSONSupportsFullRecordObjects(t *testing.T) {
 	assert.Equal(t, "arn:aws:iam::123:user/dev", record.User)
 }
 
-func TestExportJSONMappedKeepsExplicitEmptyValueField(t *testing.T) {
+func TestExportJSONKeepsExplicitEmptyValueField(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"value"}, Value: ""}}
 
-	err := ExportJSONMapped(&out, records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "")
+	err := (&JSON{writer: &out}).Export(records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "")
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `[{"value":""}]`, out.String())
 }
 
-func TestExportJSONMappedKeepsKeyedExplicitEmptyValueField(t *testing.T) {
+func TestExportJSONKeepsKeyedExplicitEmptyValueField(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: ""}}
 
-	err := ExportJSONMapped(&out, records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "name")
+	err := (&JSON{writer: &out}).Export(records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "name")
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"/app/prod/api/key":{"value":""}}`, out.String())
@@ -173,7 +198,7 @@ func TestExportYAMLUsesArrayShapeAndMappings(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "type", "value"}, Type: "SecureString", Value: "secret"}}
 
-	err := ExportYAMLMapped(&out, records, []FieldMapping{{AWSName: "name", FileName: "path"}, {AWSName: "type", FileName: "kind"}, {AWSName: "value", FileName: "secret"}}, "")
+	err := (&YAML{writer: &out}).Export(records, []FieldMapping{{AWSName: "name", FileName: "path"}, {AWSName: "type", FileName: "kind"}, {AWSName: "value", FileName: "secret"}}, "")
 
 	require.NoError(t, err)
 	yaml := out.String()
@@ -186,7 +211,7 @@ func TestExportYAMLUsesKeyedShape(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: "secret"}}
 
-	err := ExportYAMLMapped(&out, records, nil, "name")
+	err := (&YAML{writer: &out}).Export(records, nil, "name")
 
 	require.NoError(t, err)
 	yaml := out.String()
@@ -203,7 +228,7 @@ func TestImportYAMLReadsArrayRecords(t *testing.T) {
   version: 7
 `)
 
-	records, err := ImportYAMLMapped(input, nil, "")
+	records, err := (&YAML{reader: input}).Import(nil, "")
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -220,7 +245,7 @@ func TestImportYAMLReadsKeyedRecords(t *testing.T) {
   value: secret
 `)
 
-	records, err := ImportYAMLMapped(input, nil, "name")
+	records, err := (&YAML{reader: input}).Import(nil, "name")
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -233,20 +258,12 @@ func TestExportJSONUsesTypedShapeWhenTypeMetadataExists(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/log-level", Value: "debug", Type: "String"}}
 
-	err := ExportJSON(&out, records)
+	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), `"/app/prod/api/log-level": {`)
 	assert.Contains(t, out.String(), `"type": "String"`)
 	assert.Contains(t, out.String(), `"value": "debug"`)
-}
-
-func TestAliasForPathHandlesKnownSecretTypes(t *testing.T) {
-	assert.Equal(t, "PASSWORD", AliasForPath("/app/prod/api/password", inventory.Item{Kind: "app-secret"}))
-	assert.Equal(t, "GHCR_TOKEN", AliasForPath("/app-infra/prod/ghcr/token", inventory.Item{}))
-	assert.Equal(t, "FLUX_GITHUB_TOKEN", AliasForPath("/flux/github/token", inventory.Item{}))
-	assert.Equal(t, "TLS_EXAMPLE_COM_CRT", AliasForPath("/app-infra/prod/tls/example.com/tls.crt", inventory.Item{}))
-	assert.Equal(t, "TLS_EXAMPLE_COM_KEY", AliasForPath("/app-infra/prod/tls/example.com/tls.key", inventory.Item{}))
 }
 
 func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
@@ -267,7 +284,7 @@ func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
 		User:        "arn:aws:iam::123:user/dev",
 	}}
 
-	err := ExportJSON(&out, records)
+	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
 	json := out.String()
@@ -289,7 +306,7 @@ func TestExportJSONUsesObjectShapeForValueOnlyFields(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: "secret", Type: "SecureString"}}
 
-	err := ExportJSON(&out, records)
+	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
 	assert.Equal(t, "{\n  \"/app/prod/api/key\": {\n    \"value\": \"secret\"\n  }\n}\n", out.String())
@@ -299,7 +316,7 @@ func TestExportJSONCanExportMetadataWithoutValue(t *testing.T) {
 	var out bytes.Buffer
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "type", "date"}, Type: "String", Value: "secret", Date: "2026-06-17T00:00:00Z"}}
 
-	err := ExportJSON(&out, records)
+	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
 	json := out.String()
@@ -312,7 +329,7 @@ func TestExportScalarLinesWritesOneValuePerLine(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
 	var out bytes.Buffer
 
-	err := ExportScalarLines(&out, records, "value")
+	err := (&DotEnv{writer: &out}).ExportScalar(records, "value", "")
 
 	require.NoError(t, err)
 	assert.Equal(t, "secret-a\nsecret-b\n", out.String())
@@ -322,7 +339,7 @@ func TestExportJSONScalarWritesArray(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
 	var out bytes.Buffer
 
-	err := ExportJSONScalar(&out, records, "value", "")
+	err := (&JSON{writer: &out}).ExportScalar(records, "value", "")
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `["secret-a","secret-b"]`, out.String())
@@ -332,7 +349,7 @@ func TestExportJSONScalarWritesKeyedMap(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
 	var out bytes.Buffer
 
-	err := ExportJSONScalar(&out, records, "value", "name")
+	err := (&JSON{writer: &out}).ExportScalar(records, "value", "name")
 
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"/app/a":"secret-a","/app/b":"secret-b"}`, out.String())
@@ -342,7 +359,7 @@ func TestExportYAMLScalarWritesKeyedMap(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
 	var out bytes.Buffer
 
-	err := ExportYAMLScalar(&out, records, "value", "name")
+	err := (&YAML{writer: &out}).ExportScalar(records, "value", "name")
 
 	require.NoError(t, err)
 	assert.Contains(t, out.String(), "/app/a: secret-a")

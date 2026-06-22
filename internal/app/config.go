@@ -12,9 +12,9 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/logging"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
@@ -26,8 +26,8 @@ type Config struct {
 	Logger                    *slog.Logger
 	FiltersFile               string
 	FilterGroups              filter.Groups
-	FieldMappings             outputfmt.FieldMappings
-	Fields                    outputfmt.Fields
+	FieldMappings             textio.FieldMappings
+	Fields                    textio.Fields
 	InventoryItems            inventory.Items
 	Region                    string
 	Regions                   []string
@@ -149,13 +149,13 @@ func boolFlagValueAny(ctx *CLIContext, name string, defaultValue bool, envNames 
 	return defaultValue
 }
 
-func parseOutputFields(values []string) (outputfmt.Fields, error) {
+func parseOutputFields(values []string) (textio.Fields, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	fields := make(outputfmt.Fields, 0, len(parts))
+	fields := make(textio.Fields, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--output-field accepts one value per flag; repeat --output-field instead of using commas")
@@ -173,13 +173,13 @@ func parseOutputFields(values []string) (outputfmt.Fields, error) {
 	return fields, nil
 }
 
-func parseMapFields(values []string) (outputfmt.FieldMappings, error) {
+func parseMapFields(values []string) (textio.FieldMappings, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	mappings := make(outputfmt.FieldMappings, 0, len(parts))
+	mappings := make(textio.FieldMappings, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--map-field accepts one value per flag; repeat --map-field instead of using commas")
@@ -200,7 +200,7 @@ func parseMapFields(values []string) (outputfmt.FieldMappings, error) {
 			continue
 		}
 		seen[canonical] = true
-		mappings = append(mappings, outputfmt.FieldMapping{AWSName: canonical, FileName: fileField})
+		mappings = append(mappings, textio.FieldMapping{AWSName: canonical, FileName: fileField})
 	}
 	return mappings, nil
 }

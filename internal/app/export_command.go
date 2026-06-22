@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -9,9 +8,9 @@ import (
 	crerr "github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
@@ -30,13 +29,13 @@ type exportCommand struct {
 	ctx          *CLIContext
 	cfg          Config
 	client       ssm.Client
+	writer       textio.Writer
 	items        inventory.Items
 	regions      []string
 	output       io.Writer
-	format       string
 	keyField     string
 	scalarField  string
-	recordFields outputfmt.Fields
+	recordFields textio.Fields
 	sortRules    exportSortRules
 }
 
@@ -71,10 +70,10 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 		ctx:          ctx,
 		cfg:          cfg,
 		client:       client,
+		writer:       textio.NewWriter(textio.FormatType(ctx.String("format")), output),
 		items:        items,
 		regions:      regions,
 		output:       output,
-		format:       ctx.String("format"),
 		keyField:     keyField,
 		scalarField:  scalarField,
 		recordFields: exportRecordFields(fields, scalarField, keyField),
@@ -87,9 +86,13 @@ func (command *exportCommand) run() error {
 	command.sortRules.sort(statuses)
 	records := command.records(statuses)
 	if command.scalarField != "" {
-		return command.writeScalar(records)
+		return crerr.Wrap(
+			command.writer.ExportScalar(records, command.scalarField, command.keyField),
+			"write scalar export",
+		)
 	}
-	return command.writeRecords(records)
+	mappings := command.cfg.FieldMappings.WithDefaults().ForFields(command.recordFields)
+	return crerr.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
 }
 
 func (command *exportCommand) loadStatuses() ui.Statuses {
@@ -123,39 +126,12 @@ func (command *exportCommand) loadStatuses() ui.Statuses {
 	return statuses
 }
 
-func (command *exportCommand) records(statuses ui.Statuses) outputfmt.Records {
-	records := make(outputfmt.Records, 0, len(statuses))
+func (command *exportCommand) records(statuses ui.Statuses) textio.Records {
+	records := make(textio.Records, 0, len(statuses))
 	for i := range statuses {
 		if statuses[i].Exists {
 			records = append(records, exportRecordFromStatus(statuses[i], command.recordFields))
 		}
 	}
 	return records
-}
-
-func (command *exportCommand) writeScalar(records outputfmt.Records) error {
-	switch command.format {
-	case "dotenv":
-		return crerr.Wrap(outputfmt.ExportScalarLines(command.output, records, command.scalarField), "export scalar")
-	case "json":
-		return crerr.Wrap(outputfmt.ExportJSONScalar(command.output, records, command.scalarField, command.keyField), "export scalar JSON")
-	case "yaml", "yml":
-		return crerr.Wrap(outputfmt.ExportYAMLScalar(command.output, records, command.scalarField, command.keyField), "export scalar YAML")
-	default:
-		return fmt.Errorf("unsupported format: %s", command.format)
-	}
-}
-
-func (command *exportCommand) writeRecords(records outputfmt.Records) error {
-	mappings := command.cfg.FieldMappings.WithDefaults().ForFields(command.recordFields)
-	switch command.format {
-	case "dotenv":
-		return crerr.Wrap(outputfmt.ExportDotenv(command.output, records), "export dotenv")
-	case "json":
-		return crerr.Wrap(outputfmt.ExportJSONMapped(command.output, records, mappings, command.keyField), "export JSON")
-	case "yaml", "yml":
-		return crerr.Wrap(outputfmt.ExportYAMLMapped(command.output, records, mappings, command.keyField), "export YAML")
-	default:
-		return fmt.Errorf("unsupported format: %s", command.format)
-	}
 }

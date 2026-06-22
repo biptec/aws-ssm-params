@@ -1,24 +1,19 @@
-package format
+package textio
 
-import (
-	"encoding/json"
-	"strconv"
-
-	"github.com/biptec/aws-ssm-params/internal/inventory"
-)
-
-// FieldMappings is an ordered set of AWS-to-file field mappings.
+// FieldMappings is an ordered set of AWS-to-file field mappings shared by structured codecs.
 type FieldMappings []FieldMapping
 
-func recordsToObjects(records Records, mappings FieldMappings, keyField string) []map[string]any {
+// objects projects records into mapped file objects.
+func (mappings FieldMappings) objects(records Records, keyField string) []map[string]any {
 	objects := make([]map[string]any, 0, len(records))
 	for i := range records {
-		objects = append(objects, recordObject(records[i], mappings, keyField))
+		objects = append(objects, mappings.object(records[i], keyField))
 	}
 	return objects
 }
 
-func recordObject(record Record, mappings FieldMappings, keyField string) map[string]any {
+// object projects one record and omits the field represented by an outer object key.
+func (mappings FieldMappings) object(record Record, keyField string) map[string]any {
 	object := map[string]any{}
 	for _, mapping := range mappings {
 		if mapping.AWSName == keyField {
@@ -35,48 +30,9 @@ func recordObject(record Record, mappings FieldMappings, keyField string) map[st
 	return object
 }
 
-func recordsFromObjects(objects []map[string]json.RawMessage, mappings FieldMappings, keyField string) Records {
-	records := make(Records, 0, len(objects))
-	for _, object := range objects {
-		record := recordFromObject(object, mappings)
-		if keyField != "" && record.fieldValue(keyField) == "" {
-			continue
-		}
-		records = append(records, record)
-	}
-	return records
-}
-
-func recordFromObject(object map[string]json.RawMessage, mappings FieldMappings) Record {
-	record := Record{}
-	fields := make(Fields, 0, len(mappings))
-	for _, mapping := range mappings {
-		raw, ok := object[mapping.FileName]
-		if !ok {
-			continue
-		}
-		var value string
-		if err := json.Unmarshal(raw, &value); err == nil {
-			record.setFieldValue(mapping.AWSName, value)
-			fields = append(fields, mapping.AWSName)
-			continue
-		}
-		var number int64
-		if err := json.Unmarshal(raw, &number); err == nil {
-			record.setFieldValue(mapping.AWSName, strconv.FormatInt(number, 10))
-			fields = append(fields, mapping.AWSName)
-		}
-	}
-	record.Fields = fields
-	if record.Alias == "" && record.Path != "" {
-		record.Alias = AliasForPath(record.Path, inventory.Item{})
-	}
-	return record
-}
-
 // DefaultFieldMappings returns the default AWS-to-file field mappings.
 func DefaultFieldMappings() FieldMappings {
-	return append(FieldMappings(nil), defaultJSONMappings()...)
+	return append(FieldMappings(nil), defaultFieldMappings()...)
 }
 
 // WithDefaults overlays the receiver on the default mappings.
@@ -118,7 +74,7 @@ func (mappings FieldMappings) ForFields(fields Fields) FieldMappings {
 	return out
 }
 
-func defaultJSONMappings() FieldMappings {
+func defaultFieldMappings() FieldMappings {
 	return FieldMappings{
 		{AWSName: "name", FileName: "name"},
 		{AWSName: "region", FileName: "region"},

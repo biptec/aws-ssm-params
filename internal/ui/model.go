@@ -7,9 +7,9 @@ import (
 	"time"
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,7 +29,7 @@ type Options struct {
 	Keymap                    string
 	ShowColumns               []string
 	Sort                      []string
-	Fields                    outputfmt.Fields
+	Fields                    textio.Fields
 	IncludeValues             bool
 	ShowSecureValues          bool
 	AllowNamesFileUpdate      bool

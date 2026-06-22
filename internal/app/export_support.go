@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	outputfmt "github.com/biptec/aws-ssm-params/internal/format"
 	"github.com/biptec/aws-ssm-params/internal/natural"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
@@ -133,13 +133,13 @@ func (rules exportSortRules) sort(statuses ui.Statuses) {
 	})
 }
 
-var allExportFields = outputfmt.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
+var allExportFields = textio.Fields{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
 
-func exportFields(cfg Config) outputfmt.Fields {
+func exportFields(cfg Config) textio.Fields {
 	if len(cfg.Fields) == 0 {
-		return append(outputfmt.Fields(nil), allExportFields...)
+		return append(textio.Fields(nil), allExportFields...)
 	}
-	return append(outputfmt.Fields(nil), cfg.Fields...)
+	return append(textio.Fields(nil), cfg.Fields...)
 }
 
 func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
@@ -153,7 +153,7 @@ func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
 	return cfg.Fields[0], nil
 }
 
-func validateKeyFieldOutputFields(keyField string, outputFields outputfmt.Fields) error {
+func validateKeyFieldOutputFields(keyField string, outputFields textio.Fields) error {
 	keyField = strings.TrimSpace(keyField)
 	if keyField == "" {
 		return nil
@@ -166,12 +166,12 @@ func validateKeyFieldOutputFields(keyField string, outputFields outputfmt.Fields
 	return nil
 }
 
-func exportRecordFields(fields outputfmt.Fields, scalarField, keyField string) outputfmt.Fields {
+func exportRecordFields(fields textio.Fields, scalarField, keyField string) textio.Fields {
 	return fields.With(strings.TrimSpace(scalarField), strings.TrimSpace(keyField))
 }
 
-func exportRecordFromStatus(status ui.Status, fields outputfmt.Fields) outputfmt.Record {
-	record := outputfmt.Record{Path: status.Item.Path, Alias: outputfmt.AliasForItem(status.Item), Fields: fields}
+func exportRecordFromStatus(status ui.Status, fields textio.Fields) textio.Record {
+	record := textio.Record{Path: status.Item.Path, Fields: fields}
 	if fields.Contains("region") {
 		record.Region = status.Item.Region
 	}
