@@ -134,3 +134,36 @@ func TestAWSFiltersAreSafePrefilters(t *testing.T) {
 		}
 	}
 }
+
+func TestGroupExactNameRecognizesLiteralNameGroups(t *testing.T) {
+	t.Parallel()
+
+	group, err := ParseGroup("/app/prod/token;type:SecureString")
+	if err != nil {
+		t.Fatalf("parse group: %v", err)
+	}
+
+	name, ok := group.ExactName()
+
+	if !ok {
+		t.Fatal("expected exact name")
+	}
+	if name != "/app/prod/token" {
+		t.Fatalf("unexpected exact name: %s", name)
+	}
+}
+
+func TestGroupExactNameRejectsWildcardNameGroups(t *testing.T) {
+	t.Parallel()
+
+	group, err := ParseGroup("/app/prod/*;type:SecureString")
+	if err != nil {
+		t.Fatalf("parse group: %v", err)
+	}
+
+	_, ok := group.ExactName()
+
+	if ok {
+		t.Fatal("did not expect wildcard name to be exact")
+	}
+}

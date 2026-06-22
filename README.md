@@ -10,11 +10,9 @@ The tool uses the AWS SDK for Go. AWS CLI is not required at runtime.
 aws-ssm-params [global options] <command> [command options]
 
 Commands:
-  interactive, tui  Open the interactive TUI
-  get               Print one selected parameter field
-  put               Put a String, StringList, or SecureString parameter value
-  import            Import parameter values from stdin
-  export            Export parameter values to stdout
+  tui      Open the TUI
+  import   Import parameter values from stdin
+  export   Export parameter values to stdout
 ```
 
 ## Global options
@@ -25,58 +23,50 @@ Commands:
 --profile value      AWS profile
 --no-color           Disable colored output
 --keymap value       Keyboard navigation style: emacs or vi
---log-level value    Log level: debug, info, warn, error, or off
---log-target value   Log target: stderr, stdout, or file
---log-file path      Log file path used when --log-target=file
+--log-level value    Log level: trace, debug, info, warn, error, or off
+--filters-file path  File with filter groups; one OR group per line
+--filter value       Filter group; repeat for OR groups
 ```
 
-Logging is disabled by default (`--log-level=off`). API errors and requests are logged with structured `log/slog` output when enabled. SecureString values are always masked in logs. During TUI sessions, stdout/stderr logs are buffered and printed after the TUI exits; `--log-target=file` writes directly to `--log-file`.
+Global options can be written before or after the command name:
+
+```bash
+aws-ssm-params --region eu-north-1 export
+aws-ssm-params export --region eu-north-1
+```
+
+Logging is disabled by default (`--log-level=off`). Any enabled log level writes structured `log/slog` output to stderr, so stdout stays machine-readable and logs can be saved with normal shell redirection, for example `aws-ssm-params --log-level trace tui 2>debug.log`. SecureString values are always masked in logs. Trace logging enables low-level AWS HTTP timing diagnostics.
 
 CLI list values are passed by repeating flags:
 
 ```bash
-aws-ssm-params --region eu-north-1 --region eu-central-1 interactive --name /stage/prod/test
+aws-ssm-params --region eu-north-1 --region eu-central-1 tui
 ```
 
 Comma-separated lists are allowed only in environment variables:
 
 ```bash
-AWS_SSM_PARAMS_REGIONS=eu-north-1,eu-central-1 AWS_SSM_PARAMS_NAME=/stage/prod/test,/stage/dev/test aws-ssm-params interactive
+AWS_SSM_PARAMS_REGIONS=eu-north-1,eu-central-1 aws-ssm-params tui
 ```
-
 
 ## Explicit parameter inventory
 
-Use interactive `--name` or `--names-file` when you already know which infrastructure parameters should exist. These options are TUI inventory inputs, not global filters: they build the desired inventory. Names that are not found in AWS are still shown in the TUI as missing rows so they can be created.
+Pipe or redirect a newline-based inventory into `tui` when you already know which infrastructure parameters should exist. Stdin inventory is not a filter: it builds the desired TUI inventory. Names that are not found in AWS are still shown in the TUI as missing rows so they can be created.
 
 ```bash
-aws-ssm-params \
-  --region eu-north-1 \
-  interactive \
-  --name /stage/prod/test \
-  --name /stage/dev/test
+cat path/to/names.txt | aws-ssm-params --region eu-north-1 tui
 
-aws-ssm-params \
-  --region eu-north-1 \
-  tui \
-  --names-file path/to/names.txt
+aws-ssm-params --region eu-north-1 tui < path/to/names.txt
 ```
 
-`--names-file` is newline-based. Empty lines and `#` comments are ignored.
+The stdin inventory format is newline-based. Empty lines and `#` comments are ignored.
 
 ```text
 /stage/prod/test
 /stage/dev/test
 ```
 
-Interactive environment variables use comma-separated values for repeated flags:
-
-```bash
-AWS_SSM_PARAMS_NAME=/stage/prod/test,/stage/dev/test
-AWS_SSM_PARAMS_NAMES_FILE=path/to/names.txt
-```
-
-`--filters-file` is separate: it filters loaded/discovered parameters, while `--names-file` declares expected parameter names.
+`--filters-file` is separate: it filters loaded/discovered/imported parameters, while stdin inventory declares expected parameter names.
 
 ## Filters
 
@@ -140,40 +130,38 @@ Extglob path matching uses these SSM path rules:
 **  matches recursively and can cross /
 ```
 
+Filters are global. For `import`, input data is parsed first, global filters are applied to the parsed records, and only then does the command query AWS or write parameters.
+
 The AWS query pipeline uses `DescribeParameters` first for AWS-side prefiltering, then applies the exact extglob matcher locally. When values are needed, it enriches the selected parameters with `GetParameters` in batches.
 
 ## SecureString values
 
 SecureString values are not decrypted or shown by default. Existing encrypted values are displayed as `(encrypted)` until `--with-decryption` is used. Use `--with-decryption` when values must be loaded, exported, edited, or matched through the `value` filter.
 
-## interactive
+## tui
 
 ```bash
-aws-ssm-params interactive \
-  --names-file path/to/names.txt \
+aws-ssm-params tui \
   --filter 'name:/prod/*;region:eu*' \
   --show-column name \
   --show-column value \
-  --sort-column name:asc
+  --sort-by name:asc \
+  --sort-by type:desc
 ```
 
 Options:
 
 ```text
---name value             repeat for multiple explicit TUI inventory names
---names-file path        file with explicit TUI inventory names
---filters-file path
---filter filter-group
 --with-decryption
 --show-column value       repeat for multiple columns
---sort-column field:asc|field:desc
+--sort-by field:asc|field:desc  repeat for multiple sort columns
 --no-confirm-overwrite-file
 --no-confirm-write-securestring
 --no-confirm-delete-one
 --no-confirm-delete-all
 ```
 
-Only one `--sort-column` value is supported.
+Use repeated `--sort-by` flags or comma-separated `AWS_SSM_PARAMS_SORT_BY` values to sort by multiple columns in priority order.
 
 ## export
 
@@ -182,24 +170,29 @@ Only one `--sort-column` value is supported.
 ```bash
 aws-ssm-params export \
   --filter '/app-infra/prod/**' \
-  --field name:title \
-  --field value:text \
+  --map-field name:title \
+  --map-field value:text \
   --format json \
+  --sort-by type:asc \
+  --sort-by name:asc \
   --with-decryption
 ```
 
 Options:
 
 ```text
---filter filter-group
---field aws_field[:file_field]
+--output-field aws_field
+--map-field aws_field:file_field
+--sort-by field:asc|field:desc  repeat for multiple sort columns
 --with-decryption
---format dotenv|json
---json-key-field field
---include-missing
+--format dotenv|json|yaml
+--key-field field
+--scalar
 ```
 
-By default, JSON export writes an array of records:
+Export sorting is applied before writing records to stdout. Use repeated `--sort-by` flags or comma-separated `AWS_SSM_PARAMS_SORT_BY` values to sort by multiple fields in priority order.
+
+By default, JSON and YAML export write an array of records:
 
 ```json
 [
@@ -210,7 +203,7 @@ By default, JSON export writes an array of records:
 ]
 ```
 
-With `--json-key-field name`, JSON export writes an object keyed by the selected AWS field:
+With `--key-field name`, JSON export writes an object and YAML export writes a map keyed by the selected AWS field:
 
 ```json
 {
@@ -225,25 +218,34 @@ With `--json-key-field name`, JSON export writes an object keyed by the selected
 `import` always reads parameter data from stdin. Redirect or pipe data into the command.
 
 ```bash
-cat values.json | aws-ssm-params import \
-  --format json \
-  --field name:title \
-  --field value:text \
-  --json-key-field name \
+cat .env | aws-ssm-params import \
+  --format dotenv \
+  --root-path /app-infra/prod/biptec/website \
+  --default-type SecureString
+```
+
+`--root-path` prefixes relative names from dotenv, JSON, and YAML inputs. Absolute SSM names and explicit `# ssm: /path` dotenv comments are kept unchanged.
+
+```bash
+cat values.yaml | aws-ssm-params import \
+  --format yaml \
+  --map-field name:title \
+  --map-field value:text \
+  --key-field name \
   --default-type SecureString
 ```
 
 Options:
 
 ```text
---filters-file path
---filter filter-group
---field aws_field[:file_field]
---format dotenv|json
---json-key-field field
---default-value value
---default-value-file path
---default-override
+--map-field aws_field:file_field
+--format dotenv|json|yaml
+--key-field field
+--root-path path
+--on-create skip|error|ask
+--on-update skip|error|ask
+--continue-on-error
+--summary
 --default-type value
 --default-tier value
 --default-data-type value
@@ -253,6 +255,30 @@ Options:
 --default-policies-file path
 ```
 
+By default, import uses upsert semantics: missing parameters are created and existing parameters are updated. `--on-create` and `--on-update` only change this default when they are set:
+
+```text
+skip   log and skip the operation
+error  log and stop at the operation
+ask    ask whether to perform the operation
+```
+
+`--continue-on-error` logs a per-record error, skips that record, and continues with the next one. If any records failed, the command exits with status `1` after processing. `--summary` prints final created/updated/skipped/failed counts; no summary is printed by default.
+
+For existing parameters, import resolves metadata fields in this order:
+
+```text
+imported file value → cloud metadata → default flag/built-in default
+```
+
+For new parameters, the order is:
+
+```text
+imported file value → default flag → built-in default
+```
+
+`value` is required in the input data and is never read from AWS. This avoids reading or decrypting existing SecureString values during import.
+
 AWS field names follow SSM API terminology:
 
 ```text
@@ -261,45 +287,49 @@ tier       Standard, Advanced, Intelligent-Tiering
 data-type  text, aws:ec2:image, aws:ssm:integration
 ```
 
-## put
+## Single-field scalar export
+
+Use `--scalar` with exactly one `--output-field` to print one selected field per matching parameter.
 
 ```bash
-aws-ssm-params put /app/prod/token secret \
-  --type SecureString \
-  --tier Advanced \
-  --region eu-north-1
+aws-ssm-params export --output-field name --scalar
+
+aws-ssm-params export \
+  --filter 'name:/app/prod/token' \
+  --output-field value \
+  --scalar \
+  --with-decryption
 ```
 
-Options:
-
-```text
---override value
---type value
---tier value
---data-type value
---region value
---description value
---policies value
---policies-file path
-```
-
-## get
+Default/dotenv format writes one scalar value per line. JSON writes an array of scalar values, and YAML writes a list:
 
 ```bash
-aws-ssm-params get /app/prod/token value --with-decryption
-aws-ssm-params get /app/prod/token type
-aws-ssm-params get /app/prod/token name
+aws-ssm-params export --format json --output-field name --scalar
 ```
 
-Allowed fields:
-
-```text
-name
-value
-type
-tier
-data-type
-region
-description
-policies
+```json
+[
+  "/app/a",
+  "/app/b"
+]
 ```
+
+With `--key-field`, JSON/YAML scalar export writes a map from key field to scalar value:
+
+```bash
+aws-ssm-params export \
+  --format json \
+  --key-field name \
+  --output-field value \
+  --scalar \
+  --with-decryption
+```
+
+```json
+{
+  "/app/a": "secret-a",
+  "/app/b": "secret-b"
+}
+```
+
+`--scalar` requires exactly one `--output-field`. Use `--map-field` only for object/map output where field names are present.

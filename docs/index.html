@@ -13,9 +13,7 @@
     <h2>Commands</h2>
     <pre><code>aws-ssm-params [global options] &lt;command&gt;
 
-interactive
-get
-put
+tui
 import
 export</code></pre>
     <h2>Global options</h2>
@@ -23,15 +21,23 @@ export</code></pre>
 --all-regions
 --profile value
 --no-color
---keymap value</code></pre>
-    <p>CLI lists use repeated flags. Comma-separated lists are supported only in environment variables such as <code>AWS_SSM_PARAMS_REGION</code>.</p>
+--keymap value
+--log-level value
+--filter value
+--filters-file path</code></pre>
+    <p>Global flags can be written before or after the command name. CLI lists use repeated flags. Comma-separated lists are supported only in environment variables such as <code>AWS_SSM_PARAMS_REGION</code>.</p>
     <h2>Filters</h2>
     <p>Filters use <code>field:extglob</code>. A bare filter is a <code>name</code> filter. Conditions inside one filter are joined by AND with <code>;</code>. Multiple filters are joined by OR.</p>
     <pre><code>--filter 'name:/prod/*;region:eu*'
 --filter '/app/prod/**'</code></pre>
     <p><code>--filters-file</code> uses the same syntax with one OR group per line. Blank lines and <code>#</code> comments are ignored.</p>
+    <p>For imports, input data is parsed first, filters are applied to the parsed records, and only then are AWS describe/write requests performed.</p>
     <h2>JSON fields</h2>
-    <p><code>--field aws_field[:file_field]</code> maps AWS fields to import/export file fields. JSON uses arrays by default. <code>--json-key-field name</code> switches JSON to an object keyed by the selected AWS field.</p>
+    <p><code>--output-field aws_field</code> selects export fields, and <code>--map-field aws_field:file_field</code> maps AWS field names to import/export file field names. JSON and YAML use arrays by default. <code>--key-field name</code> switches JSON to an object or YAML to a map keyed by the selected AWS field. For imports from ordinary dotenv files, <code>--root-path /app/prod</code> prefixes relative keys such as <code>DATABASE_URL</code>.</p>
+    <h2>Import write policy</h2>
+    <p>By default, import creates missing parameters and updates existing parameters. Use <code>--on-create skip|error|ask</code> and <code>--on-update skip|error|ask</code> to change that behavior. <code>--continue-on-error</code> is available for import, and <code>--summary</code> prints final import counts.</p>
+    <h2>Scalar export</h2>
+    <p><code>export --output-field value --scalar</code> writes one selected field per matching parameter. JSON/YAML scalar export returns arrays, or keyed maps when combined with <code>--key-field</code>.</p>
   </main>
 </body>
 </html>

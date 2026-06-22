@@ -1,11 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1171" height="412" viewBox="0 0 1171 412" role="img" aria-label="CLI: import command">
-  <rect width="100%" height="100%" rx="18" fill="#06101f"/>
-  <rect x="1" y="1" width="1169" height="410" rx="18" fill="none" stroke="#1e3354"/>
-  <circle cx="30" cy="28" r="6" fill="#ff5f57"/>
-  <circle cx="52" cy="28" r="6" fill="#ffbd2e"/>
-  <circle cx="74" cy="28" r="6" fill="#28c840"/>
-  <text x="585" y="33" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#8fb3d9">CLI: import command</text>
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#d7e2f1">
-    <text x="28" y="64" xml:space="preserve">NAME:</text><text x="28" y="84" xml:space="preserve">   aws-ssm-params import - Import parameter values from stdin</text><text x="28" y="104" xml:space="preserve"></text><text x="28" y="124" xml:space="preserve">USAGE:</text><text x="28" y="144" xml:space="preserve">   aws-ssm-params [global options] import [command options]</text><text x="28" y="164" xml:space="preserve"></text><text x="28" y="184" xml:space="preserve">OPTIONS:</text><text x="28" y="204" xml:space="preserve">   --format value                  input format: dotenv or json (default: &quot;dotenv&quot;)</text><text x="28" y="224" xml:space="preserve">   --json-key-field value          AWS field to use as JSON object key instead of JSON array records</text><text x="28" y="244" xml:space="preserve">   --default-override              overwrite existing non-empty values when imported records do not specify override metadata (defau</text><text x="28" y="264" xml:space="preserve">   --default-type value, -t value  default parameter type: string, string-list, or secure-string</text><text x="28" y="284" xml:space="preserve">   --default-tier value            default parameter tier: standard, advanced, or intelligent-tiering</text><text x="28" y="304" xml:space="preserve">   --default-data-type value       default parameter data type: text, aws:ec2:image, or aws:ssm:integration</text><text x="28" y="324" xml:space="preserve">   --default-region value          default AWS region for imported records without region metadata</text><text x="28" y="344" xml:space="preserve">   --default-description value     default parameter description</text><text x="28" y="364" xml:space="preserve">   --help, -h                      show help</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1811" height="696" viewBox="0 0 1811 696">
+<rect width="100%" height="100%" rx="12" fill="#0b0f14"/>
+<style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;fill:#d6e2ef}</style>
+<text x="28" y="28" xml:space="preserve">NAME:</text>
+<text x="28" y="48" xml:space="preserve">   aws-ssm-params import - Import parameter values from stdin</text>
+<text x="28" y="68" xml:space="preserve"></text>
+<text x="28" y="88" xml:space="preserve">USAGE:</text>
+<text x="28" y="108" xml:space="preserve">   aws-ssm-params [global options] import [command options]</text>
+<text x="28" y="128" xml:space="preserve"></text>
+<text x="28" y="148" xml:space="preserve">OPTIONS:</text>
+<text x="28" y="168" xml:space="preserve">   --map-field string [ --map-field string ]  field mapping as aws_field:file_field; repeat for multiple mappings</text>
+<text x="28" y="188" xml:space="preserve">   --format string                            input format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
+<text x="28" y="208" xml:space="preserve">   --key-field string                         AWS field to use as object/map key for JSON or YAML records</text>
+<text x="28" y="228" xml:space="preserve">   --root-path string                         SSM path prefix for relative imported names</text>
+<text x="28" y="248" xml:space="preserve">   --on-create string                         when an imported parameter does not exist: skip, error, or ask</text>
+<text x="28" y="268" xml:space="preserve">   --on-update string                         when an imported parameter already exists: skip, error, or ask</text>
+<text x="28" y="288" xml:space="preserve">   --continue-on-error                        continue importing remaining records after per-record errors</text>
+<text x="28" y="308" xml:space="preserve">   --summary                                  print an import summary after processing records</text>
+<text x="28" y="328" xml:space="preserve">   --default-type string                      default parameter type: string, string-list, or secure-string</text>
+<text x="28" y="348" xml:space="preserve">   --default-tier string                      default parameter tier: standard, advanced, or intelligent-tiering</text>
+<text x="28" y="368" xml:space="preserve">   --default-data-type string                 default parameter data type: text, aws:ec2:image, or aws:ssm:integration</text>
+<text x="28" y="388" xml:space="preserve">   --default-region string                    default AWS region for imported records without region metadata</text>
+<text x="28" y="408" xml:space="preserve">   --default-description string               default parameter description</text>
+<text x="28" y="428" xml:space="preserve">   --default-policies string                  default parameter policies JSON</text>
+<text x="28" y="448" xml:space="preserve">   --default-policies-file string             read default parameter policies JSON from file</text>
+<text x="28" y="468" xml:space="preserve">   --help, -h                                 show help</text>
+<text x="28" y="488" xml:space="preserve"></text>
+<text x="28" y="508" xml:space="preserve">GLOBAL OPTIONS:</text>
+<text x="28" y="528" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGIONS, $AWS_SSM_PARAMS_REGION]</text>
+<text x="28" y="548" xml:space="preserve">   --all-regions                        search parameters across all enabled AWS regions [$AWS_SSM_PARAMS_ALL_REGIONS]</text>
+<text x="28" y="568" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE, $AWS_PROFILE]</text>
+<text x="28" y="588" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR, $NO_COLOR]</text>
+<text x="28" y="608" xml:space="preserve">   --keymap string                      keyboard navigation style: emacs or vi (default: &quot;emacs&quot;) [$AWS_SSM_PARAMS_KEYMAP]</text>
+<text x="28" y="628" xml:space="preserve">   --log-level string                   log level: trace, debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL]</text>
+<text x="28" y="648" xml:space="preserve">   --filters-file string                file with filter groups; one OR group per line [$AWS_SSM_PARAMS_FILTERS_FILE]</text>
+<text x="28" y="668" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTERS, $AWS_SSM_PARAMS_FILTER]</text>
 </svg>

@@ -60,12 +60,54 @@ func (f fakeSDKSTS) GetCallerIdentity(_ context.Context, _ *sts.GetCallerIdentit
 	return &sts.GetCallerIdentityOutput{}, f.err
 }
 
+func TestFormatPoliciesUsesInlinePolicyText(t *testing.T) {
+	got := formatPolicies([]ssmtypes.ParameterInlinePolicy{
+		{
+			PolicyText:   aws.String(`{"Type":"Expiration","Version":"1.0","Attributes":{"Timestamp":"2026-01-01T00:00:00Z"}}`),
+			PolicyType:   aws.String("Expiration"),
+			PolicyStatus: aws.String("Pending"),
+		},
+	})
+
+	assert.JSONEq(t, `[{"Type":"Expiration","Version":"1.0","Attributes":{"Timestamp":"2026-01-01T00:00:00Z"}}]`, got)
+	assert.NotContains(t, got, "PolicyText")
+	assert.NotContains(t, got, "PolicyType")
+	assert.NotContains(t, got, "PolicyStatus")
+}
+
+func TestFormatPoliciesFlattensInlinePolicyTextArray(t *testing.T) {
+	got := formatPolicies([]ssmtypes.ParameterInlinePolicy{
+		{PolicyText: aws.String(`[{"Type":"Expiration","Version":"1.0"},{"Type":"NoChangeNotification","Version":"1.0"}]`)},
+	})
+
+	assert.JSONEq(t, `[{"Type":"Expiration","Version":"1.0"},{"Type":"NoChangeNotification","Version":"1.0"}]`, got)
+}
+
 func TestNewAWSClientStoresProfileRegionAndDecryption(t *testing.T) {
 	client := NewAWSClient("prod", "eu-north-1")
 
 	assert.Equal(t, "prod", client.Profile)
 	assert.Equal(t, "eu-north-1", client.Region)
 	assert.True(t, client.WithDecryption)
+}
+
+func TestForRegionSharesLoadedConfigAndOverridesRegion(t *testing.T) {
+	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "AKIA", SecretAccessKey: "SECRET", Source: "test-provider"}, nil
+	})
+	cache := &awsConfigCache{loaded: true, cfg: aws.Config{Region: "us-east-1", Credentials: provider}}
+	client := &AWSClient{Profile: "prod", Region: "us-east-1", WithDecryption: true, sharedCfg: cache}
+
+	regional, ok := client.ForRegion("eu-west-1").(*AWSClient)
+	require.True(t, ok)
+	assert.Same(t, cache, regional.sharedCfg)
+
+	cfg, err := regional.sdkConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "eu-west-1", cfg.Region)
+	creds, err := cfg.Credentials.Retrieve(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "test-provider", creds.Source)
 }
 
 func TestGetManyMapsValuesAndInvalidParameters(t *testing.T) {
@@ -161,6 +203,15 @@ func TestCheckAccessWrapsCredentialErrors(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot access AWS")
 	assert.Contains(t, err.Error(), "expired token")
+}
+
+func TestTraceHTTPClientUsesTraceRoundTripper(t *testing.T) {
+	client := traceHTTPClient()
+
+	require.NotNil(t, client)
+	require.NotNil(t, client.Transport)
+	_, traced := client.Transport.(traceRoundTripper)
+	assert.True(t, traced)
 }
 
 func TestFormatModifiedDateHandlesAWSDateShapes(t *testing.T) {

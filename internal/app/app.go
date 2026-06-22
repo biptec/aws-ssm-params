@@ -2,20 +2,19 @@
 package app
 
 import (
+	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
-	"path"
+	"sort"
 	"strings"
+	"unicode"
 
 	crerr "github.com/cockroachdb/errors"
-	"github.com/gosuri/uilive"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
@@ -25,6 +24,33 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
+
+// CLIContext is the small adapter used by application code so the business layer is not coupled
+// to urfave/cli internals.
+type CLIContext struct {
+	Context context.Context
+	Command *cli.Command
+}
+
+// NewCLIContext adapts a urfave/cli/v3 command invocation for application code.
+func NewCLIContext(ctx context.Context, cmd *cli.Command) *CLIContext {
+	return &CLIContext{Context: ctx, Command: cmd}
+}
+
+// String returns a string flag value by name.
+func (ctx *CLIContext) String(name string) string { return ctx.Command.String(name) }
+
+// Bool returns a boolean flag value by name.
+func (ctx *CLIContext) Bool(name string) bool { return ctx.Command.Bool(name) }
+
+// StringSlice returns a repeated string flag value by name.
+func (ctx *CLIContext) StringSlice(name string) []string { return ctx.Command.StringSlice(name) }
+
+// IsSet reports whether a flag was set explicitly by the user.
+func (ctx *CLIContext) IsSet(name string) bool { return ctx.Command.IsSet(name) }
+
+// Args returns positional command arguments.
+func (ctx *CLIContext) Args() cli.Args { return ctx.Command.Args() }
 
 // Config is the normalized runtime configuration shared by all commands.
 // It is built from CLI flags plus AWS-related environment variables before command-specific code runs.
@@ -36,8 +62,7 @@ type Config struct {
 	FilterGroups              []filter.Group
 	FieldMappings             []secretfmt.FieldMapping
 	Fields                    []string
-	Names                     []string
-	NamesFile                 string
+	InventoryItems            []inventory.Item
 	Region                    string
 	Regions                   []string
 	Profile                   string
@@ -46,7 +71,7 @@ type Config struct {
 	WithDecryption            bool
 	Keymap                    string
 	ShowColumns               []string
-	SortColumn                string
+	SortColumns               []string
 	NoConfirmOverwriteFile    bool
 	NoConfirmWriteSecureValue bool
 	NoConfirmDeleteOne        bool
@@ -78,11 +103,8 @@ var supportedFields = map[string]string{
 }
 
 // RunWithLogging configures command logging, executes action, and flushes buffered terminal logs.
-func RunWithLogging(ctx *cli.Context, bufferTerminal bool, action func(*cli.Context) error) error {
+func RunWithLogging(ctx *CLIContext, bufferTerminal bool, action func(*CLIContext) error) error {
 	logCfg := loggingConfigFromCLI(ctx)
-	if ctx.Command != nil && ctx.Command.Name == "export" && strings.EqualFold(strings.TrimSpace(logCfg.Target), "stdout") && loggingLevelEnabled(logCfg.Level) {
-		return errors.New("--log-target=stdout cannot be used with export when logging is enabled; use stderr or file")
-	}
 	logger, flush, err := logging.New(logCfg, bufferTerminal)
 	if err != nil {
 		return crerr.Wrap(err, "configure logging")
@@ -102,55 +124,136 @@ func RunWithLogging(ctx *cli.Context, bufferTerminal bool, action func(*cli.Cont
 	return err
 }
 
-func loggingLevelEnabled(level string) bool {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case "", "off":
-		return false
-	default:
-		return true
-	}
+func loggingConfigFromCLI(ctx *CLIContext) logging.Config {
+	return logging.Config{Level: stringFlagValueAny(ctx, "log-level", logging.DefaultLevel, "AWS_SSM_PARAMS_LOG_LEVEL")}
 }
 
-func loggingConfigFromCLI(ctx *cli.Context) logging.Config {
-	return logging.Config{
-		Level:  stringFlagValueAny(ctx, "log-level", logging.DefaultLevel, "AWS_SSM_PARAMS_LOG_LEVEL"),
-		Target: stringFlagValueAny(ctx, "log-target", logging.DefaultTarget, "AWS_SSM_PARAMS_LOG_TARGET"),
-		File:   stringFlagValueAny(ctx, "log-file", logging.DefaultFile, "AWS_SSM_PARAMS_LOG_FILE"),
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
 	}
+	return out
 }
 
-func parseFieldMappings(values []string) ([]secretfmt.FieldMapping, []string, error) {
+func dedupeStrings(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func splitCommaEnv(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return compactStrings(strings.Split(value, ","))
+}
+
+func stringSliceFlagValue(ctx *CLIContext, name string, envNames ...string) []string {
+	values := compactStrings(ctx.StringSlice(name))
+	if len(values) > 0 {
+		return values
+	}
+	for _, envName := range envNames {
+		if envValues := splitCommaEnv(os.Getenv(envName)); len(envValues) > 0 {
+			return envValues
+		}
+	}
+	return nil
+}
+
+func stringFlagValueAny(ctx *CLIContext, name, defaultValue string, envNames ...string) string {
+	if ctx.IsSet(name) {
+		return ctx.String(name)
+	}
+	for _, envName := range envNames {
+		if value := os.Getenv(envName); strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return defaultValue
+}
+
+func boolFlagValueAny(ctx *CLIContext, name string, defaultValue bool, envNames ...string) bool {
+	if ctx.IsSet(name) {
+		return ctx.Bool(name)
+	}
+	for _, envName := range envNames {
+		value := strings.ToLower(strings.TrimSpace(os.Getenv(envName)))
+		switch value {
+		case "1", "t", "true", "yes", "y", "on":
+			return true
+		case "0", "f", "false", "no", "n", "off":
+			return false
+		}
+	}
+	return defaultValue
+}
+
+func parseOutputFields(values []string) ([]string, error) {
 	parts := compactStrings(values)
 	if len(parts) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	seen := map[string]bool{}
-	mappings := make([]secretfmt.FieldMapping, 0, len(parts))
 	fields := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
-			return nil, nil, fmt.Errorf("--field accepts one value per flag; repeat --field instead of using commas")
+			return nil, fmt.Errorf("--output-field accepts one value per flag; repeat --output-field instead of using commas")
 		}
-		awsField, fileField, ok := strings.Cut(part, ":")
+		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(part))]
 		if !ok {
-			fileField = awsField
-		}
-		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(awsField))]
-		if !ok {
-			return nil, nil, fmt.Errorf("unsupported --field value %q", awsField)
-		}
-		fileField = strings.TrimSpace(fileField)
-		if fileField == "" {
-			return nil, nil, fmt.Errorf("field mapping %q has empty file field", part)
+			return nil, fmt.Errorf("unsupported --output-field value %q", part)
 		}
 		if seen[canonical] {
 			continue
 		}
 		seen[canonical] = true
 		fields = append(fields, canonical)
+	}
+	return fields, nil
+}
+
+func parseMapFields(values []string) ([]secretfmt.FieldMapping, error) {
+	parts := compactStrings(values)
+	if len(parts) == 0 {
+		return nil, nil
+	}
+	seen := map[string]bool{}
+	mappings := make([]secretfmt.FieldMapping, 0, len(parts))
+	for _, part := range parts {
+		if strings.Contains(part, ",") {
+			return nil, fmt.Errorf("--map-field accepts one value per flag; repeat --map-field instead of using commas")
+		}
+		awsField, fileField, ok := strings.Cut(part, ":")
+		if !ok {
+			return nil, fmt.Errorf("--map-field requires aws_field:file_field")
+		}
+		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(awsField))]
+		if !ok {
+			return nil, fmt.Errorf("unsupported --map-field AWS field %q", awsField)
+		}
+		fileField = strings.TrimSpace(fileField)
+		if fileField == "" {
+			return nil, fmt.Errorf("field mapping %q has empty file field", part)
+		}
+		if seen[canonical] {
+			continue
+		}
+		seen[canonical] = true
 		mappings = append(mappings, secretfmt.FieldMapping{AWSName: canonical, FileName: fileField})
 	}
-	return mappings, fields, nil
+	return mappings, nil
 }
 
 func parseFilterGroups(values []string, filtersFile string) ([]filter.Group, error) {
@@ -231,7 +334,7 @@ func RejectCommaSeparatedFlagArgs(args []string, flagNames ...string) error {
 
 // ConfigFromCLI converts raw urfave/cli state into a Config that the rest of the application can use.
 // CLI list values are provided by repeating flags; only environment variables may contain comma-separated lists.
-func ConfigFromCLI(ctx *cli.Context) (Config, error) {
+func ConfigFromCLI(ctx *CLIContext) (Config, error) {
 	allRegions := boolFlagValueAny(ctx, "all-regions", false, "AWS_SSM_PARAMS_ALL_REGIONS")
 	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGIONS", "AWS_SSM_PARAMS_REGION"))
 	if allRegions && len(regions) > 0 {
@@ -262,19 +365,13 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported --keymap %q; expected emacs or vi", keymap)
 	}
 
-	fieldMappings, fields, err := parseFieldMappings(stringSliceFlagValue(ctx, "field", "AWS_SSM_PARAMS_FIELDS"))
+	fieldMappings, err := parseMapFields(stringSliceFlagValue(ctx, "map-field", "AWS_SSM_PARAMS_MAP_FIELDS", "AWS_SSM_PARAMS_MAP_FIELD"))
 	if err != nil {
 		return Config{}, err
 	}
-	var names []string
-	namesFile := ""
-	if interactiveInventoryFlagsEnabled(ctx) {
-		var err error
-		names, err = parseNames(stringSliceFlagValue(ctx, "name", "AWS_SSM_PARAMS_NAME"))
-		if err != nil {
-			return Config{}, err
-		}
-		namesFile = strings.TrimSpace(stringFlagValueAny(ctx, "names-file", "", "AWS_SSM_PARAMS_NAMES_FILE"))
+	fields, err := parseOutputFields(stringSliceFlagValue(ctx, "output-field", "AWS_SSM_PARAMS_OUTPUT_FIELDS", "AWS_SSM_PARAMS_OUTPUT_FIELD"))
+	if err != nil {
+		return Config{}, err
 	}
 	showColumns, err := ui.ParseColumnOption(strings.Join(stringSliceFlagValue(ctx, "show-column", "AWS_SSM_PARAMS_SHOW_COLUMNS"), ","))
 	if err != nil {
@@ -292,8 +389,6 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		FilterGroups:              filterGroups,
 		FieldMappings:             fieldMappings,
 		Fields:                    fields,
-		Names:                     names,
-		NamesFile:                 namesFile,
 		Region:                    region,
 		Regions:                   regions,
 		Profile:                   profile,
@@ -302,7 +397,7 @@ func ConfigFromCLI(ctx *cli.Context) (Config, error) {
 		WithDecryption:            boolFlagValueAny(ctx, "with-decryption", false, "AWS_SSM_PARAMS_WITH_DECRYPTION"),
 		Keymap:                    keymap,
 		ShowColumns:               showColumns,
-		SortColumn:                strings.TrimSpace(stringFlagValueAny(ctx, "sort-column", "", "AWS_SSM_PARAMS_SORT_COLUMN")),
+		SortColumns:               compactStrings(stringSliceFlagValue(ctx, "sort-by", "AWS_SSM_PARAMS_SORT_BY")),
 		NoConfirmOverwriteFile:    boolFlagValueAny(ctx, "no-confirm-overwrite-file", false, "AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE"),
 		NoConfirmWriteSecureValue: boolFlagValueAny(ctx, "no-confirm-write-securestring", false, "AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING"),
 		NoConfirmDeleteOne:        boolFlagValueAny(ctx, "no-confirm-delete-one", false, "AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE"),
@@ -319,8 +414,8 @@ func NewClient(cfg Config) ssm.Client {
 	return client
 }
 
-// LoadItems builds explicit inventory items from --name and --names-file.
-// When no names are configured, callers can still discover parameters directly from AWS SSM.
+// LoadItems builds explicit inventory items from configured sources.
+// When no inventory is configured, callers can still discover parameters directly from AWS SSM.
 func LoadItems(cfg Config) ([]inventory.Item, error) {
 	seen := map[string]bool{}
 	items := []inventory.Item{}
@@ -333,20 +428,8 @@ func LoadItems(cfg Config) ([]inventory.Item, error) {
 		items = append(items, item)
 	}
 
-	if strings.TrimSpace(cfg.NamesFile) != "" {
-		fileItems, err := inventory.LoadPathsFile(cfg.NamesFile)
-		if err != nil {
-			return nil, crerr.Wrap(err, "load names file")
-		}
-		for _, item := range fileItems {
-			add(item)
-		}
-	}
-	for _, name := range cfg.Names {
-		if !strings.HasPrefix(name, "/") {
-			return nil, fmt.Errorf("invalid SSM name: %s", name)
-		}
-		add(inventory.Item{Path: name, Kind: "name", Source: "--name", SecretName: path.Base(name)})
+	for _, item := range cfg.InventoryItems {
+		add(item)
 	}
 	return items, nil
 }
@@ -371,201 +454,6 @@ func PrepareItems(ctx context.Context, cfg *Config) ([]inventory.Item, error) {
 		return applyInventoryRegion(items, "*"), nil
 	}
 	return applyInventoryRegion(items, cfg.Region), nil
-}
-
-func applyInventoryRegion(items []inventory.Item, region string) []inventory.Item {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]inventory.Item, len(items))
-	copy(out, items)
-	for i := range out {
-		if out[i].Region == "" {
-			out[i].Region = region
-		}
-	}
-	return out
-}
-
-func interactiveInventoryFlagsEnabled(ctx *cli.Context) bool {
-	if ctx == nil || ctx.Command == nil || ctx.Command.Name == "" {
-		return true
-	}
-	return ctx.Command.Name == "interactive"
-}
-
-func parseNames(values []string) ([]string, error) {
-	names := compactStrings(values)
-	for _, name := range names {
-		if !strings.HasPrefix(name, "/") {
-			return nil, fmt.Errorf("invalid --name value %q", name)
-		}
-	}
-	return dedupeStrings(names), nil
-}
-
-func filterRecordsByGroups(records []secretfmt.Record, groups []filter.Group) []secretfmt.Record {
-	if len(groups) == 0 {
-		return records
-	}
-	out := make([]secretfmt.Record, 0, len(records))
-	for i := range records {
-		if filter.MatchAny(groups, filter.Record{
-			Name:        records[i].Path,
-			Region:      records[i].Region,
-			Type:        records[i].Type,
-			Tier:        records[i].Tier,
-			DataType:    records[i].DataType,
-			Description: records[i].Description,
-			Policies:    records[i].Policies,
-			Value:       records[i].Value,
-		}) {
-			out = append(out, records[i])
-		}
-	}
-	return out
-}
-
-func requireFieldForCommand(cfg Config, field, command string) error {
-	if !fieldAllowed(cfg.Fields, field) {
-		return fmt.Errorf("%s requires field %q; remove --field restrictions or include %s", command, field, field)
-	}
-	return nil
-}
-
-func rejectDisallowedFlag(ctx *cli.Context, cfg Config, flagName, field string) error {
-	if ctx.IsSet(flagName) && !fieldAllowed(cfg.Fields, field) {
-		return fmt.Errorf("--%s requires field %q; remove --field restrictions or include %s", flagName, field, field)
-	}
-	return nil
-}
-
-func parseSingleField(value, flagName, defaultField string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = defaultField
-	}
-	if strings.Contains(value, ",") {
-		return "", fmt.Errorf("--%s accepts one field only", flagName)
-	}
-	canonical, ok := supportedFields[strings.ToLower(value)]
-	if !ok {
-		return "", fmt.Errorf("unsupported --%s value %q", flagName, value)
-	}
-	return canonical, nil
-}
-
-func recordHasField(record secretfmt.Record, field string) bool {
-	for _, candidate := range record.Fields {
-		if candidate == field {
-			return true
-		}
-	}
-	return len(record.Fields) == 0
-}
-
-func importDefaultValue(ctx *cli.Context) (string, error) {
-	if valueFile := strings.TrimSpace(ctx.String("default-value-file")); valueFile != "" {
-		data, err := fileio.ReadFile(valueFile)
-		if err != nil {
-			return "", crerr.Wrapf(err, "read default value file %s", valueFile)
-		}
-		return string(data), nil
-	}
-	return ctx.String("default-value"), nil
-}
-
-func importDefaultOptions(ctx *cli.Context, cfg Config) (ssm.PutParameterOptions, error) {
-	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
-	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default tier")
-	}
-	dataType, err := ssm.ParseParameterDataType(ctx.String("default-data-type"))
-	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default data type")
-	}
-	policies := ctx.String("default-policies")
-	if policiesFile := strings.TrimSpace(ctx.String("default-policies-file")); policiesFile != "" {
-		data, err := fileio.ReadFile(policiesFile)
-		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrapf(err, "read default policies file %s", policiesFile)
-		}
-		policies = string(data)
-	}
-	opts := ssm.PutParameterOptions{Overwrite: ctx.Bool("default-override")}
-	if fieldAllowed(cfg.Fields, "tier") {
-		opts.Tier = tier
-	}
-	if fieldAllowed(cfg.Fields, "data-type") {
-		opts.DataType = dataType
-	}
-	if fieldAllowed(cfg.Fields, "description") {
-		opts.Description = ctx.String("default-description")
-	}
-	if fieldAllowed(cfg.Fields, "policies") {
-		opts.Policies = policies
-	}
-	return opts, nil
-}
-
-func importOptionsForRecord(record secretfmt.Record, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
-	opts := defaults
-	if fieldAllowed(cfg.Fields, "tier") && recordHasField(record, "tier") && strings.TrimSpace(record.Tier) != "" {
-		tier, err := ssm.ParseParameterTier(record.Tier)
-		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
-		}
-		opts.Tier = tier
-	}
-	if fieldAllowed(cfg.Fields, "data-type") && recordHasField(record, "data-type") && strings.TrimSpace(record.DataType) != "" {
-		dataType, err := ssm.ParseParameterDataType(record.DataType)
-		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
-		}
-		opts.DataType = dataType
-	}
-	if fieldAllowed(cfg.Fields, "description") && recordHasField(record, "description") {
-		opts.Description = record.Description
-	}
-	if fieldAllowed(cfg.Fields, "policies") && recordHasField(record, "policies") {
-		opts.Policies = record.Policies
-	}
-	return opts, nil
-}
-
-func setOptions(ctx *cli.Context, cfg Config, overwrite bool) (ssm.PutParameterOptions, error) {
-	if err := rejectDisallowedFlag(ctx, cfg, "tier", "tier"); err != nil {
-		return ssm.PutParameterOptions{}, err
-	}
-	if err := rejectDisallowedFlag(ctx, cfg, "data-type", "data-type"); err != nil {
-		return ssm.PutParameterOptions{}, err
-	}
-	if err := rejectDisallowedFlag(ctx, cfg, "description", "description"); err != nil {
-		return ssm.PutParameterOptions{}, err
-	}
-	if err := rejectDisallowedFlag(ctx, cfg, "policies", "policies"); err != nil {
-		return ssm.PutParameterOptions{}, err
-	}
-	if err := rejectDisallowedFlag(ctx, cfg, "policies-file", "policies"); err != nil {
-		return ssm.PutParameterOptions{}, err
-	}
-	tier, err := ssm.ParseParameterTier(ctx.String("tier"))
-	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse tier")
-	}
-	dataType, err := ssm.ParseParameterDataType(ctx.String("data-type"))
-	if err != nil {
-		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse data type")
-	}
-	policies := ctx.String("policies")
-	if file := strings.TrimSpace(ctx.String("policies-file")); file != "" {
-		data, err := fileio.ReadFile(file)
-		if err != nil {
-			return ssm.PutParameterOptions{}, crerr.Wrapf(err, "read policies file %s", file)
-		}
-		policies = string(data)
-	}
-	return ssm.PutParameterOptions{Overwrite: overwrite, Tier: tier, DataType: dataType, Description: ctx.String("description"), Policies: policies}, nil
 }
 
 // ensureRegions guarantees that non-all-regions commands have one usable AWS region.
@@ -595,93 +483,154 @@ func ensureAllRegionsSeedRegion(cfg *Config) {
 	}
 }
 
-func stringFlagValueAny(ctx *cli.Context, name, fallback string, envNames ...string) string {
-	if ctx.IsSet(name) {
-		return ctx.String(name)
+func applyInventoryRegion(items []inventory.Item, region string) []inventory.Item {
+	if len(items) == 0 {
+		return nil
 	}
-	for _, envName := range envNames {
-		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
-			return value
+	out := make([]inventory.Item, len(items))
+	copy(out, items)
+	for i := range out {
+		if out[i].Region == "" {
+			out[i].Region = region
 		}
 	}
-	return fallback
+	return out
 }
 
-func boolFlagValueAny(ctx *cli.Context, name string, fallback bool, envNames ...string) bool {
-	if ctx.IsSet(name) {
-		return ctx.Bool(name)
+func filterRecordsByGroups(records []secretfmt.Record, groups []filter.Group) []secretfmt.Record {
+	if len(groups) == 0 {
+		return records
 	}
-	for _, envName := range envNames {
-		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
-			return parseBoolEnv(value)
+	out := make([]secretfmt.Record, 0, len(records))
+	for i := range records {
+		if filter.MatchAny(groups, filter.Record{
+			Name:        records[i].Path,
+			Region:      records[i].Region,
+			Type:        records[i].Type,
+			Tier:        records[i].Tier,
+			DataType:    records[i].DataType,
+			Description: records[i].Description,
+			Policies:    records[i].Policies,
+			Value:       records[i].Value,
+		}) {
+			out = append(out, records[i])
 		}
 	}
-	return fallback
+	return out
 }
 
-func stringSliceFlagValue(ctx *cli.Context, name string, envNames ...string) []string {
-	values := splitCommaSeparatedValues(ctx.StringSlice(name))
-	if ctx.IsSet(name) || len(values) > 0 {
-		return dedupeStrings(values)
-	}
-	for _, envName := range envNames {
-		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
-			return dedupeStrings(splitCommaSeparatedValues([]string{value}))
-		}
+func requireFieldForCommand(cfg Config, field, command string) error {
+	if !fieldAllowed(cfg.Fields, field) {
+		return fmt.Errorf("%s requires field %q; remove --output-field restrictions or include %s", command, field, field)
 	}
 	return nil
 }
 
-func splitCommaSeparatedValues(values []string) []string {
-	parts := make([]string, 0, len(values))
-	for _, value := range values {
-		parts = append(parts, strings.Split(value, ",")...)
-	}
-	return compactStrings(parts)
-}
-
-func parseBoolEnv(value string) bool {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "1", "t", "true", "y", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-// compactStrings trims whitespace and removes empty flag values while preserving the original order.
-func compactStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
+func recordHasField(record secretfmt.Record, field string) bool {
+	for _, candidate := range record.Fields {
+		if candidate == field {
+			return true
 		}
 	}
-	return out
+	return len(record.Fields) == 0
 }
 
-// dedupeStrings removes duplicate strings while preserving first occurrence order.
-func dedupeStrings(values []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
+func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions, error) {
+	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default tier")
 	}
-	return out
+	dataType, err := ssm.ParseParameterDataType(ctx.String("default-data-type"))
+	if err != nil {
+		return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse default data type")
+	}
+	policies := ctx.String("default-policies")
+	if policiesFile := strings.TrimSpace(ctx.String("default-policies-file")); policiesFile != "" {
+		data, err := fileio.ReadFile(policiesFile)
+		if err != nil {
+			return ssm.PutParameterOptions{}, crerr.Wrapf(err, "read default policies file %s", policiesFile)
+		}
+		policies = string(data)
+	}
+	opts := ssm.PutParameterOptions{}
+	if fieldAllowed(cfg.Fields, "tier") {
+		opts.Tier = tier
+	}
+	if fieldAllowed(cfg.Fields, "data-type") {
+		opts.DataType = dataType
+	}
+	if fieldAllowed(cfg.Fields, "description") {
+		opts.Description = ctx.String("default-description")
+	}
+	if fieldAllowed(cfg.Fields, "policies") {
+		opts.Policies = policies
+	}
+	return opts, nil
 }
 
-// Interactive prepares inventory, validates AWS access, resolves the region label shown to users, and starts the TUI.
-// In all-regions mode it lists enabled AWS regions once up front so the UI can show progress region-by-region.
-func Interactive(ctx *cli.Context) error {
+func importOptionsForRecord(record secretfmt.Record, cloud ssm.Metadata, exists bool, defaults ssm.PutParameterOptions, cfg Config) (ssm.PutParameterOptions, error) {
+	opts := defaults
+	if exists {
+		if fieldAllowed(cfg.Fields, "tier") && strings.TrimSpace(cloud.Tier) != "" {
+			tier, err := ssm.ParseParameterTier(cloud.Tier)
+			if err != nil {
+				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud tier")
+			}
+			opts.Tier = tier
+		}
+		if fieldAllowed(cfg.Fields, "data-type") && strings.TrimSpace(cloud.DataType) != "" {
+			dataType, err := ssm.ParseParameterDataType(cloud.DataType)
+			if err != nil {
+				return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse cloud data type")
+			}
+			opts.DataType = dataType
+		}
+		if fieldAllowed(cfg.Fields, "description") {
+			opts.Description = cloud.Description
+		}
+		if fieldAllowed(cfg.Fields, "policies") {
+			opts.Policies = cloud.Policies
+		}
+	}
+	if fieldAllowed(cfg.Fields, "tier") && recordHasField(record, "tier") && strings.TrimSpace(record.Tier) != "" {
+		tier, err := ssm.ParseParameterTier(record.Tier)
+		if err != nil {
+			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record tier")
+		}
+		opts.Tier = tier
+	}
+	if fieldAllowed(cfg.Fields, "data-type") && recordHasField(record, "data-type") && strings.TrimSpace(record.DataType) != "" {
+		dataType, err := ssm.ParseParameterDataType(record.DataType)
+		if err != nil {
+			return ssm.PutParameterOptions{}, crerr.Wrap(err, "parse record data type")
+		}
+		opts.DataType = dataType
+	}
+	if fieldAllowed(cfg.Fields, "description") && recordHasField(record, "description") && strings.TrimSpace(record.Description) != "" {
+		opts.Description = record.Description
+	}
+	if fieldAllowed(cfg.Fields, "policies") && recordHasField(record, "policies") {
+		if strings.TrimSpace(record.Policies) == "" {
+			opts.Policies = "[{}]"
+			opts.PoliciesSet = true
+		} else {
+			opts.Policies = record.Policies
+		}
+	}
+	return opts, nil
+}
+
+// Interactive opens the terminal UI.
+func Interactive(ctx *CLIContext) error {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
 		return err
 	}
+	stdinItems, useTTYInput, err := loadInteractiveInventoryFromStdin()
+	if err != nil {
+		return err
+	}
+	cfg.InventoryItems = append(cfg.InventoryItems, stdinItems...)
 	items, err := PrepareItems(ctx.Context, &cfg)
 	if err != nil {
 		return err
@@ -705,12 +654,11 @@ func Interactive(ctx *cli.Context) error {
 		Region:                    regionLabel,
 		Regions:                   regions,
 		Profile:                   cfg.Profile,
-		NamesFile:                 cfg.NamesFile,
 		FilterGroups:              cfg.FilterGroups,
 		NoColor:                   cfg.NoColor,
 		Keymap:                    cfg.Keymap,
 		ShowColumns:               cfg.ShowColumns,
-		Sort:                      cfg.SortColumn,
+		Sort:                      cfg.SortColumns,
 		Fields:                    cfg.Fields,
 		IncludeValues:             cfg.WithDecryption || includeValuesForFields(cfg.Fields) || includeValuesForFilterGroups(cfg.FilterGroups),
 		ShowSecureValues:          cfg.WithDecryption,
@@ -718,189 +666,168 @@ func Interactive(ctx *cli.Context) error {
 		NoConfirmWriteSecureValue: cfg.NoConfirmWriteSecureValue,
 		NoConfirmDeleteOne:        cfg.NoConfirmDeleteOne,
 		NoConfirmDeleteAll:        cfg.NoConfirmDeleteAll,
+		UseInputTTY:               useTTYInput,
 	}), "run interactive")
 }
 
-// Get prints one selected parameter field.
-// It intentionally rejects all-regions and multi-region modes because a single name could resolve to multiple values.
-func Get(ctx *cli.Context) error {
-	cfg, err := ConfigFromCLI(ctx)
+func loadInteractiveInventoryFromStdin() ([]inventory.Item, bool, error) {
+	info, err := os.Stdin.Stat()
 	if err != nil {
-		return err
+		return nil, false, crerr.Wrap(err, "stat stdin")
 	}
-	if cfg.AllRegions {
-		return errors.New("--all-regions is not supported for get; use interactive or export")
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return nil, false, nil
 	}
-	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
-	}
-	args := ctx.Args().Slice()
-	if len(args) != 2 {
-		return errors.New("get requires parameter name and field")
-	}
-	field, err := parseSingleField(args[1], "field", "value")
+
+	items, err := inventory.LoadPaths(os.Stdin, "stdin")
 	if err != nil {
-		return err
+		return nil, true, crerr.Wrap(err, "load TUI inventory from stdin")
 	}
-	if err := ensureRegions(ctx.Context, &cfg); err != nil {
-		return err
-	}
-	value, err := getParameterField(ctx.Context, NewClient(cfg), args[0], field, cfg.Region)
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprint(os.Stdout, value)
-	if !strings.HasSuffix(value, "\n") {
-		_, _ = fmt.Fprintln(os.Stdout)
-	}
-	return nil
+	return items, true, nil
 }
 
-func getParameterField(ctx context.Context, client ssm.Client, name, field, region string) (string, error) {
-	switch field {
-	case "value", "version", "len", "sha256":
-		param, err := client.Get(ctx, name)
-		if err != nil {
-			return "", crerr.Wrapf(err, "get parameter %s", name)
-		}
-		switch field {
-		case "value":
-			return param.Value, nil
-		case "version":
-			return fmt.Sprint(param.Version), nil
-		case "len":
-			return fmt.Sprint(len(param.Value)), nil
-		case "sha256":
-			return hashPrefix(param.Value), nil
-		}
-	}
+type writePolicyAction string
 
-	metas := client.DescribeMany(ctx, []string{name})
-	if meta, ok := metas[name]; ok {
-		switch field {
-		case "name":
-			return meta.Name, nil
-		case "region":
-			if meta.Region != "" {
-				return meta.Region, nil
-			}
-			return region, nil
-		case "type":
-			return meta.Type, nil
-		case "tier":
-			return meta.Tier, nil
-		case "data-type":
-			return meta.DataType, nil
-		case "policies":
-			return meta.Policies, nil
-		case "description":
-			return meta.Description, nil
-		case "date":
-			return meta.Modified, nil
-		case "user":
-			return meta.User, nil
-		}
-	}
+const (
+	writePolicyDefault writePolicyAction = ""
+	writePolicySkip    writePolicyAction = "skip"
+	writePolicyError   writePolicyAction = "error"
+	writePolicyAsk     writePolicyAction = "ask"
+)
 
-	param, err := client.Get(ctx, name)
-	if err != nil {
-		return "", crerr.Wrapf(err, "get parameter %s", name)
-	}
-	switch field {
-	case "name":
-		if param.Name != "" {
-			return param.Name, nil
-		}
-		return name, nil
-	case "region":
-		if param.Region != "" {
-			return param.Region, nil
-		}
-		return region, nil
-	case "type":
-		return param.Type, nil
-	case "date":
-		return param.Modified, nil
-	}
-	return "", fmt.Errorf("field %q is not available for %s", field, name)
+type writePolicy struct {
+	OnCreate writePolicyAction
+	OnUpdate writePolicyAction
 }
 
-func hashPrefix(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:8]
+type writeOperation string
+
+const (
+	writeOperationCreate writeOperation = "create"
+	writeOperationUpdate writeOperation = "update"
+)
+
+type importSummary struct {
+	Created int
+	Updated int
+	Skipped int
+	Failed  int
 }
 
-// Put writes one String, StringList, or SecureString value from positional arguments.
-// Unless --override is used, it refuses to overwrite an existing non-empty value; when --type is omitted it preserves the existing parameter type.
-func Put(ctx *cli.Context) error {
-	cfg, err := ConfigFromCLI(ctx)
-	if err != nil {
-		return err
-	}
-	if err := requireFieldForCommand(cfg, "value", "put"); err != nil {
-		return err
-	}
-	if cfg.AllRegions {
-		return errors.New("--all-regions is not supported for put; use interactive on an existing regional row")
-	}
-	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
-	}
-	args := ctx.Args().Slice()
-	if len(args) != 2 {
-		return errors.New("put requires parameter name and value")
-	}
-	parameterName := args[0]
-	value := args[1]
-	overwrite := ctx.Bool("override")
-
-	if commandRegion := strings.TrimSpace(ctx.String("region")); commandRegion != "" {
-		cfg.Region = commandRegion
-		cfg.Regions = []string{commandRegion}
-	}
-	if err := ensureRegions(ctx.Context, &cfg); err != nil {
-		return err
-	}
-	client := NewClient(cfg)
-	existing, existingErr := client.Get(ctx.Context, parameterName)
-	if existingErr != nil && !crerr.Is(existingErr, ssm.ErrNotFound) {
-		return crerr.Wrapf(existingErr, "get existing parameter %s", parameterName)
-	}
-	if !overwrite && existingErr == nil && existing.Value != "" {
-		return fmt.Errorf("parameter already has a non-empty value: %s; use --override", parameterName)
-	}
-	if ctx.IsSet("type") && !fieldAllowed(cfg.Fields, "type") {
-		return errors.New("--type requires field \"type\"; remove --field restrictions or include type")
-	}
-	parameterType, err := resolveSetType(ctx.String("type"), existing.Type)
-	if err != nil {
-		return err
-	}
-	opts, err := setOptions(ctx, cfg, overwrite)
-	if err != nil {
-		return err
-	}
-	return crerr.Wrapf(client.PutParameterWithOptions(ctx.Context, parameterName, value, parameterType, opts), "put parameter %s", parameterName)
+type strictMetadataDescriber interface {
+	DescribeManyStrict(context.Context, []string) (map[string]ssm.Metadata, map[string]error)
 }
 
-func resolveSetType(requestedType, existingType string) (ssm.ParameterType, error) {
-	for _, candidate := range []string{requestedType, existingType} {
-		if strings.TrimSpace(candidate) == "" {
-			continue
+func parseWritePolicy(ctx *CLIContext) (writePolicy, error) {
+	onCreate, err := parseWritePolicyAction(ctx.String("on-create"), "on-create")
+	if err != nil {
+		return writePolicy{}, err
+	}
+	onUpdate, err := parseWritePolicyAction(ctx.String("on-update"), "on-update")
+	if err != nil {
+		return writePolicy{}, err
+	}
+	return writePolicy{OnCreate: onCreate, OnUpdate: onUpdate}, nil
+}
+
+func parseWritePolicyAction(value, flagName string) (writePolicyAction, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return writePolicyDefault, nil
+	case "skip":
+		return writePolicySkip, nil
+	case "error":
+		return writePolicyError, nil
+	case "ask":
+		return writePolicyAsk, nil
+	default:
+		return "", fmt.Errorf("unsupported --%s value %q; use skip, error, or ask", flagName, value)
+	}
+}
+
+func recordKey(region, path string) string {
+	return strings.TrimSpace(region) + "\x00" + strings.TrimSpace(path)
+}
+
+func metadataForPaths(ctx context.Context, client ssm.Client, paths []string) (metadataByPath map[string]ssm.Metadata, errorsByPath map[string]error) {
+	if describer, ok := client.(strictMetadataDescriber); ok {
+		return describer.DescribeManyStrict(ctx, paths)
+	}
+	metas := client.DescribeMany(ctx, paths)
+	errs := map[string]error{}
+	for _, path := range paths {
+		if _, ok := metas[path]; !ok {
+			errs[path] = ssm.ErrNotFound
 		}
-		return wrapParameterType(ssm.ParseParameterType(candidate))
 	}
-	return ssm.DefaultParameterType, nil
+	return metas, errs
 }
 
-func resolveImportType(defaultType, existingType, recordType string) (ssm.ParameterType, error) {
-	for _, candidate := range []string{recordType, existingType, defaultType} {
-		if strings.TrimSpace(candidate) == "" {
-			continue
-		}
-		return wrapParameterType(ssm.ParseParameterType(candidate))
+func askWriteConfirmation(action writeOperation, region, name string) (bool, error) {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false, errors.New("ask requires an interactive terminal")
 	}
-	return ssm.DefaultParameterType, nil
+	defer func() { _ = tty.Close() }()
+
+	questionAction := "Create"
+	if action == writeOperationUpdate {
+		questionAction = "Update"
+	}
+	if region != "" {
+		_, _ = fmt.Fprintf(tty, "%s parameter %s in %s? [y/N] ", questionAction, name, region)
+	} else {
+		_, _ = fmt.Fprintf(tty, "%s parameter %s? [y/N] ", questionAction, name)
+	}
+	answer, err := bufio.NewReader(tty).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return false, crerr.Wrap(err, "read write confirmation")
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
+}
+
+func resolveWritePolicy(action writePolicyAction, operation writeOperation, region, name string) (bool, error) {
+	switch action {
+	case writePolicyDefault:
+		return true, nil
+	case writePolicySkip:
+		return false, nil
+	case writePolicyError:
+		return false, fmt.Errorf("parameter %s would %s; --on-%s=error stops the command", name, operation, operationPolicyName(operation))
+	case writePolicyAsk:
+		return askWriteConfirmation(operation, region, name)
+	default:
+		return false, fmt.Errorf("unsupported write policy action %q", action)
+	}
+}
+
+func operationPolicyName(operation writeOperation) string {
+	if operation == writeOperationCreate {
+		return "create"
+	}
+	return "update"
+}
+
+func logSkipped(logger *slog.Logger, command string, operation writeOperation, policy writePolicyAction, region, name string) {
+	if logger == nil {
+		return
+	}
+	logger.Info(command+" record skipped", "action", string(operation), "policy", "on-"+operationPolicyName(operation)+"="+string(policy), "region", region, "name", name)
+}
+
+func logRecordError(logger *slog.Logger, command string, operation writeOperation, region, name string, err error) {
+	if logger == nil {
+		return
+	}
+	logger.Error(command+" record failed", "action", string(operation), "region", region, "name", name, "error", err)
+}
+
+func logContinueOnError(logger *slog.Logger, command, region, name string) {
+	if logger == nil {
+		return
+	}
+	logger.Info("continuing after "+command+" error", "region", region, "name", name)
 }
 
 func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.ParameterType, error) {
@@ -925,9 +852,106 @@ func PrepareImportItems(ctx context.Context, cfg *Config, _ string) ([]inventory
 	return applyInventoryRegion(items, cfg.Region), nil
 }
 
-// Import reads dotenv or JSON data, resolves each record to an SSM name, and writes the values to Parameter Store.
-// It preloads existing values so it can skip protected non-empty parameters and report all skipped paths together.
-func Import(ctx *cli.Context) error {
+func applyRootPathToRecords(records []secretfmt.Record, rootPath string) ([]secretfmt.Record, error) {
+	rootPath = strings.TrimSpace(rootPath)
+	if rootPath != "" {
+		if !strings.HasPrefix(rootPath, "/") {
+			return nil, errors.New("--root-path must start with /")
+		}
+		rootPath = strings.TrimRight(rootPath, "/")
+		if rootPath == "" {
+			rootPath = "/"
+		}
+	}
+	resolved := make([]secretfmt.Record, 0, len(records))
+	for idx := range records {
+		record := records[idx]
+		path := strings.TrimSpace(record.Path)
+		if path == "" {
+			return nil, errors.New("import record is missing name; use --root-path with relative names or provide absolute SSM names")
+		}
+		if strings.HasPrefix(path, "/") {
+			record.Path = path
+			resolved = append(resolved, record)
+			continue
+		}
+		if rootPath == "" {
+			return nil, fmt.Errorf("import record name %q is not an absolute SSM path; use --root-path or # ssm comments", path)
+		}
+		if rootPath == "/" {
+			record.Path = "/" + strings.TrimLeft(path, "/")
+		} else {
+			record.Path = rootPath + "/" + strings.TrimLeft(path, "/")
+		}
+		if record.Alias == "" {
+			record.Alias = secretfmt.AliasForPath(record.Path, inventory.Item{})
+		}
+		resolved = append(resolved, record)
+	}
+	return resolved, nil
+}
+
+func recordRegion(record secretfmt.Record, cfg Config) string {
+	if fieldAllowed(cfg.Fields, "region") && recordHasField(record, "region") && strings.TrimSpace(record.Region) != "" {
+		return strings.TrimSpace(record.Region)
+	}
+	return cfg.Region
+}
+
+func metadataForImportRecords(ctx context.Context, client ssm.Client, records []secretfmt.Record, cfg Config) (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
+	pathsByRegion := map[string][]string{}
+	seen := map[string]bool{}
+	for i := range records {
+		record := &records[i]
+		region := recordRegion(*record, cfg)
+		key := recordKey(region, record.Path)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		pathsByRegion[region] = append(pathsByRegion[region], record.Path)
+	}
+	metadata := map[string]ssm.Metadata{}
+	errs := map[string]error{}
+	for region, paths := range pathsByRegion {
+		metas, regionErrs := metadataForPaths(ctx, client.ForRegion(region), paths)
+		for path := range metas {
+			meta := metas[path]
+			if meta.Region == "" {
+				meta.Region = region
+			}
+			metadata[recordKey(region, path)] = meta
+		}
+		for path, err := range regionErrs {
+			errs[recordKey(region, path)] = err
+		}
+	}
+	return metadata, errs
+}
+
+func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record secretfmt.Record, cfg Config) (ssm.ParameterType, error) {
+	recordType := ""
+	if fieldAllowed(cfg.Fields, "type") && recordHasField(record, "type") && strings.TrimSpace(record.Type) != "" {
+		recordType = record.Type
+	}
+	existingType := ""
+	if exists {
+		existingType = existing.Type
+	}
+	if !fieldAllowed(cfg.Fields, "type") {
+		defaultType = ""
+	}
+	for _, candidate := range []string{recordType, existingType, defaultType} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		return wrapParameterType(ssm.ParseParameterType(candidate))
+	}
+	return ssm.DefaultParameterType, nil
+}
+
+// Import reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
+func Import(ctx *CLIContext) error {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
 		return err
@@ -940,7 +964,7 @@ func Import(ctx *cli.Context) error {
 		return errors.New("--all-regions is not supported for import; specify --region")
 	}
 	if len(cfg.Regions) > 1 {
-		return errors.New("multiple --region values are only supported for interactive and export")
+		return errors.New("multiple --region values are only supported for tui and export")
 	}
 	format := ctx.String("format")
 	items, err := PrepareImportItems(ctx.Context, &cfg, format)
@@ -953,20 +977,15 @@ func Import(ctx *cli.Context) error {
 		return err
 	}
 
-	records, err := parseImport(format, reader, items, cfg.FieldMappings, strings.TrimSpace(ctx.String("json-key-field")))
+	records, err := parseImport(format, reader, items, effectiveFieldMappings(cfg.FieldMappings), strings.TrimSpace(ctx.String("key-field")))
+	if err != nil {
+		return err
+	}
+	records, err = applyRootPathToRecords(records, ctx.String("root-path"))
 	if err != nil {
 		return err
 	}
 	records = filterRecordsByGroups(records, cfg.FilterGroups)
-	defaultValue, err := importDefaultValue(ctx)
-	if err != nil {
-		return err
-	}
-	for i := range records {
-		if records[i].Value == "" && defaultValue != "" {
-			records[i].Value = defaultValue
-		}
-	}
 	if err := requireFieldForCommand(cfg, "value", "import"); err != nil {
 		return err
 	}
@@ -974,63 +993,292 @@ func Import(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	policy, err := parseWritePolicy(ctx)
+	if err != nil {
+		return err
+	}
+	continueOnError := ctx.Bool("continue-on-error")
+	summaryEnabled := ctx.Bool("summary")
 
 	client := NewClient(cfg)
-	paths := make([]string, 0, len(records))
-	for i := range records {
-		paths = append(paths, records[i].Path)
+	metadata, metadataErrs := metadataForImportRecords(ctx.Context, client, records, cfg)
+	summary := importSummary{}
+	var recordErrors []string
+	handleRecordError := func(operation writeOperation, region, name string, err error) error {
+		wrapped := crerr.Wrap(err, name)
+		logRecordError(cfg.Logger, "import", operation, region, name, wrapped)
+		summary.Failed++
+		recordErrors = append(recordErrors, wrapped.Error())
+		if continueOnError {
+			logContinueOnError(cfg.Logger, "import", region, name)
+			return nil
+		}
+		return wrapped
 	}
 
-	values, errs := client.GetMany(ctx.Context, paths)
-	var skipped []string
-	writer := uilive.New()
-	writer.Start()
-	defer writer.Stop()
 	for i := range records {
 		record := &records[i]
-		_, _ = fmt.Fprintf(writer, "Importing %d/%d...\n%s\n", i, len(records), record.Path)
-		if !ctx.Bool("default-override") {
-			if existing, ok := values[record.Path]; ok && existing.Value != "" {
-				skipped = append(skipped, record.Path)
+		region := recordRegion(*record, cfg)
+		key := recordKey(region, record.Path)
+		existingMeta, exists := metadata[key]
+		if err, ok := metadataErrs[key]; ok {
+			if !crerr.Is(err, ssm.ErrNotFound) {
+				if err := handleRecordError(writeOperationUpdate, region, record.Path, err); err != nil {
+					return err
+				}
 				continue
 			}
-			if err, ok := errs[record.Path]; ok && !crerr.Is(err, ssm.ErrNotFound) {
-				return crerr.Wrap(err, record.Path)
+			exists = false
+		}
+		operation := writeOperationCreate
+		policyAction := policy.OnCreate
+		if exists {
+			operation = writeOperationUpdate
+			policyAction = policy.OnUpdate
+		}
+		if strings.TrimSpace(record.Value) == "" {
+			if err := handleRecordError(operation, region, record.Path, errors.New("import record value is required")); err != nil {
+				return err
 			}
+			continue
 		}
-		existingType := ""
-		if existing, ok := values[record.Path]; ok {
-			existingType = existing.Type
-		}
-		recordType := record.Type
-		if !fieldAllowed(cfg.Fields, "type") || !recordHasField(*record, "type") {
-			recordType = ""
-		}
-		defaultType := ctx.String("default-type")
-		if !fieldAllowed(cfg.Fields, "type") {
-			defaultType = ""
-		}
-		parameterType, err := resolveImportType(defaultType, existingType, recordType)
+		shouldWrite, err := resolveWritePolicy(policyAction, operation, region, record.Path)
 		if err != nil {
-			return crerr.Wrap(err, record.Path)
+			if err := handleRecordError(operation, region, record.Path, err); err != nil {
+				return err
+			}
+			continue
 		}
-		opts, err := importOptionsForRecord(*record, defaultOpts, cfg)
+		if !shouldWrite {
+			logSkipped(cfg.Logger, "import", operation, policyAction, region, record.Path)
+			summary.Skipped++
+			continue
+		}
+		parameterType, err := resolveImportType(ctx.String("default-type"), existingMeta, exists, *record, cfg)
 		if err != nil {
-			return crerr.Wrap(err, record.Path)
+			if err := handleRecordError(operation, region, record.Path, err); err != nil {
+				return err
+			}
+			continue
 		}
-		opts.Overwrite = ctx.Bool("default-override")
-		writeClient := client
-		if fieldAllowed(cfg.Fields, "region") && recordHasField(*record, "region") && strings.TrimSpace(record.Region) != "" {
-			writeClient = client.ForRegion(strings.TrimSpace(record.Region))
+		opts, err := importOptionsForRecord(*record, existingMeta, exists, defaultOpts, cfg)
+		if err != nil {
+			if err := handleRecordError(operation, region, record.Path, err); err != nil {
+				return err
+			}
+			continue
 		}
-		if err := writeClient.PutParameterWithOptions(ctx.Context, record.Path, record.Value, parameterType, opts); err != nil {
-			return crerr.Wrap(err, record.Path)
+		opts.Overwrite = exists
+		if err := client.ForRegion(region).PutParameterWithOptions(ctx.Context, record.Path, record.Value, parameterType, opts); err != nil {
+			if err := handleRecordError(operation, region, record.Path, err); err != nil {
+				return err
+			}
+			continue
+		}
+		if exists {
+			summary.Updated++
+		} else {
+			summary.Created++
 		}
 	}
-	if len(skipped) > 0 {
-		return fmt.Errorf("skipped existing non-empty parameters without --override:\n%s", strings.Join(skipped, "\n"))
+	if summaryEnabled {
+		_, _ = fmt.Fprintf(os.Stderr, "Import summary:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n", summary.Created, summary.Updated, summary.Skipped, summary.Failed)
+	}
+	if len(recordErrors) > 0 {
+		return fmt.Errorf("import completed with %d error(s):\n%s", len(recordErrors), strings.Join(recordErrors, "\n"))
 	}
 	return nil
+}
+
+type exportSortRule struct {
+	field      string
+	descending bool
+}
+
+func includeValuesForSortColumns(values []string) bool {
+	for _, rule := range parseExportSortRules(values) {
+		switch rule.field {
+		case "value", "len", "sha256":
+			return true
+		}
+	}
+	return false
+}
+
+func parseExportSortRules(values []string) []exportSortRule {
+	rules := make([]exportSortRule, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		parts := strings.Split(value, ":")
+		field, ok := normalizeExportSortField(parts[0])
+		if !ok {
+			continue
+		}
+		descending := false
+		if len(parts) > 1 {
+			switch strings.ToLower(strings.TrimSpace(parts[1])) {
+			case "desc", "descending":
+				descending = true
+			}
+		}
+		rules = upsertExportSortRule(rules, field, descending)
+	}
+	return rules
+}
+
+func normalizeExportSortField(field string) (string, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+	switch field {
+	case "name", "path":
+		return "name", true
+	case "region", "type", "tier", "policies", "description", "value", "date", "version", "len", "sha256", "user":
+		return field, true
+	case "data-type", "datatype", "data_type":
+		return "data-type", true
+	default:
+		return "", false
+	}
+}
+
+func upsertExportSortRule(rules []exportSortRule, field string, descending bool) []exportSortRule {
+	out := make([]exportSortRule, 0, len(rules)+1)
+	for _, rule := range rules {
+		if rule.field != field {
+			out = append(out, rule)
+		}
+	}
+	return append(out, exportSortRule{field: field, descending: descending})
+}
+
+func sortStatusesForExport(statuses []ui.Status, values []string) {
+	rules := parseExportSortRules(values)
+	if len(rules) == 0 {
+		return
+	}
+	sort.SliceStable(statuses, func(i, j int) bool {
+		left := statuses[i]
+		right := statuses[j]
+		for _, rule := range rules {
+			cmp := naturalExportCompare(exportStatusSortValue(left, rule.field), exportStatusSortValue(right, rule.field))
+			if cmp == 0 {
+				continue
+			}
+			if rule.descending {
+				return cmp > 0
+			}
+			return cmp < 0
+		}
+		if cmp := naturalExportCompare(left.Item.Region, right.Item.Region); cmp != 0 {
+			return cmp < 0
+		}
+		return naturalExportCompare(left.Item.Path, right.Item.Path) < 0
+	})
+}
+
+func exportStatusSortValue(status ui.Status, field string) string {
+	switch field {
+	case "name":
+		return status.Item.Path
+	case "region":
+		return status.Item.Region
+	case "type":
+		return status.Type
+	case "tier":
+		return status.Tier
+	case "data-type":
+		return status.DataType
+	case "policies":
+		return status.Policies
+	case "description":
+		return status.Description
+	case "value":
+		return status.Value
+	case "date":
+		return status.Modified
+	case "version":
+		return fmt.Sprint(status.Version)
+	case "len":
+		return fmt.Sprint(status.Length)
+	case "sha256":
+		return status.SHA256Prefix
+	case "user":
+		return status.User
+	default:
+		return ""
+	}
+}
+
+func naturalExportCompare(left, right string) int {
+	leftRunes := []rune(strings.ToLower(strings.TrimSpace(left)))
+	rightRunes := []rune(strings.ToLower(strings.TrimSpace(right)))
+	i, j := 0, 0
+	for i < len(leftRunes) && j < len(rightRunes) {
+		if unicode.IsDigit(leftRunes[i]) && unicode.IsDigit(rightRunes[j]) {
+			li, rj := i, j
+			for i < len(leftRunes) && unicode.IsDigit(leftRunes[i]) {
+				i++
+			}
+			for j < len(rightRunes) && unicode.IsDigit(rightRunes[j]) {
+				j++
+			}
+			if cmp := compareExportDigitRuns(leftRunes[li:i], rightRunes[rj:j]); cmp != 0 {
+				return cmp
+			}
+			continue
+		}
+		if leftRunes[i] < rightRunes[j] {
+			return -1
+		}
+		if leftRunes[i] > rightRunes[j] {
+			return 1
+		}
+		i++
+		j++
+	}
+	if len(leftRunes)-i < len(rightRunes)-j {
+		return -1
+	}
+	if len(leftRunes)-i > len(rightRunes)-j {
+		return 1
+	}
+	return 0
+}
+
+func compareExportDigitRuns(left, right []rune) int {
+	leftTrimmed := trimExportLeadingZeroes(left)
+	rightTrimmed := trimExportLeadingZeroes(right)
+	if len(leftTrimmed) < len(rightTrimmed) {
+		return -1
+	}
+	if len(leftTrimmed) > len(rightTrimmed) {
+		return 1
+	}
+	for i := range leftTrimmed {
+		if leftTrimmed[i] < rightTrimmed[i] {
+			return -1
+		}
+		if leftTrimmed[i] > rightTrimmed[i] {
+			return 1
+		}
+	}
+	if len(left) < len(right) {
+		return -1
+	}
+	if len(left) > len(right) {
+		return 1
+	}
+	return 0
+}
+
+func trimExportLeadingZeroes(value []rune) []rune {
+	idx := 0
+	for idx < len(value)-1 && value[idx] == '0' {
+		idx++
+	}
+	return value[idx:]
 }
 
 var allExportFields = []string{"name", "region", "type", "tier", "data-type", "policies", "description", "value", "date", "version", "len", "sha256", "user"}
@@ -1040,6 +1288,74 @@ func exportFields(cfg Config) []string {
 		return append([]string(nil), allExportFields...)
 	}
 	return append([]string(nil), cfg.Fields...)
+}
+
+func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
+	if !ctx.Bool("scalar") {
+		return "", nil
+	}
+	rawFields := compactStrings(ctx.StringSlice("output-field"))
+	if len(rawFields) != 1 || len(cfg.Fields) != 1 {
+		return "", errors.New("--scalar requires exactly one --output-field")
+	}
+	return cfg.Fields[0], nil
+}
+
+func validateKeyFieldOutputFields(keyField string, outputFields []string) error {
+	keyField = strings.TrimSpace(keyField)
+	if keyField == "" {
+		return nil
+	}
+	for _, field := range outputFields {
+		if field == keyField {
+			return fmt.Errorf("--key-field and --output-field cannot use the same field: %s", keyField)
+		}
+	}
+	return nil
+}
+
+func effectiveFieldMappings(overrides []secretfmt.FieldMapping) []secretfmt.FieldMapping {
+	base := secretfmt.DefaultFieldMappings()
+	if len(overrides) == 0 {
+		return base
+	}
+	byField := map[string]string{}
+	for _, mapping := range base {
+		byField[mapping.AWSName] = mapping.FileName
+	}
+	for _, mapping := range overrides {
+		byField[mapping.AWSName] = mapping.FileName
+	}
+	for i := range base {
+		base[i].FileName = byField[base[i].AWSName]
+	}
+	return base
+}
+
+func exportFieldMappings(fields []string, overrides []secretfmt.FieldMapping) []secretfmt.FieldMapping {
+	effective := effectiveFieldMappings(overrides)
+	out := make([]secretfmt.FieldMapping, 0, len(fields))
+	for _, field := range fields {
+		for _, mapping := range effective {
+			if mapping.AWSName == field {
+				out = append(out, mapping)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func exportRecordFields(fields []string, scalarField, keyField string) []string {
+	out := append([]string(nil), fields...)
+	for _, field := range []string{scalarField, keyField} {
+		field = strings.TrimSpace(field)
+		if field == "" || hasExportField(out, field) {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
 }
 
 func hasExportField(fields []string, field string) bool {
@@ -1092,9 +1408,8 @@ func exportRecordFromStatus(status ui.Status, fields []string) secretfmt.Record 
 	return record
 }
 
-// Export loads statuses for the requested inventory and writes existing parameter values as dotenv or JSON.
-// Missing parameters are omitted by default, but --include-missing can keep them as empty records for templates/backups.
-func Export(ctx *cli.Context) error {
+// Export loads statuses for the requested inventory and writes existing parameter values to stdout.
+func Export(ctx *CLIContext) error {
 	cfg, err := ConfigFromCLI(ctx)
 	if err != nil {
 		return err
@@ -1113,7 +1428,17 @@ func Export(ctx *cli.Context) error {
 		}
 	}
 
-	includeValues := cfg.WithDecryption || includeValuesForFields(cfg.Fields) || includeValuesForFilterGroups(cfg.FilterGroups)
+	scalarField, err := scalarExportField(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	keyField := strings.TrimSpace(ctx.String("key-field"))
+	if err := validateKeyFieldOutputFields(keyField, cfg.Fields); err != nil {
+		return err
+	}
+	fields := exportFields(cfg)
+	recordFields := exportRecordFields(fields, scalarField, keyField)
+	includeValues := cfg.WithDecryption || includeValuesForFields(recordFields) || includeValuesForFilterGroups(cfg.FilterGroups) || includeValuesForSortColumns(cfg.SortColumns)
 	showProgress := false
 	var statuses []ui.Status
 	switch {
@@ -1130,24 +1455,40 @@ func Export(ctx *cli.Context) error {
 		statuses = ui.FilterStatusesByGroups(statuses, cfg.FilterGroups)
 	}
 
-	fields := exportFields(cfg)
+	sortStatusesForExport(statuses, cfg.SortColumns)
+
 	var records []secretfmt.Record
 	for i := range statuses {
-		if !statuses[i].Exists && !ctx.Bool("include-missing") {
+		if !statuses[i].Exists {
 			continue
 		}
-		records = append(records, exportRecordFromStatus(statuses[i], fields))
+		records = append(records, exportRecordFromStatus(statuses[i], recordFields))
 	}
 
 	writer := os.Stdout
+	format := ctx.String("format")
+	if scalarField != "" {
+		switch format {
+		case "dotenv":
+			return crerr.Wrap(secretfmt.ExportScalarLines(writer, records, scalarField), "export scalar")
+		case "json":
+			return crerr.Wrap(secretfmt.ExportJSONScalar(writer, records, scalarField, keyField), "export scalar JSON")
+		case "yaml", "yml":
+			return crerr.Wrap(secretfmt.ExportYAMLScalar(writer, records, scalarField, keyField), "export scalar YAML")
+		default:
+			return fmt.Errorf("unsupported format: %s", format)
+		}
+	}
 
-	switch ctx.String("format") {
+	switch format {
 	case "dotenv":
 		return crerr.Wrap(secretfmt.ExportDotenv(writer, records), "export dotenv")
 	case "json":
-		return crerr.Wrap(secretfmt.ExportJSONMapped(writer, records, cfg.FieldMappings, strings.TrimSpace(ctx.String("json-key-field"))), "export JSON")
+		return crerr.Wrap(secretfmt.ExportJSONMapped(writer, records, exportFieldMappings(recordFields, cfg.FieldMappings), keyField), "export JSON")
+	case "yaml", "yml":
+		return crerr.Wrap(secretfmt.ExportYAMLMapped(writer, records, exportFieldMappings(recordFields, cfg.FieldMappings), keyField), "export YAML")
 	default:
-		return fmt.Errorf("unsupported format: %s", ctx.String("format"))
+		return fmt.Errorf("unsupported format: %s", format)
 	}
 }
 
@@ -1160,6 +1501,9 @@ func parseImport(format string, reader io.Reader, items []inventory.Item, mappin
 	case "json":
 		records, err := secretfmt.ImportJSONMapped(reader, mappings, jsonKeyField)
 		return records, crerr.Wrap(err, "import JSON")
+	case "yaml", "yml":
+		records, err := secretfmt.ImportYAMLMapped(reader, mappings, jsonKeyField)
+		return records, crerr.Wrap(err, "import YAML")
 	default:
 		return nil, fmt.Errorf("unsupported format: %s", format)
 	}

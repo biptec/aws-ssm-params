@@ -1,11 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1171" height="572" viewBox="0 0 1171 572" role="img" aria-label="CLI: command overview">
-  <rect width="100%" height="100%" rx="18" fill="#06101f"/>
-  <rect x="1" y="1" width="1169" height="570" rx="18" fill="none" stroke="#1e3354"/>
-  <circle cx="30" cy="28" r="6" fill="#ff5f57"/>
-  <circle cx="52" cy="28" r="6" fill="#ffbd2e"/>
-  <circle cx="74" cy="28" r="6" fill="#28c840"/>
-  <text x="585" y="33" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" fill="#8fb3d9">CLI: command overview</text>
-  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#d7e2f1">
-    <text x="28" y="64" xml:space="preserve">NAME:</text><text x="28" y="84" xml:space="preserve">   aws-ssm-params - Manage AWS SSM parameters</text><text x="28" y="104" xml:space="preserve"></text><text x="28" y="124" xml:space="preserve">USAGE:</text><text x="28" y="144" xml:space="preserve">   aws-ssm-params [global options] &lt;command&gt; [command options]</text><text x="28" y="164" xml:space="preserve"></text><text x="28" y="184" xml:space="preserve">COMMANDS:</text><text x="28" y="204" xml:space="preserve">   interactive, tui  Open the interactive TUI</text><text x="28" y="224" xml:space="preserve">   get               Print one selected parameter field</text><text x="28" y="244" xml:space="preserve">   put               Put a String, StringList, or SecureString parameter value</text><text x="28" y="264" xml:space="preserve">   import            Import parameter values from stdin</text><text x="28" y="284" xml:space="preserve">   export            Export parameter values to stdout</text><text x="28" y="304" xml:space="preserve">   help, h           Shows a list of commands or help for one command</text><text x="28" y="324" xml:space="preserve"></text><text x="28" y="344" xml:space="preserve">GLOBAL OPTIONS:</text><text x="28" y="364" xml:space="preserve">   --region value                     AWS region; repeat for multiple regions [$AWS_SSM_PARAMS_REGIONS, $AWS_SSM_PARAMS_REGION]</text><text x="28" y="384" xml:space="preserve">   --all-regions                      search parameters across all enabled AWS regions (default: false) [$AWS_SSM_PARAMS_ALL_REGIONS</text><text x="28" y="404" xml:space="preserve">   --profile value                    AWS profile [$AWS_SSM_PARAMS_PROFILE, $AWS_PROFILE]</text><text x="28" y="424" xml:space="preserve">   --no-color                         disable colored output (default: false) [$AWS_SSM_PARAMS_NO_COLOR, $NO_COLOR]</text><text x="28" y="444" xml:space="preserve">   --log-target value                  log target: stderr, stdout, or file (default: &quot;stderr&quot;) [$AWS_SSM_PARAMS_LOG_TARGET]</text><text x="28" y="464" xml:space="preserve">   --log-level value                  log level: debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL</text><text x="28" y="484" xml:space="preserve">   --help, -h                         show help</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1811" height="476" viewBox="0 0 1811 476">
+<rect width="100%" height="100%" rx="12" fill="#0b0f14"/>
+<style>text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;fill:#d6e2ef}</style>
+<text x="28" y="28" xml:space="preserve">NAME:</text>
+<text x="28" y="48" xml:space="preserve">   aws-ssm-params - Manage AWS SSM parameters</text>
+<text x="28" y="68" xml:space="preserve"></text>
+<text x="28" y="88" xml:space="preserve">USAGE:</text>
+<text x="28" y="108" xml:space="preserve">   aws-ssm-params [global options] &lt;command&gt; [command options]</text>
+<text x="28" y="128" xml:space="preserve"></text>
+<text x="28" y="148" xml:space="preserve">COMMANDS:</text>
+<text x="28" y="168" xml:space="preserve">   tui      Open the TUI</text>
+<text x="28" y="188" xml:space="preserve">   import   Import parameter values from stdin</text>
+<text x="28" y="208" xml:space="preserve">   export   Export parameter values to stdout</text>
+<text x="28" y="228" xml:space="preserve">   help, h  Shows a list of commands or help for one command</text>
+<text x="28" y="248" xml:space="preserve"></text>
+<text x="28" y="268" xml:space="preserve">GLOBAL OPTIONS:</text>
+<text x="28" y="288" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGIONS, $AWS_SSM_PARAMS_REGION]</text>
+<text x="28" y="308" xml:space="preserve">   --all-regions                        search parameters across all enabled AWS regions [$AWS_SSM_PARAMS_ALL_REGIONS]</text>
+<text x="28" y="328" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE, $AWS_PROFILE]</text>
+<text x="28" y="348" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR, $NO_COLOR]</text>
+<text x="28" y="368" xml:space="preserve">   --keymap string                      keyboard navigation style: emacs or vi (default: &quot;emacs&quot;) [$AWS_SSM_PARAMS_KEYMAP]</text>
+<text x="28" y="388" xml:space="preserve">   --log-level string                   log level: trace, debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL]</text>
+<text x="28" y="408" xml:space="preserve">   --filters-file string                file with filter groups; one OR group per line [$AWS_SSM_PARAMS_FILTERS_FILE]</text>
+<text x="28" y="428" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTERS, $AWS_SSM_PARAMS_FILTER]</text>
+<text x="28" y="448" xml:space="preserve">   --help, -h                           show help</text>
 </svg>

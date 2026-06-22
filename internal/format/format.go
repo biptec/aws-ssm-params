@@ -1,8 +1,9 @@
-// Package format imports and exports SSM parameters in dotenv and JSON formats.
+// Package format imports and exports SSM parameters in dotenv, JSON, and YAML formats.
 package format
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	crerr "github.com/cockroachdb/errors"
+	"gopkg.in/yaml.v3"
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 )
@@ -66,6 +68,66 @@ func ExportDotenv(w io.Writer, records []Record) error {
 		}
 	}
 	return nil
+}
+
+// ExportScalarLines writes one selected field per record, one value per line.
+func ExportScalarLines(w io.Writer, records []Record, field string) error {
+	for i := range records {
+		if _, err := fmt.Fprintln(w, records[i].fieldValue(field)); err != nil {
+			return crerr.Wrap(err, "write scalar export")
+		}
+	}
+	return nil
+}
+
+// ExportJSONScalar writes one selected field as JSON scalar values.
+// Without keyField it writes an array; with keyField it writes an object keyed by the selected field.
+func ExportJSONScalar(w io.Writer, records []Record, field, keyField string) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if keyField == "" {
+		values := make([]any, 0, len(records))
+		for i := range records {
+			values = append(values, records[i].fieldAny(field))
+		}
+		return crerr.Wrap(encoder.Encode(values), "encode scalar JSON export")
+	}
+	values := map[string]any{}
+	for i := range records {
+		key := records[i].fieldValue(keyField)
+		if key == "" {
+			continue
+		}
+		values[key] = records[i].fieldAny(field)
+	}
+	return crerr.Wrap(encoder.Encode(values), "encode keyed scalar JSON export")
+}
+
+// ExportYAMLScalar writes one selected field as YAML scalar values.
+// Without keyField it writes a list; with keyField it writes a map keyed by the selected field.
+func ExportYAMLScalar(w io.Writer, records []Record, field, keyField string) error {
+	var data any
+	if keyField == "" {
+		values := make([]any, 0, len(records))
+		for i := range records {
+			values = append(values, records[i].fieldAny(field))
+		}
+		data = values
+	} else {
+		values := map[string]any{}
+		for i := range records {
+			key := records[i].fieldValue(keyField)
+			if key == "" {
+				continue
+			}
+			values[key] = records[i].fieldAny(field)
+		}
+		data = values
+	}
+	encoder := yaml.NewEncoder(w)
+	encoder.SetIndent(2)
+	defer func() { _ = encoder.Close() }()
+	return crerr.Wrap(encoder.Encode(data), "encode scalar YAML export")
 }
 
 // ExportJSON writes a stable JSON object keyed by SSM name.
@@ -212,15 +274,20 @@ func ImportDotenv(r io.Reader, items []inventory.Item) ([]Record, error) {
 		pendingType = ""
 		if path == "" {
 			matches := aliases[alias]
-			if len(matches) == 0 {
-				return nil, fmt.Errorf("cannot resolve dotenv key %s to an SSM name", alias)
-			}
 			if len(matches) > 1 {
 				return nil, fmt.Errorf("dotenv key %s is ambiguous: %s", alias, strings.Join(matches, ", "))
 			}
-			path = matches[0]
+			if len(matches) == 1 {
+				path = matches[0]
+			} else {
+				path = alias
+			}
 		}
-		records = append(records, Record{Path: path, Alias: alias, Value: value, Type: parameterType})
+		fields := []string{"name", "value"}
+		if strings.TrimSpace(parameterType) != "" {
+			fields = append(fields, "type")
+		}
+		records = append(records, Record{Path: path, Alias: alias, Fields: fields, Value: value, Type: parameterType})
 	}
 	return records, nil
 }
@@ -449,7 +516,140 @@ func ExportJSONMapped(w io.Writer, records []Record, mappings []FieldMapping, ke
 	return crerr.Wrap(encoder.Encode(data), "encode keyed JSON export")
 }
 
-// ImportJSONMapped reads either JSON array records or a JSON object keyed by json-key-field.
+// ExportYAMLMapped writes records as either an array of objects or an object keyed by a selected AWS field.
+func ExportYAMLMapped(w io.Writer, records []Record, mappings []FieldMapping, keyField string) error {
+	if len(mappings) == 0 {
+		mappings = defaultJSONMappings()
+	}
+	var data any
+	if keyField == "" {
+		data = recordsToObjects(records, mappings, "")
+	} else {
+		keyed := map[string]map[string]any{}
+		for i := range records {
+			key := records[i].fieldValue(keyField)
+			if key == "" {
+				continue
+			}
+			keyed[key] = recordObject(records[i], mappings, keyField)
+		}
+		data = keyed
+	}
+	encoder := yaml.NewEncoder(w)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(data); err != nil {
+		return crerr.Wrap(err, "encode mapped YAML export")
+	}
+	if err := encoder.Close(); err != nil {
+		return crerr.Wrap(err, "close mapped YAML export")
+	}
+	return nil
+}
+
+// ImportYAMLMapped reads either YAML array records or a YAML object keyed by key-field.
+func ImportYAMLMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]Record, error) {
+	if len(mappings) == 0 {
+		mappings = defaultJSONMappings()
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, crerr.Wrap(err, "read YAML import")
+	}
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, crerr.Wrap(err, "decode YAML import")
+	}
+	if len(root.Content) == 0 {
+		return nil, errors.New("empty YAML import")
+	}
+	switch root.Content[0].Kind {
+	case yaml.DocumentNode, yaml.ScalarNode, yaml.AliasNode:
+		return nil, errors.New("YAML import must be an array or object")
+	case yaml.SequenceNode:
+		var objects []map[string]any
+		if err := yaml.Unmarshal(data, &objects); err != nil {
+			return nil, crerr.Wrap(err, "decode YAML array import")
+		}
+		return recordsFromYAMLObjects(objects, mappings, keyField), nil
+	case yaml.MappingNode:
+		var keyed map[string]map[string]any
+		if err := yaml.Unmarshal(data, &keyed); err != nil {
+			return nil, crerr.Wrap(err, "decode keyed YAML import")
+		}
+		keys := make([]string, 0, len(keyed))
+		for key := range keyed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		records := make([]Record, 0, len(keys))
+		for _, key := range keys {
+			record := recordFromYAMLObject(keyed[key], mappings)
+			if keyField != "" {
+				record.setFieldValue(keyField, key)
+			} else if record.Path == "" {
+				record.Path = key
+				if record.Alias == "" {
+					record.Alias = AliasForPath(key, inventory.Item{})
+				}
+			}
+			records = append(records, record)
+		}
+		return records, nil
+	default:
+		return nil, errors.New("YAML import must be an array or object")
+	}
+}
+
+func recordsFromYAMLObjects(objects []map[string]any, mappings []FieldMapping, keyField string) []Record {
+	records := make([]Record, 0, len(objects))
+	for _, object := range objects {
+		record := recordFromYAMLObject(object, mappings)
+		if keyField != "" && record.fieldValue(keyField) == "" {
+			continue
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func recordFromYAMLObject(object map[string]any, mappings []FieldMapping) Record {
+	record := Record{}
+	fields := make([]string, 0, len(mappings))
+	for _, mapping := range mappings {
+		value, ok := object[mapping.FileName]
+		if !ok {
+			continue
+		}
+		record.setFieldValue(mapping.AWSName, yamlScalarString(value))
+		fields = append(fields, mapping.AWSName)
+	}
+	record.Fields = fields
+	if record.Alias == "" && record.Path != "" {
+		record.Alias = AliasForPath(record.Path, inventory.Item{})
+	}
+	return record
+}
+
+func yamlScalarString(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(typed)
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+// ImportJSONMapped reads either JSON array records or a JSON object keyed by key-field.
 func ImportJSONMapped(r io.Reader, mappings []FieldMapping, keyField string) ([]Record, error) {
 	if len(mappings) == 0 {
 		mappings = defaultJSONMappings()
@@ -504,7 +704,9 @@ func recordObject(record Record, mappings []FieldMapping, keyField string) map[s
 		}
 		value := record.fieldAny(mapping.AWSName)
 		if value == nil || value == "" {
-			continue
+			if mapping.AWSName != "value" || !record.includesField("value") {
+				continue
+			}
 		}
 		object[mapping.FileName] = value
 	}
@@ -548,6 +750,11 @@ func recordFromObject(object map[string]json.RawMessage, mappings []FieldMapping
 		record.Alias = AliasForPath(record.Path, inventory.Item{})
 	}
 	return record
+}
+
+// DefaultFieldMappings returns the default AWS-to-file field mappings.
+func DefaultFieldMappings() []FieldMapping {
+	return append([]FieldMapping(nil), defaultJSONMappings()...)
 }
 
 func defaultJSONMappings() []FieldMapping {

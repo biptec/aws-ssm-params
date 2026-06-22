@@ -17,7 +17,7 @@ BIN_DIR := $(CURDIR)/bin
 export PATH := $(BIN_DIR):$(PATH)
 
 GOLANGCI_LINT_VERSION ?= v2.12.2
-GOLANGCI_MODULES_DOWNLOAD_MODE ?= mod
+GOLANGCI_MODULES_DOWNLOAD_MODE ?= $(if $(wildcard vendor/modules.txt),vendor,mod)
 FORCE_LOCAL_TOOLS ?= false
 
 GOLANGCI_LINT ?= golangci-lint
@@ -43,6 +43,7 @@ help:
 	@echo "  make tools            Check required tools without installing anything"
 	@echo "  make doctor           Same as tools"
 	@echo "  make install-tools    Install missing tools into ./bin"
+	@echo "  make ci-check         Install missing tools, then run the normal quality gate"
 	@echo "  make fix              Format code and tidy modules"
 	@echo "  make fmt              Format Go files with goimports + gofumpt"
 	@echo "  make fmt-check        Check formatting and imports"
@@ -317,6 +318,9 @@ vuln: require-govulncheck
 	else \
 		$(GOVULNCHECK) $(PKGS); \
 	fi
+
+.PHONY: ci-check
+ci-check: install-tools check
 
 .PHONY: check
 check: tools fmt-check mod-check vet build test lint vuln

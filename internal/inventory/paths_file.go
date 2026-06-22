@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -25,9 +26,20 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 	}
 	defer func() { _ = file.Close() }()
 
+	items, err := LoadPaths(file, filePath)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// LoadPaths reads newline-based SSM inventory content from reader.
+// Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
+// duplicates are removed, and the final list is sorted to make downstream output deterministic.
+func LoadPaths(reader io.Reader, source string) ([]Item, error) {
 	seen := map[string]bool{}
 	var items []Item
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
@@ -42,16 +54,16 @@ func LoadPathsFile(filePath string) ([]Item, error) {
 			continue
 		}
 		if !strings.HasPrefix(raw, "/") {
-			return nil, fmt.Errorf("invalid SSM name in %s:%d: %s", filePath, lineNo, raw)
+			return nil, fmt.Errorf("invalid SSM name in %s:%d: %s", source, lineNo, raw)
 		}
 		if seen[raw] {
 			continue
 		}
 		seen[raw] = true
-		items = append(items, Item{Path: raw, Kind: "path-file", Source: filePath, SecretName: path.Base(raw)})
+		items = append(items, Item{Path: raw, Kind: "path-file", Source: source, SecretName: path.Base(raw)})
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, crerr.Wrapf(err, "scan paths file %s", filePath)
+		return nil, crerr.Wrapf(err, "scan paths from %s", source)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
 	return items, nil

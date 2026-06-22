@@ -4,6 +4,7 @@ package ssm
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,15 +58,40 @@ type AWSClient struct {
 	WithDecryption bool
 	Logger         *slog.Logger
 
-	cfgMu  sync.Mutex
-	cfg    aws.Config
-	cfgErr error
-	loaded bool
+	cfgMu     sync.Mutex
+	cfg       aws.Config
+	cfgErr    error
+	loaded    bool
+	sharedCfg *awsConfigCache
 
 	clientMu     sync.Mutex
 	ssmClient    ssmAPI
 	regionClient regionAPI
 	stsClient    stsAPI
+}
+
+type awsConfigCache struct {
+	mu      sync.Mutex
+	profile string
+	region  string
+	cfg     aws.Config
+	err     error
+	loaded  bool
+}
+
+func newAWSConfigCache(profile, region string) *awsConfigCache {
+	return &awsConfigCache{profile: profile, region: region}
+}
+
+func (cache *awsConfigCache) load(ctx context.Context) (aws.Config, error) {
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.loaded {
+		return cache.cfg, cache.err
+	}
+	cache.cfg, cache.err = loadSDKConfig(ctx, cache.profile, cache.region)
+	cache.loaded = true
+	return cache.cfg, cache.err
 }
 
 type ssmAPI interface {
@@ -124,6 +151,7 @@ type PutParameterOptions struct {
 	Tier        ParameterTier
 	DataType    ParameterDataType
 	Policies    string
+	PoliciesSet bool
 	Overwrite   bool
 }
 
@@ -259,7 +287,7 @@ var ErrNotFound = errors.New("parameter not found")
 
 // NewAWSClient constructs an AWS SDK backed client for one profile/region pair.
 func NewAWSClient(profile, region string) *AWSClient {
-	return &AWSClient{Profile: profile, Region: region, WithDecryption: true}
+	return &AWSClient{Profile: profile, Region: region, WithDecryption: true, sharedCfg: newAWSConfigCache(profile, region)}
 }
 
 // ResolveConfiguredRegion asks the AWS SDK config chain which default region is configured for a profile.
@@ -312,7 +340,16 @@ func (c *AWSClient) ForRegion(region string) Client {
 	if region == "" || region == c.Region {
 		return c
 	}
-	return &AWSClient{Profile: c.Profile, Region: region, WithDecryption: c.WithDecryption, Logger: c.Logger}
+	return &AWSClient{Profile: c.Profile, Region: region, WithDecryption: c.WithDecryption, Logger: c.Logger, sharedCfg: c.ensureSharedConfig()}
+}
+
+func (c *AWSClient) ensureSharedConfig() *awsConfigCache {
+	c.cfgMu.Lock()
+	defer c.cfgMu.Unlock()
+	if c.sharedCfg == nil {
+		c.sharedCfg = newAWSConfigCache(c.Profile, c.Region)
+	}
+	return c.sharedCfg
 }
 
 // DefaultRegion returns the region associated with this client.
@@ -430,35 +467,62 @@ func (c *AWSClient) ListParameterMetadataWithFilters(ctx context.Context, filter
 // DescribeMany loads non-secret metadata for parameter paths in batches.
 // Describe failures are ignored per batch because metadata is supplementary; GetMany still provides the authoritative value status.
 func (c *AWSClient) DescribeMany(ctx context.Context, paths []string) map[string]Metadata {
+	result, _ := c.DescribeManyStrict(ctx, paths)
+	return result
+}
+
+// DescribeManyStrict loads non-secret metadata for exact parameter paths in batches.
+// It uses DescribeParameters with the Name Equals filter, whose Values array accepts up to 50 names.
+func (c *AWSClient) DescribeManyStrict(ctx context.Context, paths []string) (metadataByPath map[string]Metadata, errorsByPath map[string]error) {
 	result := map[string]Metadata{}
-	for _, chunk := range chunkStrings(paths, 10) {
+	errs := map[string]error{}
+	for _, path := range paths {
+		if path != "" {
+			errs[path] = ErrNotFound
+		}
+	}
+
+	for _, chunk := range chunkStrings(paths, 50) {
 		if len(chunk) == 0 {
 			continue
 		}
-		operation := "ssm.DescribeParameters"
-		c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region), slog.Any("names", chunk))
-		out, err := c.ssm(ctx).DescribeParameters(ctx, &awsssm.DescribeParametersInput{
-			ParameterFilters: []ssmtypes.ParameterStringFilter{{
-				Key:    aws.String("Name"),
-				Option: aws.String("Equals"),
-				Values: chunk,
-			}},
-		})
-		if err != nil {
-			_ = c.logAPIError(ctx, operation, err, slog.Any("names", chunk))
-			continue
-		}
-		c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region), slog.Int("count", len(out.Parameters)))
-		for i := range out.Parameters {
-			param := out.Parameters[i]
-			name := aws.ToString(param.Name)
-			if name == "" {
-				continue
+		var nextToken *string
+		for {
+			operation := "ssm.DescribeParameters"
+			c.logDebug(ctx, "aws api request", slog.String("operation", operation), slog.String("region", c.Region), slog.Any("names", chunk), slog.Bool("has_next_token", nextToken != nil))
+			out, err := c.ssm(ctx).DescribeParameters(ctx, &awsssm.DescribeParametersInput{
+				MaxResults: aws.Int32(50),
+				NextToken:  nextToken,
+				ParameterFilters: []ssmtypes.ParameterStringFilter{{
+					Key:    aws.String("Name"),
+					Option: aws.String("Equals"),
+					Values: chunk,
+				}},
+			})
+			if err != nil {
+				normalized := c.logAPIError(ctx, operation, err, slog.Any("names", chunk))
+				for _, path := range chunk {
+					errs[path] = normalized
+				}
+				break
 			}
-			result[name] = metadataFromSDK(c.Region, param)
+			c.logInfo(ctx, "aws api request completed", slog.String("operation", operation), slog.String("region", c.Region), slog.Int("count", len(out.Parameters)))
+			for i := range out.Parameters {
+				param := out.Parameters[i]
+				name := aws.ToString(param.Name)
+				if name == "" {
+					continue
+				}
+				result[name] = metadataFromSDK(c.Region, param)
+				delete(errs, name)
+			}
+			if aws.ToString(out.NextToken) == "" {
+				break
+			}
+			nextToken = out.NextToken
 		}
 	}
-	return result
+	return result, errs
 }
 
 // PutParameter creates or overwrites one SSM parameter using the requested AWS parameter type.
@@ -491,7 +555,7 @@ func (c *AWSClient) PutParameterWithOptions(ctx context.Context, path, value str
 	if strings.TrimSpace(opts.Description) != "" {
 		input.Description = aws.String(opts.Description)
 	}
-	if strings.TrimSpace(opts.Policies) != "" {
+	if opts.PoliciesSet || strings.TrimSpace(opts.Policies) != "" {
 		input.Policies = aws.String(opts.Policies)
 	}
 	operation := "ssm.PutParameter"
@@ -562,6 +626,17 @@ func (c *AWSClient) sts(ctx context.Context) stsAPI {
 }
 
 func (c *AWSClient) sdkConfig(ctx context.Context) (aws.Config, error) {
+	if sharedCfg := c.ensureSharedConfig(); sharedCfg != nil {
+		cfg, err := sharedCfg.load(ctx)
+		if err != nil {
+			return aws.Config{}, err
+		}
+		if c.Region != "" {
+			cfg.Region = c.Region
+		}
+		return cfg, nil
+	}
+
 	c.cfgMu.Lock()
 	defer c.cfgMu.Unlock()
 	if c.loaded {
@@ -649,7 +724,9 @@ func (signedEC2RegionAPI) DescribeRegions(ctx context.Context, client *AWSClient
 	if err != nil {
 		return nil, crerr.Wrap(err, "call EC2 DescribeRegions")
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, crerr.Wrap(err, "read EC2 DescribeRegions response")
@@ -663,7 +740,7 @@ func (signedEC2RegionAPI) DescribeRegions(ctx context.Context, client *AWSClient
 	}
 	regions := make([]awsRegion, 0, len(out.Regions))
 	for _, region := range out.Regions {
-		regions = append(regions, awsRegion{Name: region.Name, OptInStatus: region.OptInStatus})
+		regions = append(regions, awsRegion(region))
 	}
 	return regions, nil
 }
@@ -676,12 +753,96 @@ func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, err
 	if region != "" {
 		opts = append(opts, config.WithRegion(region))
 	}
+	if logging.TraceEnabled(ctx) {
+		opts = append(opts, config.WithHTTPClient(traceHTTPClient()))
+	}
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return aws.Config{}, crerr.Wrap(err, "load AWS SDK config")
 	}
 	return cfg, nil
 }
+
+func traceHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	return &http.Client{Transport: traceRoundTripper{base: transport}}
+}
+
+type traceRoundTripper struct {
+	base http.RoundTripper
+}
+
+func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := transport.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	ctx := req.Context()
+	logger := logging.FromContext(ctx)
+	started := time.Now()
+	host := req.URL.Host
+	attrs := []slog.Attr{
+		slog.String("method", req.Method),
+		slog.String("host", host),
+		slog.String("url", req.URL.String()),
+	}
+
+	var dnsStarted, connectStarted, tlsStarted, wroteRequestAt time.Time
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(info httptrace.DNSStartInfo) {
+			dnsStarted = time.Now()
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "dns_start"), slog.String("dns_host", info.Host))...)
+		},
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "dns_done"), slog.Int64("duration_ms", elapsedMillis(dnsStarted)), slog.Any("addrs", info.Addrs), slog.Any("error", info.Err))...)
+		},
+		ConnectStart: func(network, addr string) {
+			connectStarted = time.Now()
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "connect_start"), slog.String("network", network), slog.String("addr", addr))...)
+		},
+		ConnectDone: func(network, addr string, err error) {
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "connect_done"), slog.Int64("duration_ms", elapsedMillis(connectStarted)), slog.String("network", network), slog.String("addr", addr), slog.Any("error", err))...)
+		},
+		TLSHandshakeStart: func() {
+			tlsStarted = time.Now()
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "tls_start"))...)
+		},
+		TLSHandshakeDone: func(_ tlsConnectionState, err error) {
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "tls_done"), slog.Int64("duration_ms", elapsedMillis(tlsStarted)), slog.Any("error", err))...)
+		},
+		GotConn: func(info httptrace.GotConnInfo) {
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "got_conn"), slog.Bool("reused", info.Reused), slog.Bool("was_idle", info.WasIdle), slog.Int64("idle_ms", int64(info.IdleTime/time.Millisecond)))...)
+		},
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			wroteRequestAt = time.Now()
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "wrote_request"), slog.Int64("elapsed_ms", elapsedMillis(started)), slog.Any("error", info.Err))...)
+		},
+		GotFirstResponseByte: func() {
+			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "first_response_byte"), slog.Int64("elapsed_ms", elapsedMillis(started)), slog.Int64("server_wait_ms", elapsedMillis(wroteRequestAt)))...)
+		},
+	}
+
+	tracedRequest := req.WithContext(httptrace.WithClientTrace(ctx, trace))
+	resp, err := base.RoundTrip(tracedRequest)
+	statusCode := 0
+	if resp != nil {
+		statusCode = resp.StatusCode
+	}
+	logger.LogAttrs(ctx, logging.LevelTrace, "aws http request completed", append(attrs, slog.Int("status", statusCode), slog.Int64("duration_ms", elapsedMillis(started)), slog.Any("error", err))...)
+	if err != nil {
+		return resp, crerr.Wrap(err, "aws http request")
+	}
+	return resp, nil
+}
+
+func elapsedMillis(started time.Time) int64 {
+	if started.IsZero() {
+		return 0
+	}
+	return int64(time.Since(started) / time.Millisecond)
+}
+
+type tlsConnectionState = tls.ConnectionState
 
 func parameterFiltersToSDK(filters []ParameterFilter) []ssmtypes.ParameterStringFilter {
 	if len(filters) == 0 {
@@ -841,15 +1002,81 @@ func formatPolicies(value any) string {
 	case nil:
 		return ""
 	case string:
-		return strings.TrimSpace(v)
+		return normalizePolicyJSON(v)
 	case []ssmtypes.ParameterInlinePolicy:
-		if len(v) == 0 {
-			return ""
-		}
+		return policiesFromInlinePolicies(v)
 	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprint(value)
+	}
+	return normalizePolicyJSON(string(encoded))
+}
+
+func policiesFromInlinePolicies(policies []ssmtypes.ParameterInlinePolicy) string {
+	if len(policies) == 0 {
+		return ""
+	}
+	items := make([]any, 0, len(policies))
+	for _, policy := range policies {
+		items = appendPolicyJSON(items, aws.ToString(policy.PolicyText))
+	}
+	return marshalPolicyItems(items)
+}
+
+func normalizePolicyJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "{}" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return raw
+	}
+	items := appendPolicyValue(nil, decoded)
+	return marshalPolicyItems(items)
+}
+
+func appendPolicyJSON(items []any, raw string) []any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return items
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return append(items, raw)
+	}
+	return appendPolicyValue(items, decoded)
+}
+
+func appendPolicyValue(items []any, value any) []any {
+	switch typed := value.(type) {
+	case nil:
+		return items
+	case []any:
+		for _, item := range typed {
+			items = appendPolicyValue(items, item)
+		}
+		return items
+	case map[string]any:
+		if policyText, ok := typed["PolicyText"]; ok {
+			return appendPolicyValue(items, policyText)
+		}
+		return append(items, typed)
+	case string:
+		return appendPolicyJSON(items, typed)
+	default:
+		return append(items, typed)
+	}
+}
+
+func marshalPolicyItems(items []any) string {
+	if len(items) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(items)
+	if err != nil {
+		return fmt.Sprint(items)
 	}
 	trimmed := strings.TrimSpace(string(encoded))
 	if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {

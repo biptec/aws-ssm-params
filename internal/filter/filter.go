@@ -228,6 +228,32 @@ func (g Group) HasField(field string) bool {
 	return false
 }
 
+// ExactName returns a literal name condition when the group can be anchored to one exact parameter name.
+// Additional non-name conditions are still evaluated locally after the exact parameter lookup.
+func (g Group) ExactName() (string, bool) {
+	name := ""
+	for _, condition := range g.Conditions {
+		if condition.Field != FieldName {
+			continue
+		}
+		if hasMeta(condition.Pattern) {
+			return "", false
+		}
+		candidate := strings.TrimSpace(condition.Pattern)
+		if candidate == "" {
+			return "", false
+		}
+		if name != "" && name != candidate {
+			return "", false
+		}
+		name = candidate
+	}
+	if name == "" {
+		return "", false
+	}
+	return name, true
+}
+
 // GroupsHaveField reports whether any group targets field.
 func GroupsHaveField(groups []Group, field string) bool {
 	for _, group := range groups {

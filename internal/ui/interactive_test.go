@@ -19,6 +19,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMergeStatusBatchReplacesWildcardPendingRow(t *testing.T) {
+	m := newModel(context.Background(), fakeSSMClient{}, []inventory.Item{{Path: "/app/api/password", Region: "*"}}, Options{})
+
+	m.mergeStatusBatch([]Status{{Item: inventory.Item{Path: "/app/api/password", Region: "eu-north-1"}, Exists: true, Type: "SecureString"}})
+
+	require.Len(t, m.statuses, 1)
+	assert.False(t, m.statuses[0].Pending)
+	assert.True(t, m.statuses[0].Exists)
+	assert.Equal(t, "eu-north-1", m.statuses[0].Item.Region)
+}
+
 func TestUpdateLoadingAllowsQuitWhileLongLoadIsRunning(t *testing.T) {
 	_, cmd := model{}.updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
@@ -30,6 +41,60 @@ func TestUpdateLoadingIgnoresUnrelatedKeys(t *testing.T) {
 	_, cmd := model{}.updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 
 	assert.Nil(t, cmd)
+}
+
+func TestLoadingStartsWithCenteredSpinnerOverlay(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.width = 80
+	m.height = 20
+
+	view := m.View()
+
+	assert.Equal(t, screenLoading, m.screen)
+	assert.Contains(t, view, "Loading parameters")
+	assert.Contains(t, view, "Loading parameters |")
+	assert.NotContains(t, view, "Preparing AWS scan...")
+}
+
+func TestLoadingProgressKeepsStatusLineMessage(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.width = 90
+	m.height = 20
+
+	updated, cmd := m.Update(progressMsg{done: 2, total: 12, region: "eu-north-1"})
+	m = updated.(model)
+
+	assert.Equal(t, screenLoading, m.screen)
+	assert.Equal(t, "Loading parameters 2/12 from eu-north-1 region...", m.busyMessage)
+	view := m.View()
+	assert.Contains(t, view, "Loading parameters |")
+	assert.Contains(t, view, "Loading parameters 2/12 from eu-north-1 region...")
+	assert.NotContains(t, view, "Progress: 2/12")
+	assert.NotContains(t, view, "Region: eu-north-1")
+	require.NotNil(t, cmd)
+}
+
+func TestStatusBatchKeepsLoadingOverlayUntilFinalLoad(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.width = 80
+	m.height = 20
+
+	updated, cmd := m.Update(statusBatchMsg{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true}})
+	m = updated.(model)
+
+	assert.Equal(t, screenLoading, m.screen)
+	assert.Len(t, m.statuses, 1)
+	require.NotNil(t, cmd)
+}
+
+func TestLoadingSpinnerTickAdvancesWhileLoading(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{})
+
+	updated, cmd := m.Update(loadingTickMsg{})
+	m = updated.(model)
+
+	assert.Equal(t, 1, m.loadingSpinnerFrame)
+	require.NotNil(t, cmd)
 }
 
 func TestNewModelStoresContextForAsyncLoad(t *testing.T) {
@@ -150,7 +215,8 @@ func TestStartMultilineInitializesEditableFields(t *testing.T) {
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
-	assert.Equal(t, editFieldValue, actual.editField)
+	assert.Equal(t, editFieldSSMPath, actual.editField)
+	assert.True(t, actual.editPathInput.Focused())
 	assert.Equal(t, "/app/value", actual.editPathInput.Value())
 	assert.Equal(t, "", actual.editPathInput.Placeholder)
 	assert.Equal(t, "", actual.editFileInput.Value())
@@ -158,7 +224,7 @@ func TestStartMultilineInitializesEditableFields(t *testing.T) {
 	assert.Equal(t, "hello", actual.textArea.Value())
 }
 
-func TestStartMultilineSkipsEncryptedSecureStringValueWithoutDecryption(t *testing.T) {
+func TestStartMultilineShowsEncryptedSecureStringPlaceholderWithoutDecryption(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{})
 	m.width = 80
 	m.height = 24
@@ -168,8 +234,109 @@ func TestStartMultilineSkipsEncryptedSecureStringValueWithoutDecryption(t *testi
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
-	assert.NotEqual(t, editFieldValue, actual.editField)
+	assert.Equal(t, editFieldSSMPath, actual.editField)
+	assert.True(t, actual.editPathInput.Focused())
+	assert.Empty(t, actual.textArea.Value())
 	assert.Contains(t, actual.renderTextAreaScreen(), "(encrypted)")
+}
+
+func TestEncryptedSecureStringValueFieldBecomesEditableWhenFocused(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{})
+	m.width = 80
+	m.height = 24
+	m.screen = screenTextArea
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeSecureString
+	m.editTier = ssm.ParameterTierStandard
+	m.editDataType = ssm.DefaultParameterDataType
+	m.editField = editFieldDescription
+	m.editDescriptionArea.Focus()
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+
+	assert.Contains(t, m.renderTextAreaScreen(), "(encrypted)")
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	assert.Equal(t, editFieldValue, m.editField)
+	assert.True(t, m.textArea.Focused())
+	assert.NotContains(t, m.renderTextAreaScreen(), "(encrypted)")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(model)
+
+	assert.Equal(t, editFieldSSMPath, m.editField)
+	assert.Contains(t, m.renderTextAreaScreen(), "(encrypted)")
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
+	m = updated.(model)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("new-secret")})
+	m = updated.(model)
+
+	assert.Equal(t, "new-secret", m.textArea.Value())
+	assert.NotContains(t, m.renderTextAreaScreen(), "(encrypted)")
+}
+
+func TestSavingChangedEncryptedSecureStringWithoutDecryptionRequiresValue(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{})
+	m.screen = screenTextArea
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeSecureString
+	m.editTier = ssm.ParameterTierStandard
+	m.editDataType = ssm.DefaultParameterDataType
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+	m.editPathInput.SetValue("/app/secret")
+	m.editInitialSnapshot = m.currentEditSnapshot()
+	m.editDescriptionArea.SetValue("changed")
+
+	updated, cmd := m.saveValue("")
+	actual := updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Equal(t, "Value is required.", actual.errMessage)
+}
+
+func TestSavingUnchangedEncryptedSecureStringWithoutDecryptionIsNoop(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{})
+	m.screen = screenTextArea
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeSecureString
+	m.editTier = ssm.ParameterTierStandard
+	m.editDataType = ssm.DefaultParameterDataType
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+	m.editPathInput.SetValue("/app/secret")
+	m.editInitialSnapshot = m.currentEditSnapshot()
+
+	updated, cmd := m.saveValue("")
+	actual := updated.(model)
+
+	assert.Nil(t, cmd)
+	assert.Empty(t, actual.errMessage)
+	assert.Equal(t, "No changes to save.", actual.message)
+}
+
+func TestSavingEncryptedSecureStringWithoutDecryptionAllowsReplacementValue(t *testing.T) {
+	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}}
+	m := newModel(context.Background(), client, nil, Options{})
+	m.screen = screenTextArea
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeSecureString
+	m.editTier = ssm.ParameterTierStandard
+	m.editDataType = ssm.DefaultParameterDataType
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
+	m.editPathInput.SetValue("/app/secret")
+
+	updated, cmd := m.saveValue("new-secret")
+	actual := updated.(model)
+
+	require.NotNil(t, cmd)
+	assert.Empty(t, actual.errMessage)
+	msg := cmd()
+	result, ok := msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	assert.NoError(t, result.err)
+	assert.Equal(t, "new-secret", client.params[itemKey("eu-north-1", "/app/secret")].Value)
 }
 
 func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
@@ -284,6 +451,121 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyShiftTab})
 	m = updated.(model)
 	assert.Equal(t, editFieldDescription, m.editField)
+}
+
+func TestEditFieldsSupportArrowNavigationForSingleLineInputs(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.editField = editFieldSSMPath
+	m.editPathInput.Focus()
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, editFieldRegion, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(model)
+	assert.Equal(t, editFieldSSMPath, m.editField)
+}
+
+func TestEditFieldsSupportArrowNavigationInViNormalAndInsertModes(t *testing.T) {
+	for _, insertMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("insert=%v", insertMode), func(t *testing.T) {
+			m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "vi"})
+			m.screen = screenTextArea
+			m.editField = editFieldSSMPath
+			m.viInsertMode = insertMode
+			m.editPathInput.Focus()
+
+			updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyDown})
+			m = updated.(model)
+			assert.Equal(t, editFieldRegion, m.editField)
+
+			updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyUp})
+			m = updated.(model)
+			assert.Equal(t, editFieldSSMPath, m.editField)
+		})
+	}
+}
+
+func TestEditFieldsUseKeymapNavigationBetweenSingleLineInputs(t *testing.T) {
+	tests := []struct {
+		name   string
+		keymap string
+		down   tea.KeyMsg
+		up     tea.KeyMsg
+	}{
+		{name: "emacs", keymap: "emacs", down: tea.KeyMsg{Type: tea.KeyCtrlN}, up: tea.KeyMsg{Type: tea.KeyCtrlP}},
+		{name: "vi", keymap: "vi", down: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}, up: tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: tt.keymap})
+			m.screen = screenTextArea
+			m.editField = editFieldSSMPath
+			m.viInsertMode = false
+			m.editPathInput.Focus()
+
+			updated, _ := m.updateTextArea(tt.down)
+			m = updated.(model)
+			assert.Equal(t, editFieldRegion, m.editField)
+
+			updated, _ = m.updateTextArea(tt.up)
+			m = updated.(model)
+			assert.Equal(t, editFieldSSMPath, m.editField)
+		})
+	}
+}
+
+func TestCompactExpandableFieldsSupportVerticalFieldNavigation(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldDescription
+	m.editDescriptionArea.SetValue("short description")
+	m.editDescriptionArea.Focus()
+	require.False(t, m.isCurrentExpandableFieldExpanded())
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, editFieldValue, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m = updated.(model)
+	assert.Equal(t, editFieldDescription, m.editField)
+}
+
+func TestExpandedExpandableFieldsKeepKeymapNavigationInsideTextarea(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m.width = 120
+	m.height = 30
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.SetValue("one\ntwo")
+	m.textArea.Focus()
+	require.True(t, m.isCurrentExpandableFieldExpanded())
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlN})
+	m = updated.(model)
+	assert.Equal(t, editFieldValue, m.editField)
+}
+
+func TestEditFieldArrowsStayInsideMultilineTextarea(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.textArea.SetValue("one\ntwo")
+	m.textArea.Focus()
+
+	updated, _ := m.updateTextArea(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(model)
+	assert.Equal(t, editFieldValue, m.editField)
+
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, editFieldValue, m.editField)
 }
 
 func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
@@ -954,7 +1236,7 @@ func TestColumnsPopupFooterReplacesMainFooter(t *testing.T) {
 	view := m.View()
 
 	assert.False(t, strings.Contains(view, "enter apply"))
-	assert.Contains(t, view, "space toggle")
+	assert.Contains(t, strings.ToLower(view), "space toggle")
 	assert.Contains(t, view, "x none")
 	assert.Contains(t, view, "ctrl+/ help")
 	assert.False(t, strings.Contains(view, "enter edit"))
@@ -1011,8 +1293,9 @@ func TestSingleDeleteConfirmPopupEnterDeletesWithoutTypingPhrase(t *testing.T) {
 	updated, cmd := m.updateConfirmPopup(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
 
-	assert.Equal(t, screenLoading, m.screen)
+	assert.Equal(t, screenMain, m.screen)
 	assert.Equal(t, popupNone, m.activePopup)
+	assert.Equal(t, "Deleting 1 parameter(s)...", m.busyMessage)
 	require.NotNil(t, cmd)
 	msg := cmd()
 	deleteMsg, ok := msg.(deleteDoneMsg)
@@ -1195,22 +1478,22 @@ func TestColumnsScreenDoesNotOfferStatusColumn(t *testing.T) {
 
 func TestSaveValueRejectsEmptyValueBeforeAWSRequest(t *testing.T) {
 	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{})
-	m.screen = screenTextArea
 	m.width = 120
 	m.height = 40
 	m.returnScreen = screenMain
-	m.editPathInput.SetValue("/app/value")
-	m.editRegion = "eu-north-1"
-	m.editType = ssm.ParameterTypeString
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "old"}}
+
+	updated, _ := m.startMultiline(screenMain)
+	m = updated.(model)
 	m.textArea.SetValue("")
-	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "old"}}
+	m = m.focusEditField(editFieldValue)
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
 	assert.Equal(t, screenTextArea, m.screen)
-	assert.Equal(t, "Value cannot be empty.", m.errMessage)
+	assert.Equal(t, "Value is required.", m.errMessage)
 }
 
 func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
@@ -1241,13 +1524,21 @@ func TestViEditorStartsNormalAndInsertModeLabelsActiveTextField(t *testing.T) {
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	m = updated.(model)
 	assert.True(t, m.viInsertMode)
-	assert.Contains(t, m.renderTextAreaScreen(), "Value [INSERT]:")
+	assert.Contains(t, m.renderTextAreaScreen(), "Name [INSERT]:")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
 	m = updated.(model)
 	assert.False(t, m.viInsertMode)
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "[INSERT]"))
+
+	m = m.focusEditField(editFieldValue)
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+	assert.True(t, m.viInsertMode)
+	assert.Contains(t, m.renderTextAreaScreen(), "Value [INSERT]:")
+	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
 
 	m.editField = editFieldSSMPath
 	m.editPathInput.Focus()
@@ -1463,7 +1754,7 @@ func TestNewParameterSaveValidatesPathAndValue(t *testing.T) {
 	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
 	assert.Nil(t, cmd)
-	assert.Equal(t, "Value cannot be empty.", m.errMessage)
+	assert.Equal(t, "Value is required.", m.errMessage)
 }
 
 func TestReplaceStatusAppendsNewParameterAndSelectsIt(t *testing.T) {
@@ -1506,7 +1797,8 @@ func TestNewParameterSaveCommandCreatesStatus(t *testing.T) {
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
 	require.NotNil(t, cmd)
-	assert.Equal(t, screenLoading, m.screen)
+	assert.Equal(t, screenTextArea, m.screen)
+	assert.Equal(t, "Saving parameter...", m.busyMessage)
 
 	msg := cmd()
 	statusMsg, ok := msg.(statusUpdatedMsg)
@@ -2028,6 +2320,30 @@ func TestSaveValueOmitsPoliciesUnlessTierIsAdvanced(t *testing.T) {
 	assert.Empty(t, client.metas[itemKey("eu-north-1", "/app/value")].Policies)
 }
 
+func TestSaveValueClearsExistingPoliciesWhenAdvancedPoliciesEmptied(t *testing.T) {
+	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1"})
+	item := inventory.Item{Path: "/app/value", Region: "eu-north-1"}
+	m.screen = screenTextArea
+	m.statuses = []Status{{Item: item, Exists: true, Type: ssm.ParameterTypeString.String(), Tier: ssm.ParameterTierAdvanced.String(), DataType: ssm.DefaultParameterDataType.String(), Value: "old", Policies: `[{"Type":"Expiration","Version":"1.0"}]`}}
+	m.editPathInput.SetValue(item.Path)
+	m.editRegion = "eu-north-1"
+	m.editType = ssm.ParameterTypeString
+	m.editTier = ssm.ParameterTierAdvanced
+	m.editDataType = ssm.DefaultParameterDataType
+	m.editOverwrite = true
+	m.editPoliciesArea.SetValue("")
+
+	_, cmd := m.saveValue("value")
+	msg := cmd()
+	updated, ok := msg.(statusUpdatedMsg)
+	require.True(t, ok)
+	require.NoError(t, updated.err)
+	assert.Equal(t, "[{}]", client.putOpts[itemKey("eu-north-1", "/app/value")].Policies)
+	assert.True(t, client.putOpts[itemKey("eu-north-1", "/app/value")].PoliciesSet)
+	assert.Equal(t, "[{}]", client.metas[itemKey("eu-north-1", "/app/value")].Policies)
+}
+
 func TestWrappedMultilineCursorRendersAndMovesAcrossVisualRows(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
 	m.width = 40
@@ -2162,6 +2478,7 @@ func TestPopupShowsInternalActionsAndBottomHotkeys(t *testing.T) {
 
 	assert.Contains(t, view, "Esc close")
 	assert.False(t, strings.Contains(view, "enter sort/toggle"))
+	assert.Contains(t, strings.ToLower(view), "space toggle")
 	assert.Contains(t, view, "d direction")
 }
 
@@ -2360,7 +2677,7 @@ func TestApplySortUsesNaturalNumericOrder(t *testing.T) {
 	assert.Equal(t, "/v18", m.statuses[2].Item.Path)
 }
 
-func TestSortPopupSelectsSingleColumnWithLetter(t *testing.T) {
+func TestSortPopupTogglesColumnWithLetter(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"type"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
@@ -2372,17 +2689,20 @@ func TestSortPopupSelectsSingleColumnWithLetter(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
 	m = updated.(model)
 
-	assert.Equal(t, columnType, m.sortBy)
-	assert.Equal(t, popupNone, m.activePopup)
-	assert.Equal(t, "/b", m.statuses[0].Item.Path)
-	assert.Equal(t, "/a", m.statuses[1].Item.Path)
+	assert.Equal(t, columnPath, m.sortBy)
+	assert.Equal(t, popupSort, m.activePopup)
+	require.Len(t, m.sortRules, 2)
+	assert.Equal(t, columnPath, m.sortRules[0].column)
+	assert.Equal(t, columnType, m.sortRules[1].column)
+	assert.Equal(t, "/a", m.statuses[0].Item.Path)
+	assert.Equal(t, "/b", m.statuses[1].Item.Path)
 }
 
-func TestSortPopupNavigationAppliesImmediately(t *testing.T) {
+func TestSortPopupNavigationMovesFocusAndSpaceApplies(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
-	m.sortBy = columnPath
+	m.setSortRules([]sortRule{{column: columnPath}})
 	m.sortCursor = 0
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/b", Region: "eu-north-1"}, Exists: true, Value: "2"},
@@ -2392,16 +2712,25 @@ func TestSortPopupNavigationAppliesImmediately(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(model)
 
-	assert.Equal(t, columnValue, m.sortBy)
+	assert.Equal(t, columnPath, m.sortBy)
+	assert.Equal(t, 1, m.sortCursor)
+	assert.Equal(t, popupSort, m.activePopup)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(model)
+
+	assert.Equal(t, columnPath, m.sortBy)
+	require.Len(t, m.sortRules, 2)
+	assert.Equal(t, columnValue, m.sortRules[1].column)
 	assert.Equal(t, "/a", m.statuses[0].Item.Path)
 	assert.Equal(t, popupSort, m.activePopup)
 }
 
-func TestSortPopupRendersRadioSelectionWithoutInlineHotkeys(t *testing.T) {
+func TestSortPopupRendersCheckboxSelectionWithoutInlineHotkeys(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "user"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
-	m.sortBy = columnValue
+	m.setSortRules([]sortRule{{column: columnValue}})
 	m.sortCursor = 1
 	m.width = 100
 	m.height = 30
@@ -2409,15 +2738,59 @@ func TestSortPopupRendersRadioSelectionWithoutInlineHotkeys(t *testing.T) {
 	view := m.View()
 
 	assert.Contains(t, view, "Sort By")
-	assert.Contains(t, view, "| (*) Value")
-	assert.Contains(t, view, "( ) Name")
-	assert.Contains(t, view, "( ) User")
-	assert.False(t, strings.Contains(view, "( ) Type"))
+	assert.Contains(t, view, "| [x] Value")
+	assert.Contains(t, view, "[ ] Name")
+	assert.Contains(t, view, "[ ] User")
+	assert.False(t, strings.Contains(view, "[ ] Type"))
 	assert.False(t, strings.Contains(view, "v  Value"))
 	assert.False(t, strings.Contains(view, "enter sort/toggle"))
+	assert.Contains(t, strings.ToLower(view), "space toggle")
 	assert.Contains(t, view, "d direction")
 	assert.Contains(t, view, "n name")
 	assert.Contains(t, view, "esc close")
+}
+
+func TestMultiSortUsesSelectedColumnOrderAndDirections(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/a", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String()},
+		{Item: inventory.Item{Path: "/c", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()},
+		{Item: inventory.Item{Path: "/b", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String()},
+	}
+
+	m.applySortWithRules([]sortRule{{column: columnType}, {column: columnPath, descending: true}})
+
+	assert.Equal(t, []string{"/c", "/b", "/a"}, m.visiblePaths())
+	assert.Equal(t, columnType, m.sortBy)
+	assert.False(t, m.sortDescending)
+}
+
+func TestSortPopupDirectionAppliesToFocusedColumn(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"type", "value"}})
+	m.screen = screenMain
+	m.activePopup = popupSort
+	m.statuses = []Status{
+		{Item: inventory.Item{Path: "/a", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "2"},
+		{Item: inventory.Item{Path: "/b", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String(), Value: "1"},
+	}
+	m.sortCursor = 2 // Type when Name and Value are also visible.
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = updated.(model)
+
+	require.Len(t, m.sortRules, 2)
+	assert.Equal(t, columnPath, m.sortRules[0].column)
+	assert.Equal(t, columnType, m.sortRules[1].column)
+	assert.True(t, m.sortRules[1].descending)
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	m = updated.(model)
+
+	require.Len(t, m.sortRules, 3)
+	assert.Equal(t, columnValue, m.sortRules[2].column)
+	assert.False(t, m.sortRules[2].descending)
 }
 
 func TestBulkDeleteConfirmRendersInlinePhraseInputAndButtons(t *testing.T) {
@@ -2516,7 +2889,7 @@ func TestPoliciesActionsPopupClearsPolicies(t *testing.T) {
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	m = updated.(model)
 	assert.Equal(t, popupNone, m.activePopup)
-	assert.Equal(t, "[]", m.editPoliciesArea.Value())
+	assert.Empty(t, m.editPoliciesArea.Value())
 }
 
 func TestPoliciesActionsLoadPrettyPoliciesFromFile(t *testing.T) {

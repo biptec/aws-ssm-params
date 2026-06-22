@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	crerr "github.com/cockroachdb/errors"
@@ -37,15 +38,21 @@ type Options struct {
 	NoColor                   bool
 	Keymap                    string
 	ShowColumns               []string
-	Sort                      string
+	Sort                      []string
 	Fields                    []string
 	IncludeValues             bool
 	ShowSecureValues          bool
 	AllowNamesFileUpdate      bool
+	UseInputTTY               bool
 	NoConfirmOverwriteFile    bool
 	NoConfirmWriteSecureValue bool
 	NoConfirmDeleteOne        bool
 	NoConfirmDeleteAll        bool
+}
+
+type sortRule struct {
+	column     columnName
+	descending bool
 }
 
 // screen identifies the currently active TUI view.
@@ -66,6 +73,12 @@ const (
 const rawLeftLinePrefix = "\x00raw-left\x00"
 
 const encryptedPlaceholderText = "(encrypted)"
+
+const loadingSpinnerInterval = 120 * time.Millisecond
+
+var loadingSpinnerFrames = []string{"|", "/", "-", "\\"}
+
+type loadingTickMsg struct{}
 
 type popupKind int
 
@@ -193,9 +206,11 @@ type model struct {
 	message        string
 	warningMessage string
 	errMessage     string
+	busyMessage    string
 
-	loadingTitle string
-	loadingLines []string
+	loadingTitle        string
+	loadingLines        []string
+	loadingSpinnerFrame int
 
 	input                textinput.Model
 	textArea             textarea.Model
@@ -232,6 +247,7 @@ type model struct {
 	columnCursor   int
 	sortBy         columnName
 	sortDescending bool
+	sortRules      []sortRule
 	sortCursor     int
 
 	randomCursor      int
@@ -254,6 +270,9 @@ type progressMsg struct {
 	region      string
 	items       []inventory.Item
 }
+
+// statusBatchMsg streams partial status rows while the initial loader is still running.
+type statusBatchMsg []Status
 
 // loadedMsg is sent once the initial status load has finished and the main table can be shown.
 type loadedMsg []Status
@@ -319,25 +338,39 @@ var (
 	cursorStyle      = lipgloss.NewStyle().Reverse(true)
 )
 
-func parseInitialSortOption(value string) (columnName, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return columnPath, false
-	}
-	parts := strings.Split(value, ":")
-	field := strings.TrimSpace(parts[0])
-	column, ok := columnByFieldName(field)
-	if !ok {
-		return columnPath, false
-	}
-	descending := false
-	if len(parts) > 1 {
-		switch strings.ToLower(strings.TrimSpace(parts[1])) {
-		case "desc", "descending":
-			descending = true
+func parseInitialSortOptions(values []string) []sortRule {
+	rules := make([]sortRule, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
 		}
+		parts := strings.Split(value, ":")
+		field := strings.TrimSpace(parts[0])
+		column, ok := columnByFieldName(field)
+		if !ok {
+			continue
+		}
+		descending := false
+		if len(parts) > 1 {
+			switch strings.ToLower(strings.TrimSpace(parts[1])) {
+			case "desc", "descending":
+				descending = true
+			}
+		}
+		rules = withSortRule(rules, column, descending)
 	}
-	return column, descending
+	if len(rules) == 0 {
+		return []sortRule{{column: columnPath}}
+	}
+	return rules
+}
+
+func primarySortRule(rules []sortRule) (columnName, bool) {
+	if len(rules) == 0 {
+		return columnPath, false
+	}
+	return rules[0].column, rules[0].descending
 }
 
 func columnByFieldName(name string) (columnName, bool) {
@@ -356,11 +389,67 @@ func columnByFieldName(name string) (columnName, bool) {
 	return "", false
 }
 
+func pendingStatuses(items []inventory.Item) []Status {
+	statuses := make([]Status, 0, len(items))
+	for _, item := range items {
+		statuses = append(statuses, Status{Item: item, Pending: true})
+	}
+	return statuses
+}
+
+func (m *model) mergeStatusBatch(batch []Status) {
+	if len(batch) == 0 {
+		return
+	}
+	incoming := map[string]*Status{}
+	removePendingPath := map[string]bool{}
+	for i := range batch {
+		status := &batch[i]
+		if status.Item.Path == "" {
+			continue
+		}
+		incoming[itemKey(status.Item.Region, status.Item.Path)] = status
+		if status.Item.Region != "" && status.Item.Region != "*" {
+			removePendingPath[status.Item.Path] = true
+		}
+	}
+	if len(incoming) == 0 {
+		return
+	}
+	used := map[string]bool{}
+	merged := make([]Status, 0, len(m.statuses)+len(incoming))
+	for i := range m.statuses {
+		status := m.statuses[i]
+		key := itemKey(status.Item.Region, status.Item.Path)
+		if next, ok := incoming[key]; ok {
+			merged = append(merged, *next)
+			used[key] = true
+			continue
+		}
+		if status.Pending && removePendingPath[status.Item.Path] && (status.Item.Region == "" || status.Item.Region == "*") {
+			continue
+		}
+		merged = append(merged, status)
+	}
+	for key, status := range incoming {
+		if !used[key] {
+			merged = append(merged, *status)
+		}
+	}
+	m.statuses = merged
+	m.applySortWithRules(m.sortRulesOrDefault())
+	m.ensureSelection()
+}
+
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
 // The function returns only after the user quits the TUI or Bubble Tea reports an error.
 func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) error {
 	m := newModel(ctx, client, items, opts)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	programOptions := []tea.ProgramOption{tea.WithAltScreen()}
+	if opts.UseInputTTY {
+		programOptions = append(programOptions, tea.WithInputTTY())
+	}
+	p := tea.NewProgram(m, programOptions...)
 	_, err := p.Run()
 	return crerr.Wrap(err, "run interactive TUI")
 }
@@ -368,7 +457,8 @@ func RunInteractive(ctx context.Context, client ssm.Client, items []inventory.It
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
 func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, opts Options) model {
-	sortBy, sortDescending := parseInitialSortOption(opts.Sort)
+	sortRules := parseInitialSortOptions(opts.Sort)
+	sortBy, sortDescending := primarySortRule(sortRules)
 	input := textinput.New()
 	input.Prompt = ""
 	input.CharLimit = 0
@@ -416,10 +506,12 @@ func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, op
 		client:               client,
 		ctx:                  ctx,
 		items:                items,
+		statuses:             pendingStatuses(items),
 		opts:                 opts,
 		loadCh:               make(chan tea.Msg),
 		screen:               screenLoading,
-		shortcutsFor:         screenMain,
+		shortcutsFor:         screenLoading,
+		loadingTitle:         "Loading parameters",
 		input:                input,
 		textArea:             area,
 		editPoliciesArea:     policiesArea,
@@ -430,6 +522,7 @@ func newModel(ctx context.Context, client ssm.Client, items []inventory.Item, op
 		columns:              defaultColumnVisibility(opts.ShowColumns),
 		sortBy:               sortBy,
 		sortDescending:       sortDescending,
+		sortRules:            sortRules,
 		expandedFields:       map[editField]bool{},
 		showGutters:          true,
 	}
@@ -446,7 +539,7 @@ func configureTextInputStyles(input *textinput.Model, opts Options) {
 
 // Init starts the initial background status load and registers a command that waits for loader messages.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh))
+	return tea.Batch(startLoadCmd(m.ctx, m.client, m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh), waitForLoad(m.loadCh), tickLoadingSpinner())
 }
 
 // startLoadCmd launches the initial SSM status scan in a goroutine.
@@ -457,11 +550,17 @@ func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item
 			loader := func(done, total int, region string, chunk []inventory.Item) {
 				ch <- progressMsg{done: done, total: total, region: region, items: append([]inventory.Item(nil), chunk...)}
 			}
+			emitBatch := func(statuses []Status) {
+				statuses = FilterStatusesByGroups(statuses, groups)
+				if len(statuses) > 0 {
+					ch <- statusBatchMsg(append([]Status(nil), statuses...))
+				}
+			}
 			var statuses []Status
 			if len(groups) > 0 && len(items) == 0 {
 				statuses = LoadFilteredStatusesBatchForRegions(ctx, client, groups, includeValues, regions, loader)
 			} else {
-				statuses = LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, loader)
+				statuses = LoadStatusesBatchForRegionsStream(ctx, client, items, includeValues, regions, loader, emitBatch)
 				statuses = FilterStatusesByGroups(statuses, groups)
 			}
 			ch <- loadedMsg(statuses)
@@ -473,6 +572,10 @@ func startLoadCmd(ctx context.Context, client ssm.Client, items []inventory.Item
 // waitForLoad blocks one Bubble Tea command worker until the status loader emits its next message.
 // Update schedules it again after each progress message, giving the UI a stream of loading updates.
 func waitForLoad(ch <-chan tea.Msg) tea.Cmd { return func() tea.Msg { return <-ch } }
+
+func tickLoadingSpinner() tea.Cmd {
+	return tea.Tick(loadingSpinnerInterval, func(time.Time) tea.Msg { return loadingTickMsg{} })
+}
 
 // Update is the Bubble Tea state machine.
 // It handles window changes, async loader/save/delete results, and keypresses, then delegates screen-specific input
@@ -494,25 +597,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case progressMsg:
-		m.screen = screenLoading
+		m.loadingTitle = "Loading parameters"
+		m.loadingLines = nil
 		if msg.region != "" {
-			m.loadingTitle = fmt.Sprintf("Loading parameters %d/%d from %s region...", msg.done, msg.total, msg.region)
+			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d from %s region...", msg.done, msg.total, msg.region)
 		} else {
-			m.loadingTitle = fmt.Sprintf("Loading parameters %d/%d...", msg.done, msg.total)
+			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d...", msg.done, msg.total)
 		}
-		m.loadingLines = itemPaths(msg.items)
+		return m, waitForLoad(m.loadCh)
+
+	case loadingTickMsg:
+		if m.screen == screenLoading {
+			m.loadingSpinnerFrame = (m.loadingSpinnerFrame + 1) % len(loadingSpinnerFrames)
+			return m, tickLoadingSpinner()
+		}
+		return m, nil
+
+	case statusBatchMsg:
+		m.mergeStatusBatch([]Status(msg))
 		return m, waitForLoad(m.loadCh)
 
 	case loadedMsg:
 		m.statuses = []Status(msg)
-		m.applySortWithDirection(columnPath, false)
+		m.applySortWithRules(m.sortRulesOrDefault())
 		m.screen = screenMain
+		m.busyMessage = ""
 		m.loadingTitle = ""
 		m.loadingLines = nil
 		m.ensureSelection()
 		return m, nil
 
 	case statusUpdatedMsg:
+		m.busyMessage = ""
 		if msg.err != nil {
 			m.errMessage = msg.err.Error()
 			m.screen = m.returnScreen
@@ -531,6 +647,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case deleteDoneMsg:
+		m.busyMessage = ""
 		if msg.err != nil {
 			m.errMessage = msg.err.Error()
 			m.screen = m.returnScreen
@@ -873,6 +990,25 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.warningMessage = ""
 	}
 
+	moveFocusWithNavigation := func(action navigationAction, allowFromExpanded bool) (tea.Model, tea.Cmd, bool) {
+		if !allowFromExpanded && m.isCurrentExpandableFieldExpanded() {
+			return m, nil, false
+		}
+		switch action {
+		case navPrevious:
+			resetFileConfirmation()
+			updated, cmd := m.focusPreviousEditField()
+			return updated, cmd, true
+		case navNext:
+			resetFileConfirmation()
+			updated, cmd := m.focusNextEditField()
+			return updated, cmd, true
+		case navNone, navPageUp, navPageDown, navFirst, navLast:
+			return m, nil, false
+		}
+		return m, nil, false
+	}
+
 	key := msg.String()
 	beforeEditField := m.editField
 	beforeExpandableValue := ""
@@ -895,15 +1031,15 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		} else {
+			if action, ok := m.editorNavigationAction(key); ok {
+				allowFromExpanded := action == navPrevious && key == "shift+tab" || action == navNext && key == "tab"
+				if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
+					return updated, cmd
+				}
+			}
 			switch key {
 			case "q", "esc", "ctrl+g":
 				return m.requestEditorBack()
-			case "tab":
-				resetFileConfirmation()
-				return m.focusNextEditField()
-			case "shift+tab":
-				resetFileConfirmation()
-				return m.focusPreviousEditField()
 			case "enter", "ctrl+j":
 				resetFileConfirmation()
 				if m.expandCompactFieldIfNeeded() {
@@ -950,12 +1086,14 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			break
 		}
 		return m.requestEditorBack()
-	case "tab":
-		resetFileConfirmation()
-		return m.focusNextEditField()
-	case "shift+tab":
-		resetFileConfirmation()
-		return m.focusPreviousEditField()
+	}
+	if action, ok := m.editorNavigationAction(key); ok {
+		allowFromExpanded := action == navPrevious && key == "shift+tab" || action == navNext && key == "tab"
+		if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
+			return updated, cmd
+		}
+	}
+	switch key {
 	case "enter", "ctrl+j":
 		resetFileConfirmation()
 		if m.expandCompactFieldIfNeeded() {
@@ -1136,21 +1274,18 @@ func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key != "d" {
 		if col, ok := m.popupSortColumnByLetterHotkey(key); ok {
-			m.applySortSelection(col)
-			m.popPopup()
+			m.toggleSortColumn(col)
 			return m, nil
 		}
 	}
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
-			m.applySortCursor(items)
 		}
 		return m, nil
 	}
 	if action, ok := m.navigationAction(key); ok {
 		m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
-		m.applySortCursor(items)
 		return m, nil
 	}
 	if m.keymapStyle() == keymapVi && key == "g" {
@@ -1160,8 +1295,13 @@ func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenMain, popupSort)
-	case "q", "esc", "ctrl+g", "enter", "ctrl+j":
+	case "q", "esc", "ctrl+g":
 		m.popPopup()
+	case " ", "enter", "ctrl+j":
+		if len(items) > 0 {
+			m.sortCursor = min(m.sortCursor, len(items)-1)
+			m.toggleSortColumn(items[m.sortCursor].column)
+		}
 	case "d":
 		if len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
@@ -1274,7 +1414,7 @@ func (m model) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	choose := func(action string) (tea.Model, tea.Cmd) {
 		switch action {
 		case "clear":
-			m.editPoliciesArea.SetValue("[]")
+			m.editPoliciesArea.SetValue("")
 			m.clearPopupStack()
 			m.message = "Policies cleared. Press Ctrl-s to save."
 			m.focusEditField(editFieldPolicies)
@@ -1505,9 +1645,9 @@ func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		items := append([]inventory.Item(nil), m.confirmItems...)
-		m.loadingTitle = "Deleting parameters..."
-		m.loadingLines = itemPaths(items)
-		m.screen = screenLoading
+		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
+		m.loadingTitle = ""
+		m.loadingLines = nil
 		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	var cmd tea.Cmd
@@ -1624,11 +1764,11 @@ func (m model) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		items := append([]inventory.Item(nil), m.confirmItems...)
-		m.loadingTitle = "Deleting parameters..."
-		m.loadingLines = itemPaths(items)
+		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
+		m.loadingTitle = ""
+		m.loadingLines = nil
 		m.activePopup = popupNone
 		m.popupStack = nil
-		m.screen = screenLoading
 		return m, deleteCmd(m.ctx, m.client, items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
 	if m.confirmExpected == "" {
@@ -1881,7 +2021,7 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.editFileInput.SetValue("")
 	m.editFileInput.Placeholder = ""
 	m.editFileInput.Blur()
-	m.editField = editFieldValue
+	m.editField = editFieldSSMPath
 	m.editDirection = editDirectionNext
 	m.viInsertMode = m.keymapStyle() != keymapVi
 	m.pendingFileWrite = fileWriteConfirmationNone
@@ -1890,11 +2030,7 @@ func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
 	m.errMessage = ""
 	m.editInitialSnapshot = m.currentEditSnapshot()
 	m.screen = screenTextArea
-	if m.encryptedValueLocked() {
-		m = m.focusEditField(m.editFieldOrder()[0])
-	} else {
-		m.textArea.Focus()
-	}
+	m = m.focusEditField(editFieldSSMPath)
 	return m, nil
 }
 
@@ -2342,14 +2478,14 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 		}
 		item.Path = newPath
 	}
-	if m.encryptedValueLocked() {
-		m.errMessage = "SecureString value is encrypted. Reopen with --with-decryption to edit or save it."
-		m.message = ""
-		m.warningMessage = ""
-		return m, nil
-	}
 	if value == "" {
-		m.errMessage = "Value cannot be empty."
+		if !m.editNewParameter && !m.editorHasUnsavedChanges() {
+			m.message = "No changes to save."
+			m.errMessage = ""
+			m.warningMessage = ""
+			return m, nil
+		}
+		m.errMessage = "Value is required."
 		m.message = ""
 		m.warningMessage = ""
 		return m, nil
@@ -2380,21 +2516,30 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	}
 	item.Region = m.editRegion
 	policies := ""
+	policiesSet := false
 	if m.shouldShowPoliciesField() {
-		policies = normalizePoliciesForAWS(m.editPoliciesArea.Value())
+		rawPolicies := strings.TrimSpace(m.editPoliciesArea.Value())
+		policies = normalizePoliciesForAWS(rawPolicies)
+		if strings.TrimSpace(policies) == "[{}]" {
+			policiesSet = true
+		}
+		if rawPolicies == "" && strings.TrimSpace(m.currentStatus().Policies) != "" {
+			policies = "[{}]"
+			policiesSet = true
+		}
 	}
 	overwrite := true
 	if m.shouldShowOverwriteField() {
 		overwrite = m.editOverwrite
 	}
-	m.loadingTitle = "Saving parameter..."
-	m.loadingLines = []string{item.Path}
-	m.screen = screenLoading
+	m.busyMessage = "Saving parameter..."
+	m.loadingTitle = ""
+	m.loadingLines = nil
 	description := strings.TrimSpace(m.editDescriptionArea.Value())
 	if description == "" {
 		description = strings.TrimSpace(m.editDescriptionInput.Value())
 	}
-	return m, saveValueCmd(m.ctx, m.client, item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	return m, saveValueCmd(m.ctx, m.client, item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
@@ -2510,7 +2655,7 @@ func (m model) renderTextAreaScreen() string {
 		remaining = max(1, innerHeight-len(lines))
 	}
 
-	if m.encryptedValueLocked() {
+	if m.shouldShowEncryptedEditPlaceholder() {
 		lines = append(lines, m.editFieldLine(editFieldValue, "Value", m.encryptedPlaceholder(), labelWidth))
 	} else if m.editFieldAllowed(editFieldValue) {
 		valueLines := m.renderExpandableField(editFieldValue, "Value", m.textArea, labelWidth, max(1, remaining-1), false)
@@ -2846,7 +2991,7 @@ func (m model) renderColumnsPopup() string {
 }
 
 func (m model) renderSortPopup() string {
-	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Esc close")
+	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Space toggle   D direction   Esc close")
 }
 
 func (m model) renderValueActionsPopup() string {
@@ -2930,7 +3075,8 @@ func (m model) sortOptionLines() []string {
 		m.sortCursor = len(items) - 1
 	}
 	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(m.sortPopupLabel(item), i == m.sortCursor, i == m.sortCursor))
+		_, checked := sortRuleForColumn(m.sortRules, item.column)
+		lines = append(lines, m.multiSelectLine(m.sortPopupLabel(item), checked, i == m.sortCursor))
 	}
 	return lines
 }
@@ -3102,14 +3248,20 @@ func (m model) renderShortcutsPopup() string {
 	return m.renderPopupBoxWithActions("Shortcuts", lines, "Esc close")
 }
 
-// renderLoading renders current background-operation progress, including the region and paths currently being scanned.
+// renderLoading renders a centered loading overlay while the initial background scan is running.
 func (m model) renderLoading() string {
-	lines := make([]string, 0, 2+len(m.loadingLines))
-	lines = append(lines, "  "+m.loadingTitle, "")
-	for _, line := range m.loadingLines {
-		lines = append(lines, "  "+line)
+	bodyLines := make([]string, max(1, m.height))
+	body := strings.Join(bodyLines, "\n")
+	return m.overlayPopupOnBody(body, m.renderLoadingPopup())
+}
+
+func (m model) renderLoadingPopup() string {
+	title := strings.TrimSpace(m.loadingTitle)
+	if title == "" {
+		title = "Loading parameters"
 	}
-	return m.renderBox("Loading", lines, m.height)
+	spinner := loadingSpinnerFrames[m.loadingSpinnerFrame%len(loadingSpinnerFrames)]
+	return m.renderPopupBox("Loading", []string{fmt.Sprintf("%s %s", title, spinner)})
 }
 
 // renderSelectedParameterBlock renders the compact or expanded selected-parameter summary shown above the main table.
@@ -3197,6 +3349,9 @@ func (m model) detailFieldAllowed(label string) bool {
 // displayValue returns the user-facing value for selected blocks and VALUE table cells.
 // SecureString values are shown when decrypted; otherwise the UI renders an encrypted placeholder.
 func (m model) displayValue(st Status, full bool) string {
+	if st.Pending {
+		return "-"
+	}
 	if st.Item.Path != "" && st.isMissing() {
 		return "-"
 	}
@@ -3237,11 +3392,15 @@ func oneLineValuePreview(value string, width int) string {
 }
 
 func (m model) shouldDisplayEncryptedValue(st Status) bool {
-	return st.HasSensitiveValue() && st.Value == "" && !m.opts.ShowSecureValues
+	return !st.Pending && st.HasSensitiveValue() && st.Value == "" && !m.opts.ShowSecureValues
 }
 
 func (m model) encryptedValueLocked() bool {
 	return !m.editNewParameter && m.currentStatus().Exists && m.normalizedEditType() == ssm.ParameterTypeSecureString && !m.opts.ShowSecureValues
+}
+
+func (m model) shouldShowEncryptedEditPlaceholder() bool {
+	return m.encryptedValueLocked() && m.editField != editFieldValue && m.textArea.Value() == ""
 }
 
 // renderListBlock renders the main table, including dynamic columns, scrolling, search/filter status, and messages.
@@ -3417,7 +3576,7 @@ func (m model) rowText(st Status, row string, selected bool) string {
 		}
 		return lipgloss.NewStyle().Foreground(errFg).Render(row)
 	}
-	if label == "MISSING" {
+	if label == "LOADING" || label == "MISSING" {
 		if m.opts.NoColor {
 			return row
 		}
@@ -3646,7 +3805,7 @@ func (m model) renderPopupBox(title string, lines []string) string {
 	if availableInner <= 0 {
 		availableInner = m.boxInnerWidth()
 	}
-	innerWidth := max(36, maxLineWidth)
+	innerWidth := max(20, maxLineWidth)
 	innerWidth = min(innerWidth, 80)
 	innerWidth = min(innerWidth, max(10, availableInner))
 	out := make([]string, 0, 1+len(lines)+1)
@@ -4070,6 +4229,8 @@ func (m model) renderStatusMessage() string {
 		return m.applyErr(m.errMessage)
 	case m.warningMessage != "":
 		return m.applyWarning(m.warningMessage)
+	case m.busyMessage != "":
+		return m.muted(m.busyMessage)
 	case m.message != "":
 		return m.muted(m.message)
 	default:
@@ -4463,12 +4624,64 @@ func (m model) visibleSortColumnByHotkey(key string) (columnName, bool) {
 
 func (m model) sortCursorForCurrentSort() int {
 	items := m.popupSortItems()
+	primary, _ := primarySortRule(m.sortRules)
 	for i, item := range items {
-		if item.column == m.sortBy {
+		if item.column == primary {
 			return i
 		}
 	}
 	return 0
+}
+
+func sortRuleIndex(rules []sortRule, column columnName) int {
+	for i, rule := range rules {
+		if rule.column == column {
+			return i
+		}
+	}
+	return -1
+}
+
+func sortRuleForColumn(rules []sortRule, column columnName) (sortRule, bool) {
+	idx := sortRuleIndex(rules, column)
+	if idx < 0 {
+		return sortRule{}, false
+	}
+	return rules[idx], true
+}
+
+func withoutSortRule(rules []sortRule, column columnName) []sortRule {
+	filtered := make([]sortRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.column != column {
+			filtered = append(filtered, rule)
+		}
+	}
+	return filtered
+}
+
+func withSortRule(rules []sortRule, column columnName, descending bool) []sortRule {
+	if column == "" {
+		return rules
+	}
+	updated := withoutSortRule(rules, column)
+	updated = append(updated, sortRule{column: column, descending: descending})
+	return updated
+}
+
+func (m model) sortRulesOrDefault() []sortRule {
+	if len(m.sortRules) == 0 {
+		return []sortRule{{column: columnPath}}
+	}
+	return m.sortRules
+}
+
+func (m *model) setSortRules(rules []sortRule) {
+	if len(rules) == 0 {
+		rules = []sortRule{{column: columnPath}}
+	}
+	m.sortRules = append([]sortRule(nil), rules...)
+	m.sortBy, m.sortDescending = primarySortRule(m.sortRules)
 }
 
 func (m *model) applySort(column columnName) {
@@ -4479,56 +4692,68 @@ func (m *model) applySort(column columnName) {
 	if column == m.sortBy {
 		descending = !m.sortDescending
 	}
-	m.applySortWithDirection(column, descending)
+	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
 }
 
-func (m *model) applySortSelection(column columnName) {
+func (m *model) toggleSortColumn(column columnName) {
 	if column == "" {
 		return
 	}
-	descending := false
-	if column == m.sortBy {
-		descending = m.sortDescending
+	rules := m.sortRulesOrDefault()
+	if sortRuleIndex(rules, column) >= 0 {
+		rules = withoutSortRule(rules, column)
+	} else {
+		rules = withSortRule(rules, column, false)
 	}
-	m.applySortWithDirection(column, descending)
-}
-
-func (m *model) applySortCursor(items []sortItem) {
-	if len(items) == 0 {
-		return
-	}
-	m.sortCursor = min(m.sortCursor, len(items)-1)
-	m.applySortSelection(items[m.sortCursor].column)
+	m.applySortWithRules(rules)
 }
 
 func (m *model) toggleSortDirection(column columnName) {
 	if column == "" {
 		return
 	}
-	descending := true
-	if column == m.sortBy {
-		descending = !m.sortDescending
+	rules := m.sortRulesOrDefault()
+	idx := sortRuleIndex(rules, column)
+	if idx < 0 {
+		rules = withSortRule(rules, column, true)
+	} else {
+		rules[idx].descending = !rules[idx].descending
 	}
-	m.applySortWithDirection(column, descending)
+	m.applySortWithRules(rules)
 }
 
 func (m *model) applySortWithDirection(column columnName, descending bool) {
 	if column == "" {
 		return
 	}
+	m.applySortWithRules([]sortRule{{column: column, descending: descending}})
+}
+
+func (m *model) applySortWithRules(rules []sortRule) {
 	var selectedKey string
 	if len(m.visible()) > 0 && m.selected < len(m.visible()) {
 		st := m.statuses[m.visible()[m.selected]]
 		selectedKey = itemKey(st.Item.Region, st.Item.Path)
 	}
-	m.sortBy = column
-	m.sortDescending = descending
+	m.setSortRules(rules)
+	rules = m.sortRulesOrDefault()
 	sort.SliceStable(m.statuses, func(i, j int) bool {
-		cmp := naturalCompare(m.tableCellValue(column, 0, m.statuses[i]), m.tableCellValue(column, 0, m.statuses[j]))
-		if descending {
-			return cmp > 0
+		left := m.statuses[i]
+		right := m.statuses[j]
+		for _, rule := range rules {
+			cmp := naturalCompare(m.tableCellValue(rule.column, 0, left), m.tableCellValue(rule.column, 0, right))
+			if cmp == 0 {
+				continue
+			}
+			if rule.descending {
+				return cmp > 0
+			}
+			return cmp < 0
 		}
-		return cmp < 0
+		if cmp := naturalCompare(left.Item.Region, right.Item.Region); cmp != 0 {
+			return cmp < 0
+		}
+		return naturalCompare(left.Item.Path, right.Item.Path) < 0
 	})
 	if selectedKey != "" {
 		for idx, visIdx := range m.visible() {
@@ -4617,22 +4842,22 @@ func (m model) columnHeader(c columnName) string {
 		return "#"
 	}
 	header := strings.ToUpper(columnLabel(c))
-	if c == m.sortBy {
-		header += " " + m.sortDirectionArrow()
+	if rule, ok := sortRuleForColumn(m.sortRules, c); ok {
+		header += " " + sortDirectionArrow(rule.descending)
 	}
 	return header
 }
 
-func (m model) sortDirectionArrow() string {
-	if m.sortDescending {
+func sortDirectionArrow(descending bool) string {
+	if descending {
 		return "↓"
 	}
 	return "↑"
 }
 
 func (m model) sortPopupLabel(item sortItem) string {
-	if item.column == m.sortBy {
-		return item.label + " " + m.sortDirectionArrow()
+	if rule, ok := sortRuleForColumn(m.sortRules, item.column); ok {
+		return item.label + " " + sortDirectionArrow(rule.descending)
 	}
 	return item.label
 }
@@ -4714,7 +4939,7 @@ func (m model) editFieldAllowed(field editField) bool {
 	case editFieldPolicies:
 		return m.fieldAllowed("policies")
 	case editFieldValue:
-		return m.fieldAllowed("value") && !m.encryptedValueLocked()
+		return m.fieldAllowed("value")
 	case editFieldOverwrite:
 		return m.fieldAllowed("value")
 	default:

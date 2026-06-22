@@ -79,6 +79,20 @@ func (m model) navigationAction(key string) (navigationAction, bool) {
 	return navNone, false
 }
 
+func (m model) editorNavigationAction(key string) (navigationAction, bool) {
+	action, ok := m.navigationAction(key)
+	if !ok {
+		return navNone, false
+	}
+	if m.keymapStyle() == keymapVi && m.viInsertMode {
+		switch key {
+		case "j", "k", "G":
+			return navNone, false
+		}
+	}
+	return action, true
+}
+
 func (m model) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
 	if m.pendingKeySequence == "" {
 		return navNone, false, false

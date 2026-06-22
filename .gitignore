@@ -72,5 +72,5 @@ tmp/
 release/
 checksums.txt
 
-# Do not ignore vendor/
-# This repository keeps vendored dependencies for reproducible/offline builds.
+# Vendored dependencies are kept outside the repository/archive.
+vendor/
