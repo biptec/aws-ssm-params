@@ -13,14 +13,14 @@ import (
 
 func globalFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGIONS", "AWS_SSM_PARAMS_REGION"), Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
+		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION"), Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
 		&cli.BoolFlag{Name: "all-regions", Sources: cli.EnvVars("AWS_SSM_PARAMS_ALL_REGIONS"), Usage: "search parameters across all enabled AWS regions"},
-		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE"), Usage: "AWS profile"},
-		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR"), Usage: "disable colored output"},
+		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE"), Usage: "AWS profile"},
+		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR"), Usage: "disable colored output"},
 		&cli.StringFlag{Name: "keymap", Value: "emacs", Sources: cli.EnvVars("AWS_SSM_PARAMS_KEYMAP"), Usage: "keyboard navigation style: emacs or vi"},
 		&cli.StringFlag{Name: "log-level", Value: "off", Sources: cli.EnvVars("AWS_SSM_PARAMS_LOG_LEVEL"), Usage: "log level: trace, debug, info, warn, error, or off"},
-		&cli.StringFlag{Name: "filters-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTERS_FILE"), Usage: "file with filter groups; one OR group per line"},
-		&cli.StringSliceFlag{Name: "filter", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTERS", "AWS_SSM_PARAMS_FILTER"), Usage: "filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values"},
+		&cli.StringFlag{Name: "filters-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTER_FILE"), Usage: "file with filter groups; one OR group per line"},
+		&cli.StringSliceFlag{Name: "filter", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTER"), Usage: "filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values"},
 	}
 }
 
@@ -51,7 +51,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 				},
 				Flags: []cli.Flag{
 					&cli.BoolFlag{Name: "with-decryption", Sources: cli.EnvVars("AWS_SSM_PARAMS_WITH_DECRYPTION"), Usage: "decrypt SecureString values"},
-					&cli.StringSliceFlag{Name: "show-column", Sources: cli.EnvVars("AWS_SSM_PARAMS_SHOW_COLUMNS"), Usage: "optional column to show in the TUI; repeat for multiple columns; env accepts comma-separated values"},
+					&cli.StringSliceFlag{Name: "show-column", Sources: cli.EnvVars("AWS_SSM_PARAMS_SHOW_COLUMN"), Usage: "optional column to show in the TUI; repeat for multiple columns; env accepts comma-separated values"},
 					&cli.StringSliceFlag{Name: "sort-by", Sources: cli.EnvVars("AWS_SSM_PARAMS_SORT_BY"), Usage: "initial sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
 					&cli.BoolFlag{Name: "no-confirm-overwrite-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE"), Usage: "do not ask before overwriting local files from the TUI"},
 					&cli.BoolFlag{Name: "no-confirm-write-securestring", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING"), Usage: "do not ask before writing SecureString values to local files in plaintext"},
@@ -98,8 +98,8 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					return ctx, app.RejectCommaSeparatedFlagArgs(cmd.Args().Slice(), "output-field", "map-field", "sort-by")
 				},
 				Flags: []cli.Flag{
-					&cli.StringSliceFlag{Name: "output-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_OUTPUT_FIELDS", "AWS_SSM_PARAMS_OUTPUT_FIELD"), Usage: "AWS field to include in export output; repeat for multiple fields"},
-					&cli.StringSliceFlag{Name: "map-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_MAP_FIELDS", "AWS_SSM_PARAMS_MAP_FIELD"), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+					&cli.StringSliceFlag{Name: "output-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_OUTPUT_FIELD"), Usage: "AWS field to include in export output; repeat for multiple fields"},
+					&cli.StringSliceFlag{Name: "map-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_MAP_FIELD"), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
 					&cli.StringSliceFlag{Name: "sort-by", Sources: cli.EnvVars("AWS_SSM_PARAMS_SORT_BY"), Usage: "export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
 					&cli.BoolFlag{Name: "with-decryption", Sources: cli.EnvVars("AWS_SSM_PARAMS_WITH_DECRYPTION"), Usage: "decrypt SecureString values"},
 					&cli.StringFlag{Name: "format", Value: "dotenv", Usage: "output format: dotenv, json, or yaml"},

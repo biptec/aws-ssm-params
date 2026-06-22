@@ -8,8 +8,8 @@
 <text x="28" y="108" xml:space="preserve">   aws-ssm-params [global options] export [command options]</text>
 <text x="28" y="128" xml:space="preserve"></text>
 <text x="28" y="148" xml:space="preserve">OPTIONS:</text>
-<text x="28" y="168" xml:space="preserve">   --output-field string [ --output-field string ]  AWS field to include in export output; repeat for multiple fields [$AWS_SSM_PARAMS_OUTPUT_FIELDS, $AWS_SSM_PARAMS_OUTPUT_FIELD]</text>
-<text x="28" y="188" xml:space="preserve">   --map-field string [ --map-field string ]        field mapping as aws_field:file_field; repeat for multiple mappings [$AWS_SSM_PARAMS_MAP_FIELDS, $AWS_SSM_PARAMS_MAP_FIELD]</text>
+<text x="28" y="168" xml:space="preserve">   --output-field string [ --output-field string ]  AWS field to include in export output; repeat for multiple fields [$AWS_SSM_PARAMS_OUTPUT_FIELD]</text>
+<text x="28" y="188" xml:space="preserve">   --map-field string [ --map-field string ]        field mapping as aws_field:file_field; repeat for multiple mappings [$AWS_SSM_PARAMS_MAP_FIELD]</text>
 <text x="28" y="208" xml:space="preserve">   --sort-by string [ --sort-by string ]            export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values [$AWS_SSM_PARAMS_SORT_BY]</text>
 <text x="28" y="228" xml:space="preserve">   --with-decryption                                decrypt SecureString values [$AWS_SSM_PARAMS_WITH_DECRYPTION]</text>
 <text x="28" y="248" xml:space="preserve">   --format string                                  output format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
@@ -18,12 +18,12 @@
 <text x="28" y="308" xml:space="preserve">   --help, -h                                       show help</text>
 <text x="28" y="328" xml:space="preserve"></text>
 <text x="28" y="348" xml:space="preserve">GLOBAL OPTIONS:</text>
-<text x="28" y="368" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGIONS, $AWS_SSM_PARAMS_REGION]</text>
+<text x="28" y="368" xml:space="preserve">   --region string [ --region string ]  AWS region; repeat the flag for multiple regions; env accepts comma-separated values [$AWS_SSM_PARAMS_REGION]</text>
 <text x="28" y="388" xml:space="preserve">   --all-regions                        search parameters across all enabled AWS regions [$AWS_SSM_PARAMS_ALL_REGIONS]</text>
-<text x="28" y="408" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE, $AWS_PROFILE]</text>
-<text x="28" y="428" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR, $NO_COLOR]</text>
+<text x="28" y="408" xml:space="preserve">   --profile string                     AWS profile [$AWS_SSM_PARAMS_PROFILE]</text>
+<text x="28" y="428" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR]</text>
 <text x="28" y="448" xml:space="preserve">   --keymap string                      keyboard navigation style: emacs or vi (default: &quot;emacs&quot;) [$AWS_SSM_PARAMS_KEYMAP]</text>
 <text x="28" y="468" xml:space="preserve">   --log-level string                   log level: trace, debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL]</text>
-<text x="28" y="488" xml:space="preserve">   --filters-file string                file with filter groups; one OR group per line [$AWS_SSM_PARAMS_FILTERS_FILE]</text>
-<text x="28" y="508" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTERS, $AWS_SSM_PARAMS_FILTER]</text>
+<text x="28" y="488" xml:space="preserve">   --filters-file string                file with filter groups; one OR group per line [$AWS_SSM_PARAMS_FILTER_FILE]</text>
+<text x="28" y="508" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTER]</text>
 </svg>

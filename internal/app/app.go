@@ -336,14 +336,11 @@ func RejectCommaSeparatedFlagArgs(args []string, flagNames ...string) error {
 // CLI list values are provided by repeating flags; only environment variables may contain comma-separated lists.
 func ConfigFromCLI(ctx *CLIContext) (Config, error) {
 	allRegions := boolFlagValueAny(ctx, "all-regions", false, "AWS_SSM_PARAMS_ALL_REGIONS")
-	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGIONS", "AWS_SSM_PARAMS_REGION"))
+	regions := dedupeStrings(stringSliceFlagValue(ctx, "region", "AWS_SSM_PARAMS_REGION"))
 	if allRegions && len(regions) > 0 {
 		return Config{}, errors.New("--region and --all-regions cannot be used together")
 	}
 	profile := stringFlagValueAny(ctx, "profile", "", "AWS_SSM_PARAMS_PROFILE")
-	if profile == "" {
-		profile = os.Getenv("AWS_PROFILE")
-	}
 	region := ""
 	if len(regions) > 0 {
 		region = regions[0]
@@ -365,20 +362,20 @@ func ConfigFromCLI(ctx *CLIContext) (Config, error) {
 		return Config{}, fmt.Errorf("unsupported --keymap %q; expected emacs or vi", keymap)
 	}
 
-	fieldMappings, err := parseMapFields(stringSliceFlagValue(ctx, "map-field", "AWS_SSM_PARAMS_MAP_FIELDS", "AWS_SSM_PARAMS_MAP_FIELD"))
+	fieldMappings, err := parseMapFields(stringSliceFlagValue(ctx, "map-field", "AWS_SSM_PARAMS_MAP_FIELD"))
 	if err != nil {
 		return Config{}, err
 	}
-	fields, err := parseOutputFields(stringSliceFlagValue(ctx, "output-field", "AWS_SSM_PARAMS_OUTPUT_FIELDS", "AWS_SSM_PARAMS_OUTPUT_FIELD"))
+	fields, err := parseOutputFields(stringSliceFlagValue(ctx, "output-field", "AWS_SSM_PARAMS_OUTPUT_FIELD"))
 	if err != nil {
 		return Config{}, err
 	}
-	showColumns, err := ui.ParseColumnOption(strings.Join(stringSliceFlagValue(ctx, "show-column", "AWS_SSM_PARAMS_SHOW_COLUMNS"), ","))
+	showColumns, err := ui.ParseColumnOption(strings.Join(stringSliceFlagValue(ctx, "show-column", "AWS_SSM_PARAMS_SHOW_COLUMN"), ","))
 	if err != nil {
 		return Config{}, crerr.Wrap(err, "parse show columns")
 	}
-	filtersFile := strings.TrimSpace(stringFlagValueAny(ctx, "filters-file", "", "AWS_SSM_PARAMS_FILTERS_FILE"))
-	filterGroups, err := parseFilterGroups(stringSliceFlagValue(ctx, "filter", "AWS_SSM_PARAMS_FILTERS", "AWS_SSM_PARAMS_FILTER"), filtersFile)
+	filtersFile := strings.TrimSpace(stringFlagValueAny(ctx, "filters-file", "", "AWS_SSM_PARAMS_FILTER_FILE"))
+	filterGroups, err := parseFilterGroups(stringSliceFlagValue(ctx, "filter", "AWS_SSM_PARAMS_FILTER"), filtersFile)
 	if err != nil {
 		return Config{}, err
 	}
@@ -393,7 +390,7 @@ func ConfigFromCLI(ctx *CLIContext) (Config, error) {
 		Regions:                   regions,
 		Profile:                   profile,
 		AllRegions:                allRegions,
-		NoColor:                   boolFlagValueAny(ctx, "no-color", false, "AWS_SSM_PARAMS_NO_COLOR") || os.Getenv("NO_COLOR") != "",
+		NoColor:                   boolFlagValueAny(ctx, "no-color", false, "AWS_SSM_PARAMS_NO_COLOR"),
 		WithDecryption:            boolFlagValueAny(ctx, "with-decryption", false, "AWS_SSM_PARAMS_WITH_DECRYPTION"),
 		Keymap:                    keymap,
 		ShowColumns:               showColumns,

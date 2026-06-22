@@ -43,6 +43,38 @@ func TestTUIHelpUsesShowColumnFlag(t *testing.T) {
 	assert.False(t, strings.Contains(out.String(), "--columns"))
 }
 
+func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
+	cases := [][]string{
+		{"aws-ssm-params", "--help"},
+		{"aws-ssm-params", "tui", "--help"},
+		{"aws-ssm-params", "export", "--help"},
+		{"aws-ssm-params", "import", "--help"},
+	}
+	legacyEnvNames := []string{
+		"AWS_SSM_PARAMS_REGIONS",
+		"AWS_SSM_PARAMS_FILTERS",
+		"AWS_SSM_PARAMS_FILTERS_FILE",
+		"AWS_SSM_PARAMS_SHOW_COLUMNS",
+		"AWS_SSM_PARAMS_OUTPUT_FIELDS",
+		"AWS_SSM_PARAMS_MAP_FIELDS",
+		"AWS_PROFILE",
+		"$NO_COLOR",
+	}
+
+	for _, args := range cases {
+		cliApp := newCLIApp(args[1:])
+		var out bytes.Buffer
+		cliApp.Writer = &out
+
+		err := cliApp.Run(context.Background(), args)
+
+		require.NoError(t, err)
+		for _, legacyEnvName := range legacyEnvNames {
+			assert.NotContains(t, out.String(), legacyEnvName, strings.Join(args, " "))
+		}
+	}
+}
+
 func TestInteractiveCommandIsRemoved(t *testing.T) {
 	cliApp := newCLIApp([]string{"interactive", "--help"})
 	var out bytes.Buffer

@@ -63,10 +63,10 @@ func TestConfigFromCLIParsesRepeatedRegionsFiltersAndFields(t *testing.T) {
 }
 
 func TestConfigFromCLIUsesCommaSeparatedEnvironmentLists(t *testing.T) {
-	t.Setenv("AWS_SSM_PARAMS_REGIONS", "eu-north-1,eu-central-1")
-	t.Setenv("AWS_SSM_PARAMS_OUTPUT_FIELDS", "name,value")
-	t.Setenv("AWS_SSM_PARAMS_MAP_FIELDS", "name:title,value:text")
-	t.Setenv("AWS_SSM_PARAMS_SHOW_COLUMNS", "name,value")
+	t.Setenv("AWS_SSM_PARAMS_REGION", "eu-north-1,eu-central-1")
+	t.Setenv("AWS_SSM_PARAMS_OUTPUT_FIELD", "name,value")
+	t.Setenv("AWS_SSM_PARAMS_MAP_FIELD", "name:title,value:text")
+	t.Setenv("AWS_SSM_PARAMS_SHOW_COLUMN", "name,value")
 	t.Setenv("AWS_SSM_PARAMS_SORT_BY", "name:asc,type:desc")
 	t.Setenv("AWS_SSM_PARAMS_WITH_DECRYPTION", "true")
 
@@ -412,19 +412,19 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 func testCLIContext(t *testing.T, args []string) *CLIContext {
 	t.Helper()
 	return testCommandContext(t, []cli.Flag{
-		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGIONS", "AWS_SSM_PARAMS_REGION")},
+		&cli.StringSliceFlag{Name: "region", Sources: cli.EnvVars("AWS_SSM_PARAMS_REGION")},
 		&cli.BoolFlag{Name: "all-regions", Sources: cli.EnvVars("AWS_SSM_PARAMS_ALL_REGIONS")},
-		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE", "AWS_PROFILE")},
-		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR", "NO_COLOR")},
+		&cli.StringFlag{Name: "profile", Sources: cli.EnvVars("AWS_SSM_PARAMS_PROFILE")},
+		&cli.BoolFlag{Name: "no-color", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_COLOR")},
 		&cli.StringFlag{Name: "keymap", Value: "emacs", Sources: cli.EnvVars("AWS_SSM_PARAMS_KEYMAP")},
-		&cli.StringFlag{Name: "filters-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTERS_FILE")},
-		&cli.StringSliceFlag{Name: "filter", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTERS", "AWS_SSM_PARAMS_FILTER")},
-		&cli.StringSliceFlag{Name: "output-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_OUTPUT_FIELDS", "AWS_SSM_PARAMS_OUTPUT_FIELD")},
-		&cli.StringSliceFlag{Name: "map-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_MAP_FIELDS", "AWS_SSM_PARAMS_MAP_FIELD")},
+		&cli.StringFlag{Name: "filters-file", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTER_FILE")},
+		&cli.StringSliceFlag{Name: "filter", Sources: cli.EnvVars("AWS_SSM_PARAMS_FILTER")},
+		&cli.StringSliceFlag{Name: "output-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_OUTPUT_FIELD")},
+		&cli.StringSliceFlag{Name: "map-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_MAP_FIELD")},
 		&cli.BoolFlag{Name: "with-decryption", Sources: cli.EnvVars("AWS_SSM_PARAMS_WITH_DECRYPTION")},
 		&cli.BoolFlag{Name: "scalar"},
 		&cli.StringSliceFlag{Name: "sort-by", Sources: cli.EnvVars("AWS_SSM_PARAMS_SORT_BY")},
-		&cli.StringSliceFlag{Name: "show-column", Sources: cli.EnvVars("AWS_SSM_PARAMS_SHOW_COLUMNS")},
+		&cli.StringSliceFlag{Name: "show-column", Sources: cli.EnvVars("AWS_SSM_PARAMS_SHOW_COLUMN")},
 		&cli.BoolFlag{Name: "no-confirm-overwrite-file"},
 		&cli.BoolFlag{Name: "no-confirm-write-securestring"},
 		&cli.BoolFlag{Name: "no-confirm-delete-one"},
