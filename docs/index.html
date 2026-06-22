@@ -3,41 +3,673 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>aws-ssm-params</title>
+  <meta name="description" content="aws-ssm-params is a terminal UI and CLI for AWS SSM Parameter Store discovery, filtering, import, export, and editing." />
+  <title>aws-ssm-params documentation</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main>
-    <h1>aws-ssm-params</h1>
-    <p>A CLI/TUI for AWS SSM Parameter Store discovery, filtering, import, export, and editing.</p>
-    <h2>Commands</h2>
-    <pre><code>aws-ssm-params [global options] &lt;command&gt;
+  <header class="site-header">
+    <nav class="nav" aria-label="Main navigation">
+      <a class="brand" href="#top">aws-ssm-params</a>
+      <div class="nav-links">
+        <a href="#install">Install</a>
+        <a href="#commands">Commands</a>
+        <a href="#filters">Filters</a>
+        <a href="#tui">TUI</a>
+        <a href="#export">Export</a>
+        <a href="#import">Import</a>
+        <a href="#scenarios">Scenarios</a>
+      </div>
+    </nav>
+  </header>
 
-tui
-import
-export</code></pre>
-    <h2>Global options</h2>
-    <pre><code>--region value       repeat for multiple regions
---all-regions
---profile value
---no-color
---keymap value
---log-level value
---filter value
---filters-file path</code></pre>
-    <p>Global flags can be written before or after the command name. CLI lists use repeated flags. Comma-separated lists are supported only in environment variables such as <code>AWS_SSM_PARAMS_REGION</code>.</p>
-    <h2>Filters</h2>
-    <p>Filters use <code>field:extglob</code>. A bare filter is a <code>name</code> filter. Conditions inside one filter are joined by AND with <code>;</code>. Multiple filters are joined by OR.</p>
-    <pre><code>--filter 'name:/prod/*;region:eu*'
---filter '/app/prod/**'</code></pre>
-    <p><code>--filters-file</code> uses the same syntax with one OR group per line. Blank lines and <code>#</code> comments are ignored.</p>
-    <p>For imports, input data is parsed first, filters are applied to the parsed records, and only then are AWS describe/write requests performed.</p>
-    <h2>JSON fields</h2>
-    <p><code>--output-field aws_field</code> selects export fields, and <code>--map-field aws_field:file_field</code> maps AWS field names to import/export file field names. JSON and YAML use arrays by default. <code>--key-field name</code> switches JSON to an object or YAML to a map keyed by the selected AWS field. For imports from ordinary dotenv files, <code>--root-path /app/prod</code> prefixes relative keys such as <code>DATABASE_URL</code>.</p>
-    <h2>Import write policy</h2>
-    <p>By default, import creates missing parameters and updates existing parameters. Use <code>--on-create skip|error|ask</code> and <code>--on-update skip|error|ask</code> to change that behavior. <code>--continue-on-error</code> is available for import, and <code>--summary</code> prints final import counts.</p>
-    <h2>Scalar export</h2>
-    <p><code>export --output-field value --scalar</code> writes one selected field per matching parameter. JSON/YAML scalar export returns arrays, or keyed maps when combined with <code>--key-field</code>.</p>
+  <main id="top">
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">AWS Systems Manager Parameter Store</p>
+          <h1>Terminal UI and automation-friendly CLI for SSM parameters.</h1>
+          <p class="lead">
+            Inspect, filter, edit, import, and export parameters across one region, many regions,
+            or every enabled region in an AWS account. Keep secret values hidden by default and
+            keep stdout clean for scripts.
+          </p>
+          <div class="cta-row">
+            <a class="button primary" href="#quick-start">Quick start</a>
+            <a class="button" href="https://github.com/biptec/aws-ssm-params">GitHub</a>
+          </div>
+          <div class="terminal-command" aria-label="Homebrew install command"><span>$</span> brew install biptec/tools/aws-ssm-params</div>
+        </div>
+        <figure class="terminal-card">
+          <img src="assets/screens/01-main-inventory.svg" alt="TUI inventory table showing AWS SSM parameters" />
+        </figure>
+      </div>
+    </section>
+
+    <section class="section compact" id="features">
+      <div class="section-heading">
+        <p class="eyebrow">What it does</p>
+        <h2>One tool for interactive maintenance and scripted workflows.</h2>
+      </div>
+      <div class="cards four">
+        <article class="card">
+          <h3>Browse and edit</h3>
+          <p>Use the TUI to audit, search, sort, create, edit, and delete parameters.</p>
+        </article>
+        <article class="card">
+          <h3>Import and export</h3>
+          <p>Move data through dotenv, JSON, or YAML with explicit field mapping.</p>
+        </article>
+        <article class="card">
+          <h3>Safe secrets</h3>
+          <p>SecureString values stay hidden until you explicitly request decryption.</p>
+        </article>
+        <article class="card">
+          <h3>Multi-region</h3>
+          <p>Target one region, repeat <code>--region</code>, or scan every enabled region.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="install">
+      <div class="section-heading">
+        <p class="eyebrow">Installation</p>
+        <h2>Install with Homebrew or download a release binary.</h2>
+      </div>
+      <div class="split">
+        <div>
+          <h3>Homebrew Formula</h3>
+          <p>
+            The Homebrew tap uses a Formula, so the normal CLI install command works without
+            <code>--cask</code>.
+          </p>
+        </div>
+        <div class="code-block"><pre><code>brew install biptec/tools/aws-ssm-params
+
+# Or tap once and install by name:
+brew tap biptec/tools
+brew install aws-ssm-params</code></pre></div>
+      </div>
+      <div class="split reverse">
+        <div>
+          <h3>Build from source</h3>
+          <p>Go 1.24 or newer is required. Release CI uses the version configured in the workflow.</p>
+        </div>
+        <div class="code-block"><pre><code>git clone https://github.com/biptec/aws-ssm-params.git
+cd aws-ssm-params
+go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
+      </div>
+    </section>
+
+    <section class="section" id="quick-start">
+      <div class="section-heading">
+        <p class="eyebrow">Quick start</p>
+        <h2>Start with one region and one command.</h2>
+      </div>
+      <div class="command-grid">
+        <article class="command-card">
+          <h3>Open the TUI</h3>
+          <p>Browse parameters in one region.</p>
+          <pre><code>aws-ssm-params --region eu-north-1 tui</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Filter production parameters</h3>
+          <p>A bare path filter is treated as a <code>name</code> filter.</p>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter '/app/prod/**' \
+  tui</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Export to dotenv</h3>
+          <p>Write command output to stdout and redirect it to a file.</p>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/prod/**' \
+  export &gt; prod.env</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Import a dotenv file</h3>
+          <p>Use <code>--root-path</code> when dotenv keys are relative names.</p>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format dotenv \
+  --root-path /app/prod \
+  --summary &lt; .env</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="commands">
+      <div class="section-heading">
+        <p class="eyebrow">Command model</p>
+        <h2>Three commands: <code>tui</code>, <code>export</code>, and <code>import</code>.</h2>
+        <p>
+          There are no separate <code>get</code> or <code>put</code> commands. Use scalar export to read a
+          single value, import to write values, and the TUI for manual editing.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Command</th><th>Use it for</th><th>Example</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>tui</code></td>
+              <td>Interactive auditing, editing, creating, sorting, searching, and deletion.</td>
+              <td><code>aws-ssm-params --region eu-north-1 tui</code></td>
+            </tr>
+            <tr>
+              <td><code>export</code></td>
+              <td>Backups, scripts, local dotenv files, JSON/YAML migrations, and scalar values.</td>
+              <td><code>aws-ssm-params --region eu-north-1 export</code></td>
+            </tr>
+            <tr>
+              <td><code>import</code></td>
+              <td>Creating and updating parameters from dotenv, JSON, or YAML stdin.</td>
+              <td><code>aws-ssm-params --region eu-north-1 import &lt; params.yaml</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <strong>Flag placement:</strong> global flags may be written before or after the command name.
+        Repeated CLI list flags must be repeated. Comma-separated lists are accepted only in the
+        matching environment variable.
+      </div>
+      <div class="code-block"><pre><code>aws-ssm-params --region eu-north-1 export
+aws-ssm-params export --region eu-north-1
+
+# CLI lists use repeated flags:
+aws-ssm-params --region eu-north-1 --region eu-central-1 export
+
+# Env lists may use commas:
+AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export</code></pre></div>
+    </section>
+
+    <section class="section" id="globals">
+      <div class="section-heading">
+        <p class="eyebrow">Global options</p>
+        <h2>One flag, one tool-specific environment variable.</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Flag</th><th>Environment</th><th>When to use it</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>--region</code></td><td><code>AWS_SSM_PARAMS_REGION</code></td><td>Target one or more known regions.</td></tr>
+            <tr><td><code>--all-regions</code></td><td><code>AWS_SSM_PARAMS_ALL_REGIONS</code></td><td>Audit every enabled region.</td></tr>
+            <tr><td><code>--profile</code></td><td><code>AWS_SSM_PARAMS_PROFILE</code></td><td>Select an AWS profile or SSO profile.</td></tr>
+            <tr><td><code>--no-color</code></td><td><code>AWS_SSM_PARAMS_NO_COLOR</code></td><td>Disable color output for CI or plain logs.</td></tr>
+            <tr><td><code>--keymap</code></td><td><code>AWS_SSM_PARAMS_KEYMAP</code></td><td>Choose <code>emacs</code> or <code>vi</code> navigation.</td></tr>
+            <tr><td><code>--log-level</code></td><td><code>AWS_SSM_PARAMS_LOG_LEVEL</code></td><td>Enable <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code> logs.</td></tr>
+            <tr><td><code>--filters-file</code></td><td><code>AWS_SSM_PARAMS_FILTER_FILE</code></td><td>Load reusable filter groups from a file.</td></tr>
+            <tr><td><code>--filter</code></td><td><code>AWS_SSM_PARAMS_FILTER</code></td><td>Filter loaded, exported, imported, or displayed records.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="regions">
+      <div class="section-heading">
+        <p class="eyebrow">Credentials and regions</p>
+        <h2>Use AWS SDK credentials with explicit tool configuration.</h2>
+        <p>
+          The tool uses the AWS SDK for Go. Credentials may come from environment credentials,
+          shared config files, SSO profiles, web identity, or instance metadata. Region selection
+          starts with <code>--region</code> or <code>AWS_SSM_PARAMS_REGION</code>, then falls back to standard
+          AWS region configuration.
+        </p>
+      </div>
+      <div class="cards three">
+        <article class="card">
+          <h3>One region</h3>
+          <pre><code>aws-ssm-params --region eu-north-1 tui</code></pre>
+        </article>
+        <article class="card">
+          <h3>Several regions</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --region eu-central-1 \
+  export</code></pre>
+        </article>
+        <article class="card">
+          <h3>All enabled regions</h3>
+          <pre><code>aws-ssm-params \
+  --profile production \
+  --all-regions \
+  tui</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="fields">
+      <div class="section-heading">
+        <p class="eyebrow">Fields</p>
+        <h2>Use the same field names for filters, output, mappings, and sorting.</h2>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Field</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>SSM parameter name/path.</td></tr>
+            <tr><td><code>region</code></td><td>AWS region.</td></tr>
+            <tr><td><code>type</code></td><td><code>String</code>, <code>StringList</code>, or <code>SecureString</code>.</td></tr>
+            <tr><td><code>tier</code></td><td><code>Standard</code>, <code>Advanced</code>, or <code>Intelligent-Tiering</code>.</td></tr>
+            <tr><td><code>data-type</code></td><td>Usually <code>text</code>. Aliases: <code>datatype</code>, <code>data_type</code>.</td></tr>
+            <tr><td><code>policies</code></td><td>Advanced parameter policies JSON.</td></tr>
+            <tr><td><code>description</code></td><td>Parameter description.</td></tr>
+            <tr><td><code>value</code></td><td>Parameter value. SecureString requires <code>--with-decryption</code> for plaintext.</td></tr>
+            <tr><td><code>date</code></td><td>Last modified date. Aliases: <code>modified</code>, <code>last-modified-date</code>.</td></tr>
+            <tr><td><code>version</code></td><td>SSM parameter version.</td></tr>
+            <tr><td><code>len</code></td><td>Value length. Alias: <code>length</code>.</td></tr>
+            <tr><td><code>sha256</code></td><td>SHA-256 hash of the value. Alias: <code>hash</code>.</td></tr>
+            <tr><td><code>user</code></td><td>Last modified user/ARN when available.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="filters">
+      <div class="section-heading">
+        <p class="eyebrow">Filtering</p>
+        <h2>Path-aware extglob filters with AND/OR grouping.</h2>
+        <p>
+          A filter condition is <code>field:pattern</code>. A bare pattern is a <code>name</code> filter.
+          Semicolons inside one filter are AND. Repeated filters are OR.
+        </p>
+      </div>
+      <div class="split">
+        <div>
+          <h3>Filter examples</h3>
+          <ul class="feature-list">
+            <li><code>name:/prod/*</code> matches one level only.</li>
+            <li><code>name:/prod/**</code> matches recursively.</li>
+            <li><code>name:/prod/@(app|worker)/**</code> matches selected branches.</li>
+            <li><code>type:SecureString</code> filters by SSM type.</li>
+            <li><code>value:*token*</code> needs values to be loaded; SecureString needs decryption.</li>
+          </ul>
+        </div>
+        <div class="code-block"><pre><code># AND inside one group:
+aws-ssm-params \
+  --filter 'name:/app/prod/**;type:SecureString' \
+  export
+
+# OR with repeated filters:
+aws-ssm-params \
+  --filter 'name:/app/prod/**;type:SecureString' \
+  --filter 'name:/shared/prod/**;type:SecureString' \
+  export</code></pre></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Pattern</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>*</code></td><td>Match within one path segment only.</td></tr>
+            <tr><td><code>**</code></td><td>Match recursively and cross <code>/</code>.</td></tr>
+            <tr><td><code>?</code></td><td>Match one non-slash character.</td></tr>
+            <tr><td><code>[a-z]</code>, <code>[!abc]</code></td><td>Character class or negated class.</td></tr>
+            <tr><td><code>@(a|b)</code></td><td>Match one alternative.</td></tr>
+            <tr><td><code>?(a|b)</code></td><td>Match zero or one alternative.</td></tr>
+            <tr><td><code>+(a|b)</code></td><td>Match one or more alternatives.</td></tr>
+            <tr><td><code>*(a|b)</code></td><td>Match zero or more alternatives.</td></tr>
+            <tr><td><code>!(a|b)</code></td><td>Match anything except the alternatives.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="securestring">
+      <div class="section-heading">
+        <p class="eyebrow">SecureString</p>
+        <h2>Hidden by default, decrypted only when requested.</h2>
+        <p>
+          Existing SecureString values are not decrypted unless you pass <code>--with-decryption</code>.
+          This makes metadata audits safer and prevents accidental secret exposure in stdout or logs.
+        </p>
+      </div>
+      <div class="cards three">
+        <article class="card">
+          <h3>Audit safely</h3>
+          <p>Export names, metadata, versions, hashes, or lengths without revealing plaintext values.</p>
+        </article>
+        <article class="card">
+          <h3>Edit without revealing</h3>
+          <p>The TUI can replace a hidden SecureString value without displaying the old value.</p>
+        </article>
+        <article class="card">
+          <h3>Decrypt intentionally</h3>
+          <p>Use <code>--with-decryption</code> only for trusted terminals, files, and scripts.</p>
+        </article>
+      </div>
+      <div class="code-block"><pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/prod/api/token' \
+  export \
+  --with-decryption \
+  --output-field value \
+  --scalar</code></pre></div>
+    </section>
+
+    <section class="section" id="tui">
+      <div class="section-heading">
+        <p class="eyebrow">Command: tui</p>
+        <h2>Interactive inventory, editing, sorting, and deletion.</h2>
+      </div>
+      <div class="screen-grid">
+        <figure class="screen-card wide">
+          <img src="assets/screens/01-main-inventory.svg" alt="Main TUI inventory" />
+          <figcaption>Main inventory view with row status, optional columns, and shortcuts.</figcaption>
+        </figure>
+        <figure class="screen-card">
+          <img src="assets/screens/02-details.svg" alt="TUI details panel" />
+          <figcaption>Details panel for selected parameter metadata and value information.</figcaption>
+        </figure>
+        <figure class="screen-card">
+          <img src="assets/screens/06-edit-parameter.svg" alt="TUI edit parameter form" />
+          <figcaption>Edit values, descriptions, policies, tier, type, overwrite behavior, and data type.</figcaption>
+        </figure>
+        <figure class="screen-card">
+          <img src="assets/screens/03-columns-popup.svg" alt="TUI columns popup" />
+          <figcaption>Columns popup for table density and audit views.</figcaption>
+        </figure>
+        <figure class="screen-card">
+          <img src="assets/screens/04-sort-popup.svg" alt="TUI sort popup" />
+          <figcaption>Sort by visible columns and toggle direction.</figcaption>
+        </figure>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Environment</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>--with-decryption</code></td><td><code>AWS_SSM_PARAMS_WITH_DECRYPTION</code></td><td>Load real SecureString values.</td></tr>
+            <tr><td><code>--show-column</code></td><td><code>AWS_SSM_PARAMS_SHOW_COLUMN</code></td><td>Show optional table columns such as <code>type</code>, <code>value</code>, <code>region</code>, <code>sha256</code>.</td></tr>
+            <tr><td><code>--sort-by</code></td><td><code>AWS_SSM_PARAMS_SORT_BY</code></td><td>Initial sort, repeated in priority order.</td></tr>
+            <tr><td><code>--no-confirm-overwrite-file</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE</code></td><td>Skip local overwrite confirmation.</td></tr>
+            <tr><td><code>--no-confirm-write-securestring</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING</code></td><td>Skip confirmation before writing secrets to local files.</td></tr>
+            <tr><td><code>--no-confirm-delete-one</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE</code></td><td>Skip confirmation for deleting one selected parameter.</td></tr>
+            <tr><td><code>--no-confirm-delete-all</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL</code></td><td>Skip confirmation for deleting all visible parameters.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="code-block"><pre><code># Load an explicit expected inventory from stdin.
+cat expected-params.txt | aws-ssm-params --region eu-north-1 tui
+
+# Show metadata columns and start sorted by type, then name.
+aws-ssm-params \
+  --region eu-north-1 \
+  tui \
+  --show-column type \
+  --show-column tier \
+  --show-column sha256 \
+  --sort-by type:asc \
+  --sort-by name:asc</code></pre></div>
+    </section>
+
+    <section class="section" id="export">
+      <div class="section-heading">
+        <p class="eyebrow">Command: export</p>
+        <h2>Write stable, scriptable output to stdout.</h2>
+        <p>
+          Export supports dotenv, JSON, YAML, selected fields, field mapping, scalar output, multi-region
+          sorting, and optional SecureString decryption.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Environment</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>--output-field</code></td><td><code>AWS_SSM_PARAMS_OUTPUT_FIELD</code></td><td>Include selected AWS fields.</td></tr>
+            <tr><td><code>--map-field</code></td><td><code>AWS_SSM_PARAMS_MAP_FIELD</code></td><td>Rename AWS fields in file output.</td></tr>
+            <tr><td><code>--sort-by</code></td><td><code>AWS_SSM_PARAMS_SORT_BY</code></td><td>Sort records before writing.</td></tr>
+            <tr><td><code>--with-decryption</code></td><td><code>AWS_SSM_PARAMS_WITH_DECRYPTION</code></td><td>Decrypt SecureString values.</td></tr>
+            <tr><td><code>--format</code></td><td>—</td><td><code>dotenv</code>, <code>json</code>, or <code>yaml</code>. Default is <code>dotenv</code>.</td></tr>
+            <tr><td><code>--key-field</code></td><td>—</td><td>Write JSON/YAML as an object/map keyed by a field.</td></tr>
+            <tr><td><code>--scalar</code></td><td>—</td><td>Write exactly one selected output field as scalar values.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="command-grid">
+        <article class="command-card">
+          <h3>JSON backup</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/prod/**' \
+  export \
+  --with-decryption \
+  --format json &gt; prod-params.json</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Scalar value</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/prod/api/token' \
+  export \
+  --with-decryption \
+  --output-field value \
+  --scalar</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Mapped fields</h3>
+          <pre><code>aws-ssm-params export \
+  --format json \
+  --map-field name:title \
+  --map-field value:text</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Audit view</h3>
+          <pre><code>aws-ssm-params \
+  --all-regions \
+  --filter 'type:SecureString' \
+  export \
+  --format yaml \
+  --output-field region \
+  --output-field name \
+  --output-field version \
+  --sort-by region:asc \
+  --sort-by name:asc</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="import">
+      <div class="section-heading">
+        <p class="eyebrow">Command: import</p>
+        <h2>Create and update parameters from stdin.</h2>
+        <p>
+          Import is upsert by default: missing parameters are created and existing parameters are updated.
+          Use <code>--on-create</code> and <code>--on-update</code> to make it safer or interactive.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Purpose</th><th>Use when</th></tr></thead>
+          <tbody>
+            <tr><td><code>--format</code></td><td>Input format: <code>dotenv</code>, <code>json</code>, or <code>yaml</code>.</td><td>Choose parser for stdin.</td></tr>
+            <tr><td><code>--map-field</code></td><td>Map input file keys to AWS fields.</td><td>Your JSON/YAML schema uses custom names.</td></tr>
+            <tr><td><code>--key-field</code></td><td>Use JSON/YAML object keys as an AWS field.</td><td>Input is keyed by name or another field.</td></tr>
+            <tr><td><code>--root-path</code></td><td>Prefix relative names.</td><td>Importing ordinary dotenv keys.</td></tr>
+            <tr><td><code>--on-create</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control missing parameter behavior.</td></tr>
+            <tr><td><code>--on-update</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control existing parameter behavior.</td></tr>
+            <tr><td><code>--continue-on-error</code></td><td>Continue after per-record failures.</td><td>Bulk imports where one bad row should not stop the run.</td></tr>
+            <tr><td><code>--summary</code></td><td>Print created/updated/skipped/failed counts.</td><td>You want an import report.</td></tr>
+            <tr><td><code>--default-type</code></td><td>Default type: <code>string</code>, <code>string-list</code>, <code>secure-string</code>.</td><td>Input does not include type.</td></tr>
+            <tr><td><code>--default-tier</code></td><td>Default tier: <code>standard</code>, <code>advanced</code>, <code>intelligent-tiering</code>.</td><td>Input does not include tier.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="command-grid">
+        <article class="command-card">
+          <h3>Dotenv under a root path</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format dotenv \
+  --root-path /app/prod \
+  --summary &lt; .env</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Ask before writes</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format yaml \
+  --on-create ask \
+  --on-update ask \
+  --summary &lt; params.yaml</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Create only</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format json \
+  --on-update error \
+  --summary &lt; new-params.json</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Update only</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format yaml \
+  --on-create skip \
+  --summary &lt; updates.yaml</code></pre>
+        </article>
+      </div>
+      <div class="note">
+        Import supports one target region at a time. <code>--all-regions</code> and multiple
+        <code>--region</code> values are intentionally not supported for writes.
+      </div>
+    </section>
+
+    <section class="section" id="formats">
+      <div class="section-heading">
+        <p class="eyebrow">Formats</p>
+        <h2>Choose dotenv for local files, JSON/YAML for structured migration.</h2>
+      </div>
+      <div class="cards three">
+        <article class="card">
+          <h3>Dotenv</h3>
+          <p>Best for local development and simple secret files. Export includes SSM comments when possible.</p>
+          <pre><code># ssm: /app/prod/api/token
+# type: SecureString
+API_TOKEN="secret"</code></pre>
+        </article>
+        <article class="card">
+          <h3>JSON</h3>
+          <p>Best for scripts, reviewable diffs, and automation. Supports arrays and keyed objects.</p>
+          <pre><code>{
+  "/app/prod/api/token": {
+    "type": "SecureString",
+    "value": "secret"
+  }
+}</code></pre>
+        </article>
+        <article class="card">
+          <h3>YAML</h3>
+          <p>Best for human-edited migration files. Supports arrays and keyed maps.</p>
+          <pre><code>/app/prod/api/token:
+  type: SecureString
+  value: secret</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="logging">
+      <div class="section-heading">
+        <p class="eyebrow">Logging</p>
+        <h2>Logs go to stderr; command data stays on stdout.</h2>
+        <p>
+          Logging is disabled by default. Enable <code>debug</code> or <code>trace</code> when diagnosing AWS
+          calls. Trace logs include low-level AWS HTTP timing diagnostics. SecureString values are
+          masked in logs.
+        </p>
+      </div>
+      <div class="code-block"><pre><code>aws-ssm-params --log-level debug export &gt; params.json 2&gt;debug.log
+
+aws-ssm-params \
+  --all-regions \
+  --log-level trace \
+  --filter 'name:/app/prod/**' \
+  export &gt; params.json 2&gt;trace.log</code></pre></div>
+    </section>
+
+    <section class="section" id="scenarios">
+      <div class="section-heading">
+        <p class="eyebrow">Scenarios</p>
+        <h2>Practical command patterns.</h2>
+      </div>
+      <div class="command-grid">
+        <article class="command-card">
+          <h3>Metadata-only SecureString audit</h3>
+          <pre><code>aws-ssm-params \
+  --all-regions \
+  --filter 'type:SecureString' \
+  export \
+  --format yaml \
+  --output-field region \
+  --output-field name \
+  --output-field version \
+  --output-field date</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Generate local dev env</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/dev/**' \
+  export \
+  --with-decryption \
+  --format dotenv &gt; .env.local</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Migrate selected parameters</h3>
+          <pre><code>aws-ssm-params --region eu-north-1 \
+  --filter 'name:/app/prod/**' \
+  export --with-decryption --format json &gt; params.json
+
+aws-ssm-params --region eu-central-1 \
+  import --format json --summary &lt; params.json</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Find cleanup candidates</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/!(prod|stage)/**' \
+  tui \
+  --show-column type \
+  --show-column date</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="release">
+      <div class="section-heading">
+        <p class="eyebrow">Release</p>
+        <h2>GoReleaser builds assets and publishes the Homebrew Formula.</h2>
+        <p>
+          Tag releases build Linux, macOS, and Windows artifacts, generate checksums, create the GitHub
+          Release, and update <code>Formula/aws-ssm-params.rb</code> in the Homebrew tap.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Secret</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>GITHUB_TOKEN</code></td><td>Create or update the release in this repository.</td></tr>
+            <tr><td><code>HOMEBREW_TAP_GITHUB_TOKEN</code></td><td>Commit the updated formula to <code>biptec/homebrew-tools</code>.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
+
+  <footer class="footer">
+    <span>MIT License</span>
+    <span><a href="https://github.com/biptec/aws-ssm-params">GitHub</a> · <a href="#top">Back to top</a></span>
+  </footer>
 </body>
 </html>
