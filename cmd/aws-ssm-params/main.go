@@ -9,6 +9,9 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/biptec/aws-ssm-params/internal/app"
+	exportcmd "github.com/biptec/aws-ssm-params/internal/app/export"
+	importcmd "github.com/biptec/aws-ssm-params/internal/app/import"
+	tuicmd "github.com/biptec/aws-ssm-params/internal/app/tui"
 )
 
 func globalFlags() []cli.Flag {
@@ -59,7 +62,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					&cli.BoolFlag{Name: "no-confirm-delete-all", Sources: cli.EnvVars("AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL"), Usage: "do not ask before deleting all visible parameters in the TUI"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), true, app.Interactive)
+					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), true, tuicmd.Run)
 				},
 			},
 			{
@@ -87,7 +90,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					&cli.StringFlag{Name: "default-policies-file", Usage: "read default parameter policies JSON from file"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), false, app.Import)
+					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), false, importcmd.Run)
 				},
 			},
 			{
@@ -107,7 +110,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					&cli.BoolFlag{Name: "scalar", Usage: "write exactly one selected --output-field as scalar values instead of records"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
-					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), false, app.Export)
+					return app.RunWithLogging(app.NewCLIContext(ctx, cmd), false, exportcmd.Run)
 				},
 			},
 		},

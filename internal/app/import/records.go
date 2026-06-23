@@ -1,4 +1,4 @@
-package app
+package importer
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
@@ -16,9 +17,10 @@ type strictMetadataDescriber interface {
 	DescribeManyStrict(context.Context, []string) (map[string]ssm.Metadata, map[string]error)
 }
 
-type importRecords []textio.Record
+// Records is the command-specific collection of imported text records.
+type Records []textio.Record
 
-func (records importRecords) withRootPath(rootPath string) (importRecords, error) {
+func (records Records) withRootPath(rootPath string) (Records, error) {
 	rootPath = strings.TrimSpace(rootPath)
 	if rootPath != "" {
 		if !strings.HasPrefix(rootPath, "/") {
@@ -29,7 +31,7 @@ func (records importRecords) withRootPath(rootPath string) (importRecords, error
 			rootPath = "/"
 		}
 	}
-	resolved := make(importRecords, 0, len(records))
+	resolved := make(Records, 0, len(records))
 	for idx := range records {
 		record := records[idx]
 		path := strings.TrimSpace(record.Path)
@@ -54,11 +56,11 @@ func (records importRecords) withRootPath(rootPath string) (importRecords, error
 	return resolved, nil
 }
 
-func (records importRecords) filter(groups filter.Groups) importRecords {
+func (records Records) filter(groups filter.Groups) Records {
 	if len(groups) == 0 {
 		return records
 	}
-	out := make(importRecords, 0, len(records))
+	out := make(Records, 0, len(records))
 	for i := range records {
 		if groups.Match(filter.Record{
 			Name:        records[i].Path,
@@ -76,11 +78,12 @@ func (records importRecords) filter(groups filter.Groups) importRecords {
 	return out
 }
 
-type importMetadataResolver struct {
+// MetadataResolver loads existing SSM metadata grouped by record region.
+type MetadataResolver struct {
 	ctx     context.Context
 	client  ssm.Client
-	records importRecords
-	cfg     Config
+	records Records
+	cfg     app.Config
 }
 
 func recordKey(region, path string) string {
@@ -108,7 +111,7 @@ func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.Paramete
 	return parameterType, nil
 }
 
-func recordRegion(record textio.Record, cfg Config) string {
+func recordRegion(record textio.Record, cfg app.Config) string {
 	if cfg.Fields.Allows(textio.FieldRegion) &&
 		record.HasField(textio.FieldRegion) &&
 		strings.TrimSpace(record.Region) != "" {
@@ -117,7 +120,7 @@ func recordRegion(record textio.Record, cfg Config) string {
 	return cfg.Region
 }
 
-func (resolver importMetadataResolver) resolve() (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
+func (resolver MetadataResolver) resolve() (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
 	pathsByRegion := map[string][]string{}
 	seen := map[string]bool{}
 	for i := range resolver.records {
@@ -148,7 +151,7 @@ func (resolver importMetadataResolver) resolve() (metadataByKey map[string]ssm.M
 	return metadata, errs
 }
 
-func resolveImportType(defaultType string, existing ssm.Metadata, exists bool, record textio.Record, cfg Config) (ssm.ParameterType, error) {
+func resolveType(defaultType string, existing ssm.Metadata, exists bool, record textio.Record, cfg app.Config) (ssm.ParameterType, error) {
 	recordType := ""
 	if cfg.Fields.Allows(textio.FieldType) &&
 		record.HasField(textio.FieldType) &&

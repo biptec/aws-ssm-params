@@ -10,10 +10,10 @@ import (
 
 const allRegionsSeedRegion = "us-east-1"
 
-// ensureRegions guarantees that non-all-regions commands have one usable AWS region.
+// EnsureRegions guarantees that non-all-regions commands have one usable AWS region.
 // It first asks the AWS SDK profile configuration if CLI/env flags did not provide a region, then mirrors the
 // resolved primary region into cfg.Regions when the user did not pass an explicit list.
-func ensureRegions(ctx context.Context, cfg *Config) error {
+func EnsureRegions(ctx context.Context, cfg *Config) error {
 	if cfg.AllRegions {
 		return nil
 	}

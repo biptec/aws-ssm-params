@@ -1,4 +1,5 @@
-package app
+// Package tui implements the interactive terminal command.
+package tui
 
 import (
 	"os"
@@ -6,29 +7,31 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
-type interactiveCommand struct {
-	ctx         *CLIContext
-	cfg         Config
+// Command owns the configuration and input mode of one TUI invocation.
+type Command struct {
+	ctx         *app.CLIContext
+	cfg         app.Config
 	useTTYInput bool
 }
 
-// Interactive opens the terminal UI.
-func Interactive(ctx *CLIContext) error {
-	command := interactiveCommand{ctx: ctx}
+// Run opens the terminal UI.
+func Run(ctx *app.CLIContext) error {
+	command := Command{ctx: ctx}
 	return command.run()
 }
 
-func (command *interactiveCommand) run() error {
+func (command *Command) run() error {
 	if err := command.prepare(); err != nil {
 		return err
 	}
-	client := NewClient(command.cfg)
+	client := app.NewClient(command.cfg)
 	if err := client.CheckAccess(command.ctx.Context); err != nil {
 		return errors.Wrap(err, "check AWS access")
 	}
@@ -39,19 +42,19 @@ func (command *interactiveCommand) run() error {
 	return errors.Wrap(ui.RunInteractive(command.ctx.Context, client, command.cfg.InventoryItems, command.options(regionLabel, regions)), "run interactive")
 }
 
-func (command *interactiveCommand) prepare() error {
-	cfg, err := ConfigFromCLI(command.ctx)
+func (command *Command) prepare() error {
+	cfg, err := app.ConfigFromCLI(command.ctx)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
-	stdinItems, useTTYInput, err := loadInteractiveInventoryFromStdin()
+	stdinItems, useTTYInput, err := loadInventoryFromStdin()
 	if err != nil {
 		return err
 	}
 	cfg.InventoryItems = append(cfg.InventoryItems, stdinItems...)
-	items, err := PrepareItems(command.ctx.Context, &cfg)
+	items, err := app.PrepareItems(command.ctx.Context, &cfg)
 	if err != nil {
-		return err
+		return errors.WithStack(err)
 	}
 	cfg.InventoryItems = items
 	command.cfg = cfg
@@ -59,7 +62,7 @@ func (command *interactiveCommand) prepare() error {
 	return nil
 }
 
-func (command interactiveCommand) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
+func (command Command) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
 	regionLabel = command.cfg.Region
 	regions = append([]string(nil), command.cfg.Regions...)
 	if command.cfg.AllRegions {
@@ -74,7 +77,7 @@ func (command interactiveCommand) regionSelection(client ssm.Client) (regionLabe
 	return regionLabel, regions, nil
 }
 
-func (command interactiveCommand) options(regionLabel string, regions []string) ui.Options {
+func (command Command) options(regionLabel string, regions []string) ui.Options {
 	cfg := command.cfg
 	return ui.Options{
 		Region:                    regionLabel,
@@ -96,7 +99,7 @@ func (command interactiveCommand) options(regionLabel string, regions []string) 
 	}
 }
 
-func loadInteractiveInventoryFromStdin() (inventory.Items, bool, error) {
+func loadInventoryFromStdin() (inventory.Items, bool, error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return nil, false, errors.Wrap(err, "stat stdin")

@@ -1,4 +1,4 @@
-package app
+package export
 
 import (
 	"fmt"
@@ -7,17 +7,29 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
-type exportSortRule struct {
+// SortRule describes one canonical field and direction used for export ordering.
+type SortRule struct {
 	field      string
 	descending bool
 }
 
-func (rule exportSortRule) value(status ui.Status) string {
+func compactStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func (rule SortRule) value(status ui.Status) string {
 	switch rule.field {
 	case textio.FieldName:
 		return status.Item.Path
@@ -50,9 +62,10 @@ func (rule exportSortRule) value(status ui.Status) string {
 	}
 }
 
-type exportSortRules []exportSortRule
+// SortRules is the ordered set of rules applied to exported statuses.
+type SortRules []SortRule
 
-func (rules exportSortRules) requiresValues() bool {
+func (rules SortRules) requiresValues() bool {
 	for _, rule := range rules {
 		switch rule.field {
 		case textio.FieldValue, textio.FieldLen, textio.FieldSHA256:
@@ -62,15 +75,15 @@ func (rules exportSortRules) requiresValues() bool {
 	return false
 }
 
-func parseExportSortRules(values []string) exportSortRules {
-	rules := make(exportSortRules, 0, len(values))
+func parseSortRules(values []string) SortRules {
+	rules := make(SortRules, 0, len(values))
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
 		}
 		parts := strings.Split(value, ":")
-		field, ok := normalizeExportSortField(parts[0])
+		field, ok := normalizeSortField(parts[0])
 		if !ok {
 			continue
 		}
@@ -86,7 +99,7 @@ func parseExportSortRules(values []string) exportSortRules {
 	return rules
 }
 
-func normalizeExportSortField(field string) (string, bool) {
+func normalizeSortField(field string) (string, bool) {
 	field = strings.ToLower(strings.TrimSpace(field))
 	switch field {
 	case textio.FieldName, "path":
@@ -110,17 +123,17 @@ func normalizeExportSortField(field string) (string, bool) {
 	}
 }
 
-func (rules exportSortRules) with(field string, descending bool) exportSortRules {
-	out := make(exportSortRules, 0, len(rules)+1)
+func (rules SortRules) with(field string, descending bool) SortRules {
+	out := make(SortRules, 0, len(rules)+1)
 	for _, rule := range rules {
 		if rule.field != field {
 			out = append(out, rule)
 		}
 	}
-	return append(out, exportSortRule{field: field, descending: descending})
+	return append(out, SortRule{field: field, descending: descending})
 }
 
-func (rules exportSortRules) sort(statuses ui.Statuses) {
+func (rules SortRules) sort(statuses ui.Statuses) {
 	if len(rules) == 0 {
 		return
 	}
@@ -144,7 +157,7 @@ func (rules exportSortRules) sort(statuses ui.Statuses) {
 	})
 }
 
-var allExportFields = textio.Fields{
+var allFields = textio.Fields{
 	textio.FieldName,
 	textio.FieldRegion,
 	textio.FieldType,
@@ -160,14 +173,14 @@ var allExportFields = textio.Fields{
 	textio.FieldUser,
 }
 
-func exportFields(cfg Config) textio.Fields {
+func fieldsForConfig(cfg app.Config) textio.Fields {
 	if len(cfg.Fields) == 0 {
-		return append(textio.Fields(nil), allExportFields...)
+		return append(textio.Fields(nil), allFields...)
 	}
 	return append(textio.Fields(nil), cfg.Fields...)
 }
 
-func scalarExportField(ctx *CLIContext, cfg Config) (string, error) {
+func scalarField(ctx *app.CLIContext, cfg app.Config) (string, error) {
 	if !ctx.Bool("scalar") {
 		return "", nil
 	}
@@ -191,11 +204,11 @@ func validateKeyFieldOutputFields(keyField string, outputFields textio.Fields) e
 	return nil
 }
 
-func exportRecordFields(fields textio.Fields, scalarField, keyField string) textio.Fields {
+func recordFields(fields textio.Fields, scalarField, keyField string) textio.Fields {
 	return fields.With(strings.TrimSpace(scalarField), strings.TrimSpace(keyField))
 }
 
-func exportRecordFromStatus(status ui.Status, fields textio.Fields) textio.Record {
+func recordFromStatus(status ui.Status, fields textio.Fields) textio.Record {
 	record := textio.Record{Path: status.Item.Path, Fields: fields}
 	if fields.Contains(textio.FieldRegion) {
 		record.Region = status.Item.Region

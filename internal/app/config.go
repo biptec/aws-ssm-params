@@ -47,7 +47,8 @@ type configBuilder struct {
 	ctx *CLIContext
 }
 
-func (cfg Config) requireField(field, command string) error {
+// RequireField validates that field is available under the configured output-field restrictions.
+func (cfg Config) RequireField(field, command string) error {
 	if !cfg.Fields.Allows(field) {
 		return fmt.Errorf("%s requires field %q; remove --output-field restrictions or include %s", command, field, field)
 	}

@@ -1,21 +1,23 @@
-package app
+package importer
 
 import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
-type importOptionsResolver struct {
+// OptionsResolver combines command defaults, existing metadata, and imported record metadata.
+type OptionsResolver struct {
 	defaults ssm.PutParameterOptions
-	cfg      Config
+	cfg      app.Config
 }
 
-func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions, error) {
+func defaultOptions(ctx *app.CLIContext, cfg app.Config) (ssm.PutParameterOptions, error) {
 	tier, err := ssm.ParseParameterTier(ctx.String("default-tier"))
 	if err != nil {
 		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default tier")
@@ -48,7 +50,7 @@ func importDefaultOptions(ctx *CLIContext, cfg Config) (ssm.PutParameterOptions,
 	return opts, nil
 }
 
-func (resolver importOptionsResolver) forRecord(record textio.Record, cloud ssm.Metadata, exists bool) (ssm.PutParameterOptions, error) {
+func (resolver OptionsResolver) forRecord(record textio.Record, cloud ssm.Metadata, exists bool) (ssm.PutParameterOptions, error) {
 	opts := resolver.defaults
 	cfg := resolver.cfg
 	if exists {

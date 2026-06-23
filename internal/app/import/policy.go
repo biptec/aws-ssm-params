@@ -1,4 +1,4 @@
-package app
+package importer
 
 import (
 	"bufio"
@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/app"
 )
 
 type writePolicyAction string
@@ -39,7 +41,7 @@ const (
 	writeOperationUpdate writeOperation = "update"
 )
 
-func parseWritePolicy(ctx *CLIContext) (writePolicy, error) {
+func parseWritePolicy(ctx *app.CLIContext) (writePolicy, error) {
 	onCreate, err := parseWritePolicyAction(ctx.String("on-create"), "on-create")
 	if err != nil {
 		return writePolicy{}, err

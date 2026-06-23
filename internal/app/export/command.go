@@ -1,4 +1,5 @@
-package app
+// Package export implements the export command.
+package export
 
 import (
 	"io"
@@ -7,6 +8,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -14,20 +16,20 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
-// Export loads statuses for the requested inventory and writes existing parameter values to stdout.
-func Export(ctx *CLIContext) error {
-	command, err := newExportCommand(ctx, os.Stdout)
+// Run loads statuses for the requested inventory and writes existing parameter values to stdout.
+func Run(ctx *app.CLIContext) error {
+	command, err := newCommand(ctx, os.Stdout)
 	if err != nil {
 		return err
 	}
 	return command.run()
 }
 
-// exportCommand owns the state and dependencies of one export invocation.
+// Command owns the state and dependencies of one export invocation.
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.
-type exportCommand struct {
-	ctx          *CLIContext
-	cfg          Config
+type Command struct {
+	ctx          *app.CLIContext
+	cfg          app.Config
 	client       ssm.Client
 	writer       textio.Writer
 	items        inventory.Items
@@ -36,19 +38,19 @@ type exportCommand struct {
 	keyField     string
 	scalarField  string
 	recordFields textio.Fields
-	sortRules    exportSortRules
+	sortRules    SortRules
 }
 
-func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error) {
-	cfg, err := ConfigFromCLI(ctx)
+func newCommand(ctx *app.CLIContext, output io.Writer) (*Command, error) {
+	cfg, err := app.ConfigFromCLI(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
-	items, err := PrepareItems(ctx.Context, &cfg)
+	items, err := app.PrepareItems(ctx.Context, &cfg)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
-	client := NewClient(cfg)
+	client := app.NewClient(cfg)
 	regions := append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
 		regions, err = client.ListRegions(ctx.Context)
@@ -57,7 +59,7 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 		}
 	}
 
-	scalarField, err := scalarExportField(ctx, cfg)
+	scalarField, err := scalarField(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -65,8 +67,8 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 	if err := validateKeyFieldOutputFields(keyField, cfg.Fields); err != nil {
 		return nil, err
 	}
-	fields := exportFields(cfg)
-	return &exportCommand{
+	fields := fieldsForConfig(cfg)
+	return &Command{
 		ctx:          ctx,
 		cfg:          cfg,
 		client:       client,
@@ -76,12 +78,12 @@ func newExportCommand(ctx *CLIContext, output io.Writer) (*exportCommand, error)
 		output:       output,
 		keyField:     keyField,
 		scalarField:  scalarField,
-		recordFields: exportRecordFields(fields, scalarField, keyField),
-		sortRules:    parseExportSortRules(cfg.SortColumns),
+		recordFields: recordFields(fields, scalarField, keyField),
+		sortRules:    parseSortRules(cfg.SortColumns),
 	}, nil
 }
 
-func (command *exportCommand) run() error {
+func (command *Command) run() error {
 	statuses := command.loadStatuses()
 	command.sortRules.sort(statuses)
 	records := command.records(statuses)
@@ -95,7 +97,7 @@ func (command *exportCommand) run() error {
 	return errors.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
 }
 
-func (command *exportCommand) loadStatuses() ui.Statuses {
+func (command *Command) loadStatuses() ui.Statuses {
 	includeValues := command.cfg.WithDecryption ||
 		command.recordFields.RequiresValues() ||
 		command.cfg.FilterGroups.HasField(filter.FieldValue) ||
@@ -126,11 +128,11 @@ func (command *exportCommand) loadStatuses() ui.Statuses {
 	return statuses
 }
 
-func (command *exportCommand) records(statuses ui.Statuses) textio.Records {
+func (command *Command) records(statuses ui.Statuses) textio.Records {
 	records := make(textio.Records, 0, len(statuses))
 	for i := range statuses {
 		if statuses[i].Exists {
-			records = append(records, exportRecordFromStatus(statuses[i], command.recordFields))
+			records = append(records, recordFromStatus(statuses[i], command.recordFields))
 		}
 	}
 	return records

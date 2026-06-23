@@ -13,7 +13,7 @@ func PrepareItems(ctx context.Context, cfg *Config) (inventory.Items, error) {
 		ensureAllRegionsSeedRegion(cfg)
 		return items.WithDefaultRegion("*"), nil
 	}
-	if err := ensureRegions(ctx, cfg); err != nil {
+	if err := EnsureRegions(ctx, cfg); err != nil {
 		return nil, err
 	}
 	if len(items) == 0 {

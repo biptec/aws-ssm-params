@@ -1,4 +1,5 @@
-package app
+// Package importer implements the import command.
+package importer
 
 import (
 	"fmt"
@@ -8,47 +9,49 @@ import (
 
 	"github.com/cockroachdb/errors"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
-// Import reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
-func Import(ctx *CLIContext) error {
-	command, err := newImportCommand(ctx, nil, os.Stderr)
+// Run reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
+func Run(ctx *app.CLIContext) error {
+	command, err := newCommand(ctx, nil, os.Stderr)
 	if err != nil {
 		return err
 	}
 	return command.run()
 }
 
-// importCommand owns the mutable state and dependencies of one import invocation.
-type importCommand struct {
-	ctx             *CLIContext
-	cfg             Config
+// Command owns the mutable state and dependencies of one import invocation.
+type Command struct {
+	ctx             *app.CLIContext
+	cfg             app.Config
 	client          ssm.Client
-	records         importRecords
+	records         Records
 	metadata        map[string]ssm.Metadata
 	metadataErrors  map[string]error
-	optionsResolver importOptionsResolver
+	optionsResolver OptionsResolver
 	policy          writePolicy
 	continueOnError bool
 	summaryEnabled  bool
 	summaryOutput   io.Writer
-	summary         importSummary
+	summary         Summary
 	recordErrors    []string
 }
 
-type importSummary struct {
+// Summary contains the final per-operation import counters.
+type Summary struct {
 	Created int
 	Updated int
 	Skipped int
 	Failed  int
 }
 
-func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer) (*importCommand, error) {
-	cfg, err := ConfigFromCLI(ctx)
+func newCommand(ctx *app.CLIContext, input io.Reader, summaryOutput io.Writer) (*Command, error) {
+	cfg, err := app.ConfigFromCLI(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.WithStack(err)
 	}
 	if defaultRegion := strings.TrimSpace(ctx.String("default-region")); defaultRegion != "" && cfg.Region == "" {
 		cfg.Region = defaultRegion
@@ -60,8 +63,8 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 	if len(cfg.Regions) > 1 {
 		return nil, errors.New("multiple --region values are only supported for tui and export")
 	}
-	if err := ensureRegions(ctx.Context, &cfg); err != nil {
-		return nil, err
+	if err := app.EnsureRegions(ctx.Context, &cfg); err != nil {
+		return nil, errors.WithStack(err)
 	}
 	if input == nil {
 		input, err = stdinReader()
@@ -77,15 +80,15 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 	if err != nil {
 		return nil, errors.Wrap(err, "read import")
 	}
-	records, err := importRecords(parsedRecords).withRootPath(ctx.String("root-path"))
+	records, err := Records(parsedRecords).withRootPath(ctx.String("root-path"))
 	if err != nil {
 		return nil, err
 	}
 	records = records.filter(cfg.FilterGroups)
-	if err := cfg.requireField(textio.FieldValue, "import"); err != nil {
-		return nil, err
+	if err := cfg.RequireField(textio.FieldValue, "import"); err != nil {
+		return nil, errors.WithStack(err)
 	}
-	defaultOptions, err := importDefaultOptions(ctx, cfg)
+	defaultOptions, err := defaultOptions(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -94,16 +97,16 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 		return nil, err
 	}
 
-	client := NewClient(cfg)
-	metadata, metadataErrors := (importMetadataResolver{ctx: ctx.Context, client: client, records: records, cfg: cfg}).resolve()
-	return &importCommand{
+	client := app.NewClient(cfg)
+	metadata, metadataErrors := (MetadataResolver{ctx: ctx.Context, client: client, records: records, cfg: cfg}).resolve()
+	return &Command{
 		ctx:             ctx,
 		cfg:             cfg,
 		client:          client,
 		records:         records,
 		metadata:        metadata,
 		metadataErrors:  metadataErrors,
-		optionsResolver: importOptionsResolver{defaults: defaultOptions, cfg: cfg},
+		optionsResolver: OptionsResolver{defaults: defaultOptions, cfg: cfg},
 		policy:          policy,
 		continueOnError: ctx.Bool("continue-on-error"),
 		summaryEnabled:  ctx.Bool("summary"),
@@ -111,7 +114,7 @@ func newImportCommand(ctx *CLIContext, input io.Reader, summaryOutput io.Writer)
 	}, nil
 }
 
-func (command *importCommand) run() error {
+func (command *Command) run() error {
 	for i := range command.records {
 		if err := command.processRecord(command.records[i]); err != nil {
 			return err
@@ -130,7 +133,7 @@ func (command *importCommand) run() error {
 	return nil
 }
 
-func (command *importCommand) processRecord(record textio.Record) error {
+func (command *Command) processRecord(record textio.Record) error {
 	region := recordRegion(record, command.cfg)
 	key := recordKey(region, record.Path)
 	existing, exists := command.metadata[key]
@@ -155,7 +158,7 @@ func (command *importCommand) processRecord(record textio.Record) error {
 		return nil
 	}
 
-	parameterType, err := resolveImportType(command.ctx.String("default-type"), existing, exists, record, command.cfg)
+	parameterType, err := resolveType(command.ctx.String("default-type"), existing, exists, record, command.cfg)
 	if err != nil {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
@@ -182,7 +185,7 @@ func (command *importCommand) processRecord(record textio.Record) error {
 	return nil
 }
 
-func (command *importCommand) handleRecordError(operation writeOperation, region, name string, err error) error {
+func (command *Command) handleRecordError(operation writeOperation, region, name string, err error) error {
 	wrapped := errors.Wrap(err, name)
 	logRecordError(command.cfg.Logger, "import", operation, region, name, wrapped)
 	command.summary.Failed++
@@ -194,7 +197,7 @@ func (command *importCommand) handleRecordError(operation writeOperation, region
 	return wrapped
 }
 
-func (command *importCommand) writeSummary() {
+func (command *Command) writeSummary() {
 	_, _ = fmt.Fprintf(
 		command.summaryOutput,
 		"Import summary:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n",
