@@ -19,18 +19,15 @@ type strictMetadataDescriber interface {
 // Records is the command-specific collection of imported text records.
 type Records []textio.Record
 
-func (records Records) withBasePath(value string) (Records, error) {
-	basePath, err := app.ParseBasePath(value)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
+func (records Records) withBasePath(basePath app.BasePath) (Records, error) {
 	resolved := make(Records, 0, len(records))
 	for idx := range records {
 		record := records[idx]
-		record.Path, err = basePath.Resolve(record.Path)
+		path, err := basePath.Resolve(record.Path)
 		if err != nil {
 			return nil, errors.Wrap(err, "resolve import parameter name")
 		}
+		record.Path = path
 		resolved = append(resolved, record)
 	}
 	return resolved, nil
@@ -64,6 +61,7 @@ type MetadataResolver struct {
 	client  ssm.Client
 	records Records
 	cfg     app.Config
+	fields  textio.Fields
 }
 
 func recordKey(region, path string) string {
@@ -91,8 +89,8 @@ func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.Paramete
 	return parameterType, nil
 }
 
-func recordRegion(record textio.Record, cfg app.Config) string {
-	if cfg.Fields.Allows(textio.FieldRegion) &&
+func recordRegion(record textio.Record, cfg app.Config, fields textio.Fields) string {
+	if fields.Allows(textio.FieldRegion) &&
 		record.HasField(textio.FieldRegion) &&
 		strings.TrimSpace(record.Region) != "" {
 		return strings.TrimSpace(record.Region)
@@ -105,7 +103,7 @@ func (resolver MetadataResolver) resolve() (metadataByKey map[string]ssm.Metadat
 	seen := map[string]bool{}
 	for i := range resolver.records {
 		record := &resolver.records[i]
-		region := recordRegion(*record, resolver.cfg)
+		region := recordRegion(*record, resolver.cfg, resolver.fields)
 		key := recordKey(region, record.Path)
 		if seen[key] {
 			continue
@@ -131,9 +129,15 @@ func (resolver MetadataResolver) resolve() (metadataByKey map[string]ssm.Metadat
 	return metadata, errs
 }
 
-func resolveType(defaultType string, existing ssm.Metadata, exists bool, record textio.Record, cfg app.Config) (ssm.ParameterType, error) {
+func resolveType(
+	defaultType ssm.ParameterType,
+	existing ssm.Metadata,
+	exists bool,
+	record textio.Record,
+	fields textio.Fields,
+) (ssm.ParameterType, error) {
 	recordType := ""
-	if cfg.Fields.Allows(textio.FieldType) &&
+	if fields.Allows(textio.FieldType) &&
 		record.HasField(textio.FieldType) &&
 		strings.TrimSpace(record.Type) != "" {
 		recordType = record.Type
@@ -142,10 +146,10 @@ func resolveType(defaultType string, existing ssm.Metadata, exists bool, record 
 	if exists {
 		existingType = existing.Type
 	}
-	if !cfg.Fields.Allows(textio.FieldType) {
+	if !fields.Allows(textio.FieldType) {
 		defaultType = ""
 	}
-	for _, candidate := range []string{recordType, existingType, defaultType} {
+	for _, candidate := range []string{recordType, existingType, string(defaultType)} {
 		if strings.TrimSpace(candidate) == "" {
 			continue
 		}

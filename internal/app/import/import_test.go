@@ -1,12 +1,10 @@
 package importer
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/urfave/cli/v3"
 
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
@@ -29,19 +27,22 @@ func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 	assert.Equal(t, []string{"/app/a", "/app/c"}, []string{filtered[0].Path, filtered[1].Path})
 }
 
-func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
-	ctx := testCLIContext(t, []string{"--default-description", "desc"})
+func TestDefaultOptionsRespectFieldScope(t *testing.T) {
+	defaults := ssmPutOptionsForTest(t, "standard", "text", "description")
 
-	opts, err := defaultOptions(ctx, app.Config{Fields: textio.Fields{textio.FieldName, textio.FieldValue}})
+	options := defaultOptionsForFields(defaults, textio.Fields{textio.FieldName, textio.FieldValue})
 
-	require.NoError(t, err)
-	assert.Empty(t, opts.Description)
+	assert.Empty(t, options.Tier)
+	assert.Empty(t, options.DataType)
+	assert.Empty(t, options.Description)
 }
 
 func TestApplyBasePathToRecordsPrefixesRelativeNames(t *testing.T) {
 	records := Records{{Path: "DATABASE_URL", Value: "postgres://localhost/app"}}
+	basePath, err := app.ParseBasePath("/app/prod/api/")
+	require.NoError(t, err)
 
-	resolved, err := records.withBasePath("/app/prod/api/")
+	resolved, err := records.withBasePath(basePath)
 
 	require.NoError(t, err)
 	assert.Equal(t, "/app/prod/api/DATABASE_URL", resolved[0].Path)
@@ -49,8 +50,10 @@ func TestApplyBasePathToRecordsPrefixesRelativeNames(t *testing.T) {
 
 func TestApplyBasePathToRecordsPreservesAbsoluteNames(t *testing.T) {
 	records := Records{{Path: "/explicit/path"}}
+	basePath, err := app.ParseBasePath("/app/prod")
+	require.NoError(t, err)
 
-	resolved, err := records.withBasePath("/app/prod")
+	resolved, err := records.withBasePath(basePath)
 
 	require.NoError(t, err)
 	assert.Equal(t, "/explicit/path", resolved[0].Path)
@@ -60,38 +63,7 @@ func TestApplyBasePathToRecordsRejectsRelativeNamesWithoutBase(t *testing.T) {
 	_, err := (Records{{Path: "DATABASE_URL"}}).withBasePath("")
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "--base-path")
-}
-
-func TestApplyBasePathToRecordsRejectsRelativeBasePath(t *testing.T) {
-	_, err := (Records{{Path: "DATABASE_URL"}}).withBasePath("app/prod")
-
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "must start with /")
-}
-
-func TestWritePolicyDefaultsToWrite(t *testing.T) {
-	policy, err := parseWritePolicy(testCLIContext(t, nil))
-
-	require.NoError(t, err)
-	assert.Equal(t, writePolicyDefault, policy.OnCreate)
-	assert.Equal(t, writePolicyDefault, policy.OnUpdate)
-}
-
-func TestWritePolicyParsesSkipErrorAsk(t *testing.T) {
-	policy, err := parseWritePolicy(testCLIContext(t, []string{"--on-create", "skip", "--on-update", "ask"}))
-
-	require.NoError(t, err)
-	assert.Equal(t, writePolicySkip, policy.OnCreate)
-	assert.Equal(t, writePolicyAsk, policy.OnUpdate)
-}
-
-func TestWritePolicyRejectsUnsupportedValue(t *testing.T) {
-	policy, err := parseWritePolicy(testCLIContext(t, []string{"--on-create", "apply"}))
-
-	assert.Empty(t, policy)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "unsupported --on-create value")
+	assert.ErrorContains(t, err, "requires a base path")
 }
 
 func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T) {
@@ -99,7 +71,7 @@ func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
-	opts, err := (OptionsResolver{defaults: defaults, cfg: app.Config{}}).forRecord(record, cloud, true)
+	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, cloud, true)
 
 	require.NoError(t, err)
 	assert.Empty(t, opts.Policies)
@@ -119,7 +91,7 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 	}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
 
-	opts, err := (OptionsResolver{defaults: defaults, cfg: app.Config{}}).forRecord(record, cloud, true)
+	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, cloud, true)
 
 	require.NoError(t, err)
 	assert.Equal(t, "[{}]", opts.Policies)
@@ -142,38 +114,13 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 	}
 	defaults := ssmPutOptionsForTest(t, "standard", "text", "default desc")
 
-	opts, err := (OptionsResolver{defaults: defaults, cfg: app.Config{}}).forRecord(record, ssm.Metadata{}, false)
+	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, ssm.Metadata{}, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Advanced", opts.Tier.String())
 	assert.Equal(t, "aws:ec2:image", opts.DataType.String())
 	assert.Equal(t, "from file", opts.Description)
 	assert.Equal(t, `[{"Type":"Expiration"}]`, opts.Policies)
-}
-
-func testCLIContext(t *testing.T, args []string) *app.CLIContext {
-	t.Helper()
-	cmd := &cli.Command{
-		Name: "import-test",
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: "map-field"},
-			&cli.StringFlag{Name: "base-path"},
-			&cli.StringFlag{Name: "on-create"},
-			&cli.StringFlag{Name: "on-update"},
-			&cli.BoolFlag{Name: "continue-on-error"},
-			&cli.BoolFlag{Name: "summary"},
-			&cli.StringFlag{Name: "default-type"},
-			&cli.StringFlag{Name: "default-tier"},
-			&cli.StringFlag{Name: "default-data-type"},
-			&cli.StringFlag{Name: "default-region"},
-			&cli.StringFlag{Name: "default-description"},
-			&cli.StringFlag{Name: "default-policies"},
-			&cli.StringFlag{Name: "default-policies-file"},
-		},
-		Action: func(context.Context, *cli.Command) error { return nil },
-	}
-	require.NoError(t, cmd.Run(context.Background(), append([]string{"import-test"}, args...)))
-	return app.NewCLIContext(context.Background(), cmd)
 }
 
 func ssmPutOptionsForTest(t *testing.T, tierValue, dataTypeValue, description string) ssm.PutParameterOptions {

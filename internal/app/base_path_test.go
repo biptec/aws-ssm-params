@@ -37,12 +37,12 @@ func TestBasePathRejectsSiblingPrefixOnExport(t *testing.T) {
 	_, err = basePath.Relativize("/app/prod2/token")
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "outside --base-path")
+	assert.ErrorContains(t, err, "outside base path")
 }
 
 func TestBasePathRequiresAbsoluteValue(t *testing.T) {
 	_, err := ParseBasePath("app/prod")
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "--base-path must start with /")
+	assert.ErrorContains(t, err, "base path must start with /")
 }

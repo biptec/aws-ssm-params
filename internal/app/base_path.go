@@ -7,18 +7,17 @@ import (
 	"github.com/cockroachdb/errors"
 )
 
-// BasePath is an optional absolute SSM path used to resolve relative names on import
-// and produce relative names on export.
+// BasePath is an optional absolute SSM path used to resolve and relativize parameter names.
 type BasePath string
 
-// ParseBasePath normalizes a CLI base path while preserving an empty value as disabled.
+// ParseBasePath normalizes a base path while preserving an empty value as disabled.
 func ParseBasePath(value string) (BasePath, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", nil
 	}
 	if !strings.HasPrefix(value, "/") {
-		return "", errors.New("--base-path must start with /")
+		return "", errors.New("base path must start with /")
 	}
 	value = strings.TrimRight(value, "/")
 	if value == "" {
@@ -38,7 +37,7 @@ func (base BasePath) Resolve(name string) (string, error) {
 		return name, nil
 	}
 	if base == "" {
-		return "", fmt.Errorf("relative parameter name %q requires --base-path", name)
+		return "", fmt.Errorf("relative parameter name %q requires a base path", name)
 	}
 	if base == "/" {
 		return "/" + strings.TrimLeft(name, "/"), nil
@@ -62,14 +61,14 @@ func (base BasePath) Relativize(name string) (string, error) {
 	if base == "/" {
 		relative := strings.TrimLeft(name, "/")
 		if relative == "" {
-			return "", fmt.Errorf("parameter name %q has no path relative to --base-path %q", name, base)
+			return "", fmt.Errorf("parameter name %q has no path relative to base path %q", name, base)
 		}
 		return relative, nil
 	}
 	prefix := string(base) + "/"
 	relative, ok := strings.CutPrefix(name, prefix)
 	if !ok || relative == "" {
-		return "", fmt.Errorf("parameter name %q is outside --base-path %q", name, base)
+		return "", fmt.Errorf("parameter name %q is outside base path %q", name, base)
 	}
 	return relative, nil
 }

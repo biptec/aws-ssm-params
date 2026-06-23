@@ -2,9 +2,8 @@
 package export
 
 import (
+	"context"
 	"io"
-	"os"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -16,9 +15,21 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
-// Run loads statuses for the requested inventory and writes existing parameter values to stdout.
-func Run(ctx *app.CLIContext) error {
-	command, err := newCommand(ctx, os.Stdout)
+// Options contains the complete runtime configuration for one export.
+type Options struct {
+	Config        app.Config
+	Format        textio.FormatType
+	FieldMappings textio.FieldMappings
+	Fields        textio.Fields
+	SortColumns   []string
+	KeyField      string
+	BasePath      app.BasePath
+	ScalarField   string
+}
+
+// Run loads statuses for the requested inventory and writes existing parameter values.
+func Run(ctx context.Context, options Options, output io.Writer) error {
+	command, err := newCommand(ctx, options, output)
 	if err != nil {
 		return err
 	}
@@ -28,64 +39,49 @@ func Run(ctx *app.CLIContext) error {
 // Command owns the state and dependencies of one export invocation.
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.
 type Command struct {
-	ctx          *app.CLIContext
+	ctx          context.Context
 	cfg          app.Config
 	client       ssm.Client
 	writer       textio.Writer
 	items        inventory.Items
 	regions      []string
-	output       io.Writer
 	keyField     string
 	scalarField  string
 	recordFields textio.Fields
 	sortRules    SortRules
 	basePath     app.BasePath
+	fieldMaps    textio.FieldMappings
 }
 
-func newCommand(ctx *app.CLIContext, output io.Writer) (*Command, error) {
-	cfg, err := app.ConfigFromCLI(ctx)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	basePath, err := app.ParseBasePath(ctx.String("base-path"))
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	items, err := app.PrepareItems(ctx.Context, &cfg)
+func newCommand(ctx context.Context, options Options, output io.Writer) (*Command, error) {
+	cfg := options.Config
+	items, err := app.PrepareItems(ctx, &cfg)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	client := app.NewClient(cfg)
 	regions := append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
-		regions, err = client.ListRegions(ctx.Context)
+		regions, err = client.ListRegions(ctx)
 		if err != nil {
 			return nil, errors.Wrap(err, "list AWS regions")
 		}
 	}
 
-	scalarField, err := scalarField(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	keyField := strings.TrimSpace(ctx.String("key-field"))
-	if err := validateKeyFieldOutputFields(keyField, cfg.Fields); err != nil {
-		return nil, err
-	}
-	fields := fieldsForConfig(cfg)
+	fields := fieldsForOptions(options.Fields)
 	return &Command{
 		ctx:          ctx,
 		cfg:          cfg,
 		client:       client,
-		writer:       textio.NewWriter(textio.FormatType(ctx.String("format")), output),
+		writer:       textio.NewWriter(options.Format, output),
 		items:        items,
 		regions:      regions,
-		output:       output,
-		keyField:     keyField,
-		scalarField:  scalarField,
-		recordFields: recordFields(fields, scalarField, keyField),
-		sortRules:    parseSortRules(cfg.SortColumns),
-		basePath:     basePath,
+		keyField:     options.KeyField,
+		scalarField:  options.ScalarField,
+		recordFields: recordFields(fields, options.ScalarField, options.KeyField),
+		sortRules:    parseSortRules(options.SortColumns),
+		basePath:     options.BasePath,
+		fieldMaps:    options.FieldMappings,
 	}, nil
 }
 
@@ -102,7 +98,7 @@ func (command *Command) run() error {
 			"write scalar export",
 		)
 	}
-	mappings := command.cfg.FieldMappings.WithDefaults().ForFields(command.recordFields)
+	mappings := command.fieldMaps.WithDefaults().ForFields(command.recordFields)
 	return errors.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
 }
 
@@ -115,7 +111,7 @@ func (command *Command) loadStatuses() ui.Statuses {
 	var statuses ui.Statuses
 	if len(command.cfg.FilterGroups) > 0 && len(command.items) == 0 {
 		statuses = ui.LoadFilteredStatusesBatchForRegions(
-			command.ctx.Context,
+			command.ctx,
 			command.client,
 			command.cfg.FilterGroups,
 			includeValues,
@@ -124,7 +120,7 @@ func (command *Command) loadStatuses() ui.Statuses {
 		)
 	} else {
 		statuses = ui.LoadStatusesForRegions(
-			command.ctx.Context,
+			command.ctx,
 			command.client,
 			command.items,
 			includeValues,

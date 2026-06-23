@@ -5,9 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
-	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -17,16 +14,6 @@ import (
 type SortRule struct {
 	field      string
 	descending bool
-}
-
-func compactStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }
 
 func (rule SortRule) value(status ui.Status) string {
@@ -173,35 +160,11 @@ var allFields = textio.Fields{
 	textio.FieldUser,
 }
 
-func fieldsForConfig(cfg app.Config) textio.Fields {
-	if len(cfg.Fields) == 0 {
+func fieldsForOptions(fields textio.Fields) textio.Fields {
+	if len(fields) == 0 {
 		return append(textio.Fields(nil), allFields...)
 	}
-	return append(textio.Fields(nil), cfg.Fields...)
-}
-
-func scalarField(ctx *app.CLIContext, cfg app.Config) (string, error) {
-	if !ctx.Bool("scalar") {
-		return "", nil
-	}
-	rawFields := compactStrings(ctx.StringSlice("output-field"))
-	if len(rawFields) != 1 || len(cfg.Fields) != 1 {
-		return "", errors.New("--scalar requires exactly one --output-field")
-	}
-	return cfg.Fields[0], nil
-}
-
-func validateKeyFieldOutputFields(keyField string, outputFields textio.Fields) error {
-	keyField = strings.TrimSpace(keyField)
-	if keyField == "" {
-		return nil
-	}
-	for _, field := range outputFields {
-		if field == keyField {
-			return fmt.Errorf("--key-field and --output-field cannot use the same field: %s", keyField)
-		}
-	}
-	return nil
+	return append(textio.Fields(nil), fields...)
 }
 
 func recordFields(fields textio.Fields, scalarField, keyField string) textio.Fields {

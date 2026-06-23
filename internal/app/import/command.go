@@ -2,9 +2,9 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -14,9 +14,25 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
-// Run reads dotenv, JSON, or YAML data, resolves each record to an SSM name, and writes values to Parameter Store.
-func Run(ctx *app.CLIContext) error {
-	command, err := newCommand(ctx, nil, os.Stderr)
+// Options contains the complete runtime configuration for one import.
+type Options struct {
+	Config          app.Config
+	Format          textio.FormatType
+	FieldMappings   textio.FieldMappings
+	Fields          textio.Fields
+	KeyField        string
+	BasePath        app.BasePath
+	DefaultRegion   string
+	DefaultType     ssm.ParameterType
+	DefaultOptions  ssm.PutParameterOptions
+	Policy          Policy
+	ContinueOnError bool
+	Summary         bool
+}
+
+// Run reads records, resolves their SSM names, and writes values to Parameter Store.
+func Run(ctx context.Context, options Options, input io.Reader, summaryOutput io.Writer) error {
+	command, err := newCommand(ctx, options, input, summaryOutput)
 	if err != nil {
 		return err
 	}
@@ -25,19 +41,20 @@ func Run(ctx *app.CLIContext) error {
 
 // Command owns the mutable state and dependencies of one import invocation.
 type Command struct {
-	ctx             *app.CLIContext
+	ctx             context.Context
 	cfg             app.Config
 	client          ssm.Client
 	records         Records
 	metadata        map[string]ssm.Metadata
 	metadataErrors  map[string]error
 	optionsResolver OptionsResolver
-	policy          writePolicy
+	policy          Policy
 	continueOnError bool
 	summaryEnabled  bool
 	summaryOutput   io.Writer
 	summary         Summary
 	recordErrors    []string
+	defaultType     ssm.ParameterType
 }
 
 // Summary contains the final per-operation import counters.
@@ -48,69 +65,61 @@ type Summary struct {
 	Failed  int
 }
 
-func newCommand(ctx *app.CLIContext, input io.Reader, summaryOutput io.Writer) (*Command, error) {
-	cfg, err := app.ConfigFromCLI(ctx)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	if defaultRegion := strings.TrimSpace(ctx.String("default-region")); defaultRegion != "" && cfg.Region == "" {
+func newCommand(ctx context.Context, options Options, input io.Reader, summaryOutput io.Writer) (*Command, error) {
+	cfg := options.Config
+	if defaultRegion := strings.TrimSpace(options.DefaultRegion); defaultRegion != "" && cfg.Region == "" {
 		cfg.Region = defaultRegion
 		cfg.Regions = []string{defaultRegion}
 	}
 	if cfg.AllRegions {
-		return nil, errors.New("--all-regions is not supported for import; specify --region")
+		return nil, errors.New("all-regions mode is not supported for import")
 	}
 	if len(cfg.Regions) > 1 {
-		return nil, errors.New("multiple --region values are only supported for tui and export")
+		return nil, errors.New("import supports only one region")
 	}
-	if err := app.EnsureRegions(ctx.Context, &cfg); err != nil {
+	if err := app.EnsureRegions(ctx, &cfg); err != nil {
 		return nil, errors.WithStack(err)
 	}
 	if input == nil {
-		input, err = stdinReader()
-		if err != nil {
-			return nil, err
-		}
+		return nil, errors.New("import input is required")
 	}
-	reader := textio.NewReader(textio.FormatType(ctx.String("format")), input)
+	reader := textio.NewReader(options.Format, input)
 	parsedRecords, err := reader.Import(
-		cfg.FieldMappings.WithDefaults(),
-		strings.TrimSpace(ctx.String("key-field")),
+		options.FieldMappings.WithDefaults(),
+		options.KeyField,
 	)
 	if err != nil {
 		return nil, errors.Wrap(err, "read import")
 	}
-	records, err := Records(parsedRecords).withBasePath(ctx.String("base-path"))
+	records, err := Records(parsedRecords).withBasePath(options.BasePath)
 	if err != nil {
 		return nil, err
 	}
 	records = records.filter(cfg.FilterGroups)
-	if err := cfg.RequireField(textio.FieldValue, "import"); err != nil {
-		return nil, errors.WithStack(err)
-	}
-	defaultOptions, err := defaultOptions(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	policy, err := parseWritePolicy(ctx)
-	if err != nil {
-		return nil, err
+	if !options.Fields.Allows(textio.FieldValue) {
+		return nil, errors.New("import requires the value field")
 	}
 
 	client := app.NewClient(cfg)
-	metadata, metadataErrors := (MetadataResolver{ctx: ctx.Context, client: client, records: records, cfg: cfg}).resolve()
+	metadata, metadataErrors := (MetadataResolver{
+		ctx: ctx, client: client, records: records, cfg: cfg, fields: options.Fields,
+	}).resolve()
 	return &Command{
-		ctx:             ctx,
-		cfg:             cfg,
-		client:          client,
-		records:         records,
-		metadata:        metadata,
-		metadataErrors:  metadataErrors,
-		optionsResolver: OptionsResolver{defaults: defaultOptions, cfg: cfg},
-		policy:          policy,
-		continueOnError: ctx.Bool("continue-on-error"),
-		summaryEnabled:  ctx.Bool("summary"),
+		ctx:            ctx,
+		cfg:            cfg,
+		client:         client,
+		records:        records,
+		metadata:       metadata,
+		metadataErrors: metadataErrors,
+		optionsResolver: OptionsResolver{
+			defaults: defaultOptionsForFields(options.DefaultOptions, options.Fields),
+			fields:   options.Fields,
+		},
+		policy:          options.Policy,
+		continueOnError: options.ContinueOnError,
+		summaryEnabled:  options.Summary,
 		summaryOutput:   summaryOutput,
+		defaultType:     options.DefaultType,
 	}, nil
 }
 
@@ -134,7 +143,7 @@ func (command *Command) run() error {
 }
 
 func (command *Command) processRecord(record textio.Record) error {
-	region := recordRegion(record, command.cfg)
+	region := recordRegion(record, command.cfg, command.optionsResolver.fields)
 	key := recordKey(region, record.Path)
 	existing, exists := command.metadata[key]
 	if err, ok := command.metadataErrors[key]; ok {
@@ -153,12 +162,12 @@ func (command *Command) processRecord(record textio.Record) error {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
 	if !shouldWrite {
-		logSkipped(command.cfg.Logger, "import", operation, policyAction, region, record.Path)
+		logSkipped(command.cfg.Logger, operation, policyAction, region, record.Path)
 		command.summary.Skipped++
 		return nil
 	}
 
-	parameterType, err := resolveType(command.ctx.String("default-type"), existing, exists, record, command.cfg)
+	parameterType, err := resolveType(command.defaultType, existing, exists, record, command.optionsResolver.fields)
 	if err != nil {
 		return command.handleRecordError(operation, region, record.Path, err)
 	}
@@ -168,7 +177,7 @@ func (command *Command) processRecord(record textio.Record) error {
 	}
 	options.Overwrite = exists
 	err = command.client.ForRegion(region).PutParameterWithOptions(
-		command.ctx.Context,
+		command.ctx,
 		record.Path,
 		record.Value,
 		parameterType,
@@ -187,11 +196,11 @@ func (command *Command) processRecord(record textio.Record) error {
 
 func (command *Command) handleRecordError(operation writeOperation, region, name string, err error) error {
 	wrapped := errors.Wrap(err, name)
-	logRecordError(command.cfg.Logger, "import", operation, region, name, wrapped)
+	logRecordError(command.cfg.Logger, operation, region, name, wrapped)
 	command.summary.Failed++
 	command.recordErrors = append(command.recordErrors, wrapped.Error())
 	if command.continueOnError {
-		logContinueOnError(command.cfg.Logger, "import", region, name)
+		logContinueOnError(command.cfg.Logger, region, name)
 		return nil
 	}
 	return wrapped
@@ -206,12 +215,4 @@ func (command *Command) writeSummary() {
 		command.summary.Skipped,
 		command.summary.Failed,
 	)
-}
-
-func stdinReader() (io.Reader, error) {
-	info, err := os.Stdin.Stat()
-	if err == nil && info.Mode()&os.ModeCharDevice != 0 {
-		return nil, errors.New("import requires data from stdin")
-	}
-	return os.Stdin, nil
 }

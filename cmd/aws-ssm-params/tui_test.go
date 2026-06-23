@@ -1,4 +1,4 @@
-package tui
+package main
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestLoadInteractiveInventoryFromPipedStdin(t *testing.T) {
+func TestLoadTUIInventoryFromPipedStdin(t *testing.T) {
 	oldStdin := os.Stdin
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
@@ -19,12 +19,11 @@ func TestLoadInteractiveInventoryFromPipedStdin(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, writer.Close())
 
-	items, useTTYInput, err := loadInventoryFromStdin()
+	items, useInputTTY, err := loadTUIInventoryFromStdin()
 
 	require.NoError(t, err)
-	assert.True(t, useTTYInput)
+	assert.True(t, useInputTTY)
 	require.Len(t, items, 2)
 	assert.Equal(t, "/app/from-stdin", items[0].Path)
-	assert.Equal(t, "stdin", items[0].Source)
 	assert.Equal(t, "/app/second", items[1].Path)
 }

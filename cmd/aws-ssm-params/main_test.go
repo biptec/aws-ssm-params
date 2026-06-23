@@ -10,18 +10,33 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	removedCommandInteractive = "interactive"
+	removedCommandGet         = "get"
+	removedCommandPut         = "put"
+	unknownCommandName        = "unknown"
+	removedFlagName           = "name"
+
+	legacyEnvRegions      = envVarPrefix + "REGIONS"
+	legacyEnvFilters      = envVarPrefix + "FILTERS"
+	legacyEnvFiltersFile  = envVarPrefix + "FILTERS_FILE"
+	legacyEnvShowColumns  = envVarPrefix + "SHOW_COLUMNS"
+	legacyEnvOutputFields = envVarPrefix + "OUTPUT_FIELDS"
+	legacyEnvMapFields    = envVarPrefix + "MAP_FIELDS"
+)
+
 func TestCLIHelpShowsTUICommand(t *testing.T) {
 	cliApp := newCLIApp([]string{"--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, "--help"})
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "tui")
-	assert.Contains(t, out.String(), "import")
-	assert.Contains(t, out.String(), "export")
-	assert.NotContains(t, out.String(), "interactive")
+	assert.Contains(t, out.String(), tuiCommandName)
+	assert.Contains(t, out.String(), importCommandName)
+	assert.Contains(t, out.String(), exportCommandName)
+	assert.NotContains(t, out.String(), removedCommandInteractive)
 	assert.NotContains(t, out.String(), "\n   get ")
 	assert.NotContains(t, out.String(), "\n   put ")
 	assert.NotContains(t, out.String(), "--name")
@@ -30,33 +45,33 @@ func TestCLIHelpShowsTUICommand(t *testing.T) {
 }
 
 func TestTUIHelpUsesShowColumnFlag(t *testing.T) {
-	cliApp := newCLIApp([]string{"tui", "--help"})
+	cliApp := newCLIApp([]string{tuiCommandName, "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "tui", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, tuiCommandName, "--help"})
 
 	require.NoError(t, err)
 	assert.NotContains(t, out.String(), "--name")
 	assert.NotContains(t, out.String(), "--names-file")
-	assert.Contains(t, out.String(), "--show-column")
+	assert.Contains(t, out.String(), "--"+tuiFlagShowColumn)
 	assert.False(t, strings.Contains(out.String(), "--columns"))
 }
 
 func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 	cases := [][]string{
-		{"aws-ssm-params", "--help"},
-		{"aws-ssm-params", "tui", "--help"},
-		{"aws-ssm-params", "export", "--help"},
-		{"aws-ssm-params", "import", "--help"},
+		{appName, "--help"},
+		{appName, tuiCommandName, "--help"},
+		{appName, exportCommandName, "--help"},
+		{appName, importCommandName, "--help"},
 	}
 	legacyEnvNames := []string{
-		"AWS_SSM_PARAMS_REGIONS",
-		"AWS_SSM_PARAMS_FILTERS",
-		"AWS_SSM_PARAMS_FILTERS_FILE",
-		"AWS_SSM_PARAMS_SHOW_COLUMNS",
-		"AWS_SSM_PARAMS_OUTPUT_FIELDS",
-		"AWS_SSM_PARAMS_MAP_FIELDS",
+		legacyEnvRegions,
+		legacyEnvFilters,
+		legacyEnvFiltersFile,
+		legacyEnvShowColumns,
+		legacyEnvOutputFields,
+		legacyEnvMapFields,
 		"$NO_COLOR",
 	}
 
@@ -79,32 +94,32 @@ func TestCLIHelpShowsNativeAWSRegionAndProfileAliases(t *testing.T) {
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, "--help"})
 
 	require.NoError(t, err)
-	assert.Contains(t, out.String(), "AWS_SSM_PARAMS_REGION")
-	assert.Contains(t, out.String(), "AWS_REGION")
-	assert.Contains(t, out.String(), "AWS_SSM_PARAMS_PROFILE")
-	assert.Contains(t, out.String(), "AWS_PROFILE")
+	assert.Contains(t, out.String(), envRegion)
+	assert.Contains(t, out.String(), envAWSRegion)
+	assert.Contains(t, out.String(), envProfile)
+	assert.Contains(t, out.String(), envAWSProfile)
 	assert.NotContains(t, out.String(), "$NO_COLOR")
 }
 
 func TestInteractiveCommandIsRemoved(t *testing.T) {
-	cliApp := newCLIApp([]string{"interactive", "--help"})
+	cliApp := newCLIApp([]string{removedCommandInteractive, "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "interactive", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, removedCommandInteractive, "--help"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "No help topic")
 }
 
 func TestGetAndPutCommandsAreRemoved(t *testing.T) {
-	for _, command := range []string{"get", "put"} {
+	for _, command := range []string{removedCommandGet, removedCommandPut} {
 		cliApp := newCLIApp([]string{command, "--help"})
 
-		err := cliApp.Run(context.Background(), []string{"aws-ssm-params", command, "--help"})
+		err := cliApp.Run(context.Background(), []string{appName, command, "--help"})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No help topic")
@@ -112,69 +127,69 @@ func TestGetAndPutCommandsAreRemoved(t *testing.T) {
 }
 
 func TestUnknownCommandReturnsError(t *testing.T) {
-	cliApp := newCLIApp([]string{"unknown"})
+	cliApp := newCLIApp([]string{unknownCommandName})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "unknown"})
+	err := cliApp.Run(context.Background(), []string{appName, unknownCommandName})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown command: unknown")
+	assert.Contains(t, err.Error(), "unknown command: "+unknownCommandName)
 }
 
 func TestCLIRejectsCommaSeparatedRegionFlag(t *testing.T) {
-	cliApp := newCLIApp([]string{"--region", "eu-north-1,eu-central-1"})
+	cliApp := newCLIApp([]string{"--" + flagRegion, "eu-north-1,eu-central-1"})
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "--region", "eu-north-1,eu-central-1"})
+	err := cliApp.Run(context.Background(), []string{appName, "--" + flagRegion, "eu-north-1,eu-central-1"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "repeat the flag")
 }
 
 func TestTUIRejectsRemovedNameFlag(t *testing.T) {
-	cliApp := newCLIApp([]string{"tui", "--name", "/app/a"})
+	cliApp := newCLIApp([]string{tuiCommandName, "--" + removedFlagName, "/app/a"})
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "tui", "--name", "/app/a", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, tuiCommandName, "--" + removedFlagName, "/app/a", "--help"})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "flag provided but not defined")
 }
 
 func TestExportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
-	cliApp := newCLIApp([]string{"export", "--help"})
+	cliApp := newCLIApp([]string{exportCommandName, "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "export", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, exportCommandName, "--help"})
 
 	require.NoError(t, err)
 	assert.NotContains(t, out.String(), "--name")
 	assert.NotContains(t, out.String(), "--names-file")
 	assert.NotContains(t, out.String(), "--json-key-field")
-	assert.Contains(t, out.String(), "--key-field")
-	assert.Contains(t, out.String(), "--sort-by")
-	assert.Contains(t, out.String(), "--scalar")
-	assert.Contains(t, out.String(), "--base-path")
+	assert.Contains(t, out.String(), "--"+exportFlagKeyField)
+	assert.Contains(t, out.String(), "--"+exportFlagSortBy)
+	assert.Contains(t, out.String(), "--"+exportFlagScalar)
+	assert.Contains(t, out.String(), "--"+exportFlagBasePath)
 	assert.NotContains(t, out.String(), "--include-missing")
 }
 
 func TestImportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
-	cliApp := newCLIApp([]string{"import", "--help"})
+	cliApp := newCLIApp([]string{importCommandName, "--help"})
 	var out bytes.Buffer
 	cliApp.Writer = &out
 
-	err := cliApp.Run(context.Background(), []string{"aws-ssm-params", "import", "--help"})
+	err := cliApp.Run(context.Background(), []string{appName, importCommandName, "--help"})
 
 	require.NoError(t, err)
 	assert.NotContains(t, out.String(), "--name")
 	assert.NotContains(t, out.String(), "--names-file")
 	assert.NotContains(t, out.String(), "--json-key-field")
-	assert.Contains(t, out.String(), "--key-field")
-	assert.Contains(t, out.String(), "--base-path")
-	assert.Contains(t, out.String(), "--on-create")
-	assert.Contains(t, out.String(), "--on-update")
-	assert.Contains(t, out.String(), "--continue-on-error")
-	assert.Contains(t, out.String(), "--summary")
+	assert.Contains(t, out.String(), "--"+importFlagKeyField)
+	assert.Contains(t, out.String(), "--"+importFlagBasePath)
+	assert.Contains(t, out.String(), "--"+importFlagOnCreate)
+	assert.Contains(t, out.String(), "--"+importFlagOnUpdate)
+	assert.Contains(t, out.String(), "--"+importFlagContinueOnError)
+	assert.Contains(t, out.String(), "--"+importFlagSummary)
 	assert.NotContains(t, out.String(), "--no-create")
 	assert.NotContains(t, out.String(), "--no-update")
 	assert.NotContains(t, out.String(), "--default-value")

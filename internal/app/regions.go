@@ -10,9 +10,9 @@ import (
 
 const allRegionsSeedRegion = "us-east-1"
 
-// EnsureRegions guarantees that non-all-regions commands have one usable AWS region.
-// It first asks the AWS SDK profile configuration if CLI/env flags did not provide a region, then mirrors the
-// resolved primary region into cfg.Regions when the user did not pass an explicit list.
+// EnsureRegions guarantees that non-all-regions operations have one usable AWS region.
+// It asks the AWS SDK profile configuration when the runtime config has no region, then mirrors
+// the resolved primary region into cfg.Regions when no explicit region list is present.
 func EnsureRegions(ctx context.Context, cfg *Config) error {
 	if cfg.AllRegions {
 		return nil
@@ -21,7 +21,7 @@ func EnsureRegions(ctx context.Context, cfg *Config) error {
 		cfg.Region = ssm.ResolveConfiguredRegion(ctx, cfg.Profile)
 	}
 	if cfg.Region == "" {
-		return errors.New("AWS region is required; pass --region, set AWS_REGION/AWS_DEFAULT_REGION, or configure a default region in the AWS profile")
+		return errors.New("AWS region is required")
 	}
 	if len(cfg.Regions) == 0 {
 		cfg.Regions = []string{cfg.Region}

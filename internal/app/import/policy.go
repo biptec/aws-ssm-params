@@ -9,25 +9,29 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
-
-	"github.com/biptec/aws-ssm-params/internal/app"
 )
 
-type writePolicyAction string
+// PolicyAction controls whether a create or update operation proceeds.
+type PolicyAction string
 
 const (
-	writePolicyDefault writePolicyAction = ""
-	writePolicySkip    writePolicyAction = "skip"
-	writePolicyError   writePolicyAction = "error"
-	writePolicyAsk     writePolicyAction = "ask"
+	// PolicyDefault writes without an additional policy decision.
+	PolicyDefault PolicyAction = ""
+	// PolicySkip skips the operation.
+	PolicySkip PolicyAction = "skip"
+	// PolicyError rejects the operation.
+	PolicyError PolicyAction = "error"
+	// PolicyAsk requests interactive confirmation.
+	PolicyAsk PolicyAction = "ask"
 )
 
-type writePolicy struct {
-	OnCreate writePolicyAction
-	OnUpdate writePolicyAction
+// Policy configures create and update behavior for imported records.
+type Policy struct {
+	OnCreate PolicyAction
+	OnUpdate PolicyAction
 }
 
-func (policy writePolicy) operation(exists bool) (writeOperation, writePolicyAction) {
+func (policy Policy) operation(exists bool) (writeOperation, PolicyAction) {
 	if exists {
 		return writeOperationUpdate, policy.OnUpdate
 	}
@@ -40,33 +44,6 @@ const (
 	writeOperationCreate writeOperation = "create"
 	writeOperationUpdate writeOperation = "update"
 )
-
-func parseWritePolicy(ctx *app.CLIContext) (writePolicy, error) {
-	onCreate, err := parseWritePolicyAction(ctx.String("on-create"), "on-create")
-	if err != nil {
-		return writePolicy{}, err
-	}
-	onUpdate, err := parseWritePolicyAction(ctx.String("on-update"), "on-update")
-	if err != nil {
-		return writePolicy{}, err
-	}
-	return writePolicy{OnCreate: onCreate, OnUpdate: onUpdate}, nil
-}
-
-func parseWritePolicyAction(value, flagName string) (writePolicyAction, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "":
-		return writePolicyDefault, nil
-	case "skip":
-		return writePolicySkip, nil
-	case "error":
-		return writePolicyError, nil
-	case "ask":
-		return writePolicyAsk, nil
-	default:
-		return "", fmt.Errorf("unsupported --%s value %q; use skip, error, or ask", flagName, value)
-	}
-}
 
 func askWriteConfirmation(action writeOperation, region, name string) (bool, error) {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -92,45 +69,38 @@ func askWriteConfirmation(action writeOperation, region, name string) (bool, err
 	return answer == "y" || answer == "yes", nil
 }
 
-func (action writePolicyAction) resolve(operation writeOperation, region, name string) (bool, error) {
+func (action PolicyAction) resolve(operation writeOperation, region, name string) (bool, error) {
 	switch action {
-	case writePolicyDefault:
+	case PolicyDefault:
 		return true, nil
-	case writePolicySkip:
+	case PolicySkip:
 		return false, nil
-	case writePolicyError:
-		return false, fmt.Errorf("parameter %s would %s; --on-%s=error stops the command", name, operation, operation.policyName())
-	case writePolicyAsk:
+	case PolicyError:
+		return false, fmt.Errorf("parameter %s would %s; write policy stops the operation", name, operation)
+	case PolicyAsk:
 		return askWriteConfirmation(operation, region, name)
 	default:
 		return false, fmt.Errorf("unsupported write policy action %q", action)
 	}
 }
 
-func (operation writeOperation) policyName() string {
-	if operation == writeOperationCreate {
-		return "create"
-	}
-	return "update"
-}
-
-func logSkipped(logger *slog.Logger, command string, operation writeOperation, policy writePolicyAction, region, name string) {
+func logSkipped(logger *slog.Logger, operation writeOperation, policy PolicyAction, region, name string) {
 	if logger == nil {
 		return
 	}
-	logger.Info(command+" record skipped", "action", string(operation), "policy", "on-"+operation.policyName()+"="+string(policy), "region", region, "name", name)
+	logger.Info("record skipped", "action", string(operation), "policy", string(policy), "region", region, "name", name)
 }
 
-func logRecordError(logger *slog.Logger, command string, operation writeOperation, region, name string, err error) {
+func logRecordError(logger *slog.Logger, operation writeOperation, region, name string, err error) {
 	if logger == nil {
 		return
 	}
-	logger.Error(command+" record failed", "action", string(operation), "region", region, "name", name, "error", err)
+	logger.Error("record failed", "action", string(operation), "region", region, "name", name, "error", err)
 }
 
-func logContinueOnError(logger *slog.Logger, command, region, name string) {
+func logContinueOnError(logger *slog.Logger, region, name string) {
 	if logger == nil {
 		return
 	}
-	logger.Info("continuing after "+command+" error", "region", region, "name", name)
+	logger.Info("continuing after record error", "region", region, "name", name)
 }
