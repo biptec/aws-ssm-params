@@ -16,6 +16,7 @@ func Base64(bytes int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return base64.StdEncoding.EncodeToString(data), nil
 }
 
@@ -25,6 +26,7 @@ func Hex(bytes int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return hex.EncodeToString(data), nil
 }
 
@@ -35,17 +37,21 @@ func UUID() (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	data[6] = (data[6] & 0x0f) | 0x40
 	data[8] = (data[8] & 0x3f) | 0x80
+
 	return fmt.Sprintf("%x-%x-%x-%x-%x", data[0:4], data[4:6], data[6:8], data[8:10], data[10:]), nil
 }
 
 // randomBytes reads n bytes from crypto/rand for secret-safe random material.
 func randomBytes(n int) ([]byte, error) {
 	data := make([]byte, n)
+
 	_, err := rand.Read(data)
 	if err != nil {
 		return nil, errors.Wrap(err, "read random bytes")
 	}
+
 	return data, nil
 }

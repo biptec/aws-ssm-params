@@ -68,10 +68,12 @@ func importCLICommand() *cli.Command {
 				if err != nil {
 					return err
 				}
+
 				input, err := importInput()
 				if err != nil {
 					return err
 				}
+
 				return importcmd.Run(ctx, options, input, os.Stderr)
 			})
 		},
@@ -83,6 +85,7 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 	if err != nil {
 		return &importcmd.Options{}, err
 	}
+
 	if global.AllRegions {
 		return &importcmd.Options{}, fmt.Errorf(
 			"--%s is not supported for %s; specify --%s",
@@ -91,6 +94,7 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 			flagRegion,
 		)
 	}
+
 	if len(global.Regions) > 1 {
 		return &importcmd.Options{}, fmt.Errorf(
 			"multiple --%s values are only supported for %s and %s",
@@ -99,26 +103,32 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 			exportCommandName,
 		)
 	}
+
 	fieldMappings, err := parseFieldMappings(cmd.StringSlice(importFlagMapField), importFlagMapField)
 	if err != nil {
 		return &importcmd.Options{}, err
 	}
+
 	basePath, err := app.ParseBasePath(cmd.String(importFlagBasePath))
 	if err != nil {
 		return &importcmd.Options{}, fmt.Errorf("--%s: %w", importFlagBasePath, err)
 	}
+
 	defaultType, err := ssm.ParseParameterType(cmd.String(importFlagDefaultType))
 	if err != nil {
 		return &importcmd.Options{}, errors.Wrap(err, "parse default type")
 	}
+
 	defaultOptions, err := importDefaultOptionsFromCLI(cmd)
 	if err != nil {
 		return &importcmd.Options{}, err
 	}
+
 	policy, err := importPolicyFromCLI(cmd)
 	if err != nil {
 		return &importcmd.Options{}, err
 	}
+
 	return &importcmd.Options{
 		Options:         global.Options,
 		Format:          textio.FormatType(cmd.String(importFlagFormat)),
@@ -139,18 +149,22 @@ func importDefaultOptionsFromCLI(cmd *cli.Command) (ssm.PutParameterOptions, err
 	if err != nil {
 		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default tier")
 	}
+
 	dataType, err := ssm.ParseParameterDataType(cmd.String(importFlagDefaultDataType))
 	if err != nil {
 		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default data type")
 	}
+
 	policies := cmd.String(importFlagDefaultPolicies)
 	if policiesFile := strings.TrimSpace(cmd.String(importFlagDefaultPoliciesFile)); policiesFile != "" {
 		data, err := fileio.ReadFile(policiesFile)
 		if err != nil {
 			return ssm.PutParameterOptions{}, errors.Wrapf(err, "read default policies file %s", policiesFile)
 		}
+
 		policies = string(data)
 	}
+
 	return ssm.PutParameterOptions{
 		Tier:        tier,
 		DataType:    dataType,
@@ -164,10 +178,12 @@ func importPolicyFromCLI(cmd *cli.Command) (importcmd.Policy, error) {
 	if err != nil {
 		return importcmd.Policy{}, err
 	}
+
 	onUpdate, err := parseImportPolicyAction(cmd.String(importFlagOnUpdate), importFlagOnUpdate)
 	if err != nil {
 		return importcmd.Policy{}, err
 	}
+
 	return importcmd.Policy{OnCreate: onCreate, OnUpdate: onUpdate}, nil
 }
 
@@ -191,5 +207,6 @@ func importInput() (io.Reader, error) {
 	if err == nil && info.Mode()&os.ModeCharDevice != 0 {
 		return nil, errors.New("import requires data from stdin")
 	}
+
 	return os.Stdin, nil
 }

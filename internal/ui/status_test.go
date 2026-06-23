@@ -18,6 +18,7 @@ import (
 
 func TestWriteLoadProgress(t *testing.T) {
 	var output bytes.Buffer
+
 	progress := writeLoadProgress(&output)
 
 	progress(2, 3, "eu-north-1", []inventory.Item{{Path: "/app/one"}, {Path: "/app/two"}})
@@ -39,87 +40,99 @@ type fakeSSMClient struct {
 	metadataFilters     *[][]ssm.ParameterFilter
 }
 
-func (f fakeSSMClient) CheckAccess(context.Context) error { return nil }
+func (f *fakeSSMClient) CheckAccess(context.Context) error { return nil }
 
-func (f fakeSSMClient) ListRegions(context.Context) ([]string, error) {
+func (f *fakeSSMClient) ListRegions(context.Context) ([]string, error) {
 	if f.listRegionsErr != nil {
 		return nil, f.listRegionsErr
 	}
+
 	return append([]string(nil), f.regions...), nil
 }
 
-func (f fakeSSMClient) ForRegion(region string) ssm.Client {
-	f.region = region
-	return f
+func (f *fakeSSMClient) ForRegion(region string) ssm.Client {
+	regional := *f
+	regional.region = region
+
+	return &regional
 }
 
-func (f fakeSSMClient) DefaultRegion() string { return f.region }
+func (f *fakeSSMClient) DefaultRegion() string { return f.region }
 
-func (f fakeSSMClient) Get(ctx context.Context, path string) (ssm.Parameter, error) {
-	values, errs := f.GetMany(ctx, []string{path})
-	if value, ok := values[path]; ok {
-		return value, nil
-	}
-	if err, ok := errs[path]; ok {
-		return ssm.Parameter{}, err
-	}
-	return ssm.Parameter{}, ssm.ErrNotFound
-}
+func (f *fakeSSMClient) GetMany(ctx context.Context, paths []string) (values map[string]ssm.Parameter, errs map[string]error) {
+	_ = ctx
 
-func (f fakeSSMClient) GetMany(_ context.Context, paths []string) (values map[string]ssm.Parameter, errs map[string]error) {
 	if f.getManyCalls != nil {
 		*f.getManyCalls++
 	}
+
 	values = map[string]ssm.Parameter{}
 	errs = map[string]error{}
+
 	for _, path := range paths {
 		key := itemKey(f.region, path)
 		if err, ok := f.errs[key]; ok {
 			errs[path] = err
 			continue
 		}
+
 		if value, ok := f.params[key]; ok {
 			if value.Region == "" {
 				value.Region = f.region
 			}
+
 			values[path] = value
+
 			continue
 		}
+
 		errs[path] = ssm.ErrNotFound
 	}
+
 	return values, errs
 }
 
-func (f fakeSSMClient) DescribeMany(_ context.Context, paths []string) map[string]ssm.Metadata {
+func (f *fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[string]ssm.Metadata {
+	_ = ctx
+
 	if f.describeManyCalls != nil {
 		*f.describeManyCalls++
 	}
+
 	result := map[string]ssm.Metadata{}
+
 	for _, path := range paths {
 		key := itemKey(f.region, path)
 		if meta, ok := f.metas[key]; ok {
 			if meta.Region == "" {
 				meta.Region = f.region
 			}
+
 			result[path] = meta
 		}
 	}
+
 	return result
 }
 
-func (f fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
+func (f *fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
 	var result []ssm.Metadata
+
 	for key := range f.metas {
 		meta := f.metas[key]
+
 		region, _ := splitItemKey(key)
 		if region != f.region {
 			continue
 		}
+
 		if meta.Region == "" {
 			meta.Region = f.region
 		}
+
 		result = append(result, meta)
 	}
+
 	return result, nil
 }
 
@@ -129,59 +142,73 @@ func splitItemKey(key string) (region, path string) {
 			return key[:i], key[i+1:]
 		}
 	}
+
 	return "", key
 }
 
-func (f fakeSSMClient) ListParameterMetadataWithFilters(ctx context.Context, filters []ssm.ParameterFilter) ([]ssm.Metadata, error) {
+func (f *fakeSSMClient) ListParameterMetadataWithFilters(ctx context.Context, filters []ssm.ParameterFilter) ([]ssm.Metadata, error) {
 	if f.metadataFilterCalls != nil {
 		*f.metadataFilterCalls++
 	}
+
 	if f.metadataFilters != nil {
 		copied := make([]ssm.ParameterFilter, 0, len(filters))
 		for _, filter := range filters {
 			copied = append(copied, ssm.ParameterFilter{Key: filter.Key, Option: filter.Option, Values: append([]string(nil), filter.Values...)})
 		}
+
 		*f.metadataFilters = append(*f.metadataFilters, copied)
 	}
+
 	return f.ListParameterMetadata(ctx)
 }
 
-func (f fakeSSMClient) PutParameter(ctx context.Context, path, value string, parameterType ssm.ParameterType) error {
-	return f.PutParameterWithOptions(ctx, path, value, parameterType, ssm.PutParameterOptions{Overwrite: true})
-}
+func (f *fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
+	_ = ctx
 
-func (f fakeSSMClient) PutParameterWithOptions(_ context.Context, path, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) error {
 	if f.putOpts != nil {
 		f.putOpts[itemKey(f.region, path)] = opts
 	}
+
 	if f.params != nil {
 		f.params[itemKey(f.region, path)] = ssm.Parameter{Name: path, Region: f.region, Type: parameterType.String(), Value: value}
 	}
+
 	if f.metas != nil && (strings.TrimSpace(opts.Description) != "" || strings.TrimSpace(opts.Policies) != "" || opts.Tier.IsValid() || opts.DataType.IsValid()) {
 		meta := f.metas[itemKey(f.region, path)]
 		meta.Name = path
 		meta.Region = f.region
+
 		meta.Type = parameterType.String()
 		if strings.TrimSpace(opts.Description) != "" {
 			meta.Description = opts.Description
 		}
+
 		if opts.Tier.IsValid() {
 			meta.Tier = opts.Tier.String()
 		}
+
 		if opts.DataType.IsValid() {
 			meta.DataType = opts.DataType.String()
 		}
+
 		if opts.PoliciesSet || strings.TrimSpace(opts.Policies) != "" {
 			meta.Policies = opts.Policies
 		}
+
 		f.metas[itemKey(f.region, path)] = meta
 	}
+
 	return nil
 }
-func (f fakeSSMClient) DeleteMany(_ context.Context, _ []string) error { return nil }
+
+func (f *fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error {
+	_, _ = ctx, paths
+	return nil
+}
 
 func TestLoadStatusesByItemRegionCombinesValuesMetadataAndMissing(t *testing.T) {
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		params: map[string]ssm.Parameter{
 			itemKey("eu-north-1", "/app/api/password"): {Name: "/app/api/password", Type: "SecureString", Value: "secret", Version: 3},
 		},
@@ -206,7 +233,7 @@ func TestLoadStatusesByItemRegionCombinesValuesMetadataAndMissing(t *testing.T) 
 }
 
 func TestLoadStatusesRegionsExpandsWildcardItemsAcrossRegions(t *testing.T) {
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		params: map[string]ssm.Parameter{
 			itemKey("eu-north-1", "/app/api/password"): {Name: "/app/api/password", Type: "SecureString", Value: "secret"},
 		},
@@ -227,7 +254,7 @@ func TestLoadStatusesRegionsExpandsWildcardItemsAcrossRegions(t *testing.T) {
 }
 
 func TestLoadStatusesBatchForRegionsStreamEmitsWildcardRegionMatches(t *testing.T) {
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		params: map[string]ssm.Parameter{
 			itemKey("eu-north-1", "/app/api/password"): {Name: "/app/api/password", Type: "SecureString", Value: "secret"},
 		},
@@ -236,6 +263,7 @@ func TestLoadStatusesBatchForRegionsStreamEmitsWildcardRegionMatches(t *testing.
 		},
 	}
 	items := []inventory.Item{{Path: "/app/api/password", Region: "*"}}
+
 	var batches []Statuses
 
 	statuses := LoadStatusesBatchForRegionsStream(context.Background(), client, items, false, []string{"eu-north-1", "us-east-1"}, nil, func(batch Statuses) {
@@ -250,7 +278,7 @@ func TestLoadStatusesBatchForRegionsStreamEmitsWildcardRegionMatches(t *testing.
 
 func TestLoadStatusesRegionsAvoidsValueLookupsWhenValuesAreHidden(t *testing.T) {
 	getManyCalls := 0
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		getManyCalls: &getManyCalls,
 		metas: map[string]ssm.Metadata{
 			itemKey("eu-north-1", "/app/api/password"): {Name: "/app/api/password", Type: "SecureString"},
@@ -266,7 +294,7 @@ func TestLoadStatusesRegionsAvoidsValueLookupsWhenValuesAreHidden(t *testing.T) 
 }
 
 func TestLoadStatusesAllRegionsReturnsInlineErrorsWhenRegionDiscoveryFails(t *testing.T) {
-	client := fakeSSMClient{listRegionsErr: errors.New("regions unavailable")}
+	client := &fakeSSMClient{listRegionsErr: errors.New("regions unavailable")}
 	items := []inventory.Item{{Path: "/app/api/password", Region: "*"}}
 
 	statuses := LoadStatusesForRegions(context.Background(), client, items, true, nil)
@@ -278,30 +306,37 @@ func TestLoadStatusesAllRegionsReturnsInlineErrorsWhenRegionDiscoveryFails(t *te
 
 func TestExactNameFiltersAreBatchedAwayFromDescribeScans(t *testing.T) {
 	groups := make([]filter.Group, 0, 32)
+
 	for i := 0; i < 30; i++ {
 		group, err := filter.ParseGroup(fmt.Sprintf("/app/exact/%02d", i))
 		require.NoError(t, err)
+
 		groups = append(groups, group)
 	}
+
 	for _, value := range []string{"/app/wild-a/*", "/app/wild-b/*"} {
 		group, err := filter.ParseGroup(value)
 		require.NoError(t, err)
+
 		groups = append(groups, group)
 	}
 
 	params := map[string]ssm.Parameter{}
 	metas := map[string]ssm.Metadata{}
+
 	for i := 0; i < 30; i++ {
 		name := fmt.Sprintf("/app/exact/%02d", i)
 		params[itemKey("eu-north-1", name)] = ssm.Parameter{Name: name, Region: "eu-north-1", Type: "String", Value: "value"}
 		metas[itemKey("eu-north-1", name)] = ssm.Metadata{Name: name, Region: "eu-north-1", Type: "String"}
 	}
+
 	for _, name := range []string{"/app/wild-a/one", "/app/wild-b/two"} {
 		metas[itemKey("eu-north-1", name)] = ssm.Metadata{Name: name, Region: "eu-north-1", Type: "String"}
 	}
+
 	describeManyCalls := 0
 	metadataFilterCalls := 0
-	client := fakeSSMClient{region: "eu-north-1", params: params, metas: metas, describeManyCalls: &describeManyCalls, metadataFilterCalls: &metadataFilterCalls}
+	client := &fakeSSMClient{region: "eu-north-1", params: params, metas: metas, describeManyCalls: &describeManyCalls, metadataFilterCalls: &metadataFilterCalls}
 
 	statuses := LoadFilteredStatusesBatchForRegions(context.Background(), client, groups, false, []string{"eu-north-1"}, nil)
 
@@ -312,13 +347,17 @@ func TestExactNameFiltersAreBatchedAwayFromDescribeScans(t *testing.T) {
 
 func TestSingleConditionPrefilterGroupsAreMergedByKeyAndOption(t *testing.T) {
 	groups := make([]filter.Group, 0, 3)
+
 	for _, value := range []string{"/app-infra/prod**", "/app-infra/stage**"} {
 		group, err := filter.ParseGroup(value)
 		require.NoError(t, err)
+
 		groups = append(groups, group)
 	}
+
 	separateGroup, err := filter.ParseGroup("type:SecureString")
 	require.NoError(t, err)
+
 	groups = append(groups, separateGroup)
 
 	metas := map[string]ssm.Metadata{
@@ -327,8 +366,10 @@ func TestSingleConditionPrefilterGroupsAreMergedByKeyAndOption(t *testing.T) {
 		itemKey("eu-north-1", "/app-infra/prod-secret"): {Name: "/app-infra/prod-secret", Region: "eu-north-1", Type: "SecureString"},
 	}
 	metadataFilterCalls := 0
+
 	var metadataFilters [][]ssm.ParameterFilter
-	client := fakeSSMClient{region: "eu-north-1", metas: metas, metadataFilterCalls: &metadataFilterCalls, metadataFilters: &metadataFilters}
+
+	client := &fakeSSMClient{region: "eu-north-1", metas: metas, metadataFilterCalls: &metadataFilterCalls, metadataFilters: &metadataFilters}
 
 	statuses := LoadFilteredStatusesBatchForRegions(context.Background(), client, groups, false, []string{"eu-north-1"}, nil)
 
@@ -341,9 +382,9 @@ func TestSingleConditionPrefilterGroupsAreMergedByKeyAndOption(t *testing.T) {
 
 func TestStatusHelpers(t *testing.T) {
 	status := statusFromValue(
-		inventory.Item{Path: "/path", Region: "*"},
-		ssm.Parameter{Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: "param-date"},
-		ssm.Metadata{Tier: "Advanced", Description: "desc", User: "user"},
+		&inventory.Item{Path: "/path", Region: "*"},
+		&ssm.Parameter{Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: "param-date"},
+		&ssm.Metadata{Tier: "Advanced", Description: "desc", User: "user"},
 		true,
 	)
 
@@ -353,23 +394,23 @@ func TestStatusHelpers(t *testing.T) {
 	assert.Equal(t, hashPrefix("secret"), status.SHA256Prefix)
 	assert.Equal(t, "param-date", status.Modified)
 	assert.Equal(t, "OK", status.Label())
-	assert.Equal(t, "MISS", Status{}.Label())
-	assert.Equal(t, "ERR", (Status{Error: "boom"}).Label())
-	assert.Equal(t, "EMPTY", (Status{Exists: true, Empty: true}).Label())
-	assert.Equal(t, "MISSING", Status{}.DisplayLabel())
-	assert.Equal(t, "ERROR", (Status{Error: "boom"}).DisplayLabel())
-	assert.Equal(t, "eu-north-1", (Status{Item: inventory.Item{Region: "eu-north-1"}}).RegionLabel("us-east-1"))
-	assert.Equal(t, "-", (Status{Item: inventory.Item{Region: "*"}}).RegionLabel("eu-north-1"))
-	assert.Equal(t, "us-east-1", Status{}.RegionLabel("us-east-1"))
-	assert.True(t, (Status{Type: ssm.ParameterTypeSecureString.String()}).HasSensitiveValue())
-	assert.False(t, (Status{Type: ssm.ParameterTypeString.String()}).HasSensitiveValue())
+	assert.Equal(t, "MISS", (&Status{}).Label())
+	assert.Equal(t, "ERR", (&Status{Error: "boom"}).Label())
+	assert.Equal(t, "EMPTY", (&Status{Exists: true, Empty: true}).Label())
+	assert.Equal(t, "MISSING", (&Status{}).DisplayLabel())
+	assert.Equal(t, "ERROR", (&Status{Error: "boom"}).DisplayLabel())
+	assert.Equal(t, "eu-north-1", (&Status{Item: inventory.Item{Region: "eu-north-1"}}).RegionLabel("us-east-1"))
+	assert.Equal(t, "-", (&Status{Item: inventory.Item{Region: "*"}}).RegionLabel("eu-north-1"))
+	assert.Equal(t, "us-east-1", (&Status{}).RegionLabel("us-east-1"))
+	assert.True(t, (&Status{Type: ssm.ParameterTypeSecureString.String()}).HasSensitiveValue())
+	assert.False(t, (&Status{Type: ssm.ParameterTypeString.String()}).HasSensitiveValue())
 }
 
 func TestSecureStringWithoutIncludedValueIsNotEmpty(t *testing.T) {
 	status := statusFromValue(
-		inventory.Item{Path: "/secret", Region: "eu-north-1"},
-		ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), Value: "encrypted-ciphertext"},
-		ssm.Metadata{},
+		&inventory.Item{Path: "/secret", Region: "eu-north-1"},
+		&ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), Value: "encrypted-ciphertext"},
+		&ssm.Metadata{},
 		false,
 	)
 
@@ -381,9 +422,9 @@ func TestSecureStringWithoutIncludedValueIsNotEmpty(t *testing.T) {
 
 func TestHiddenSecureStringValueIsNotEmpty(t *testing.T) {
 	status := statusFromValue(
-		inventory.Item{Path: "/secret", Region: "eu-north-1"},
-		ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), ValueHidden: true},
-		ssm.Metadata{},
+		&inventory.Item{Path: "/secret", Region: "eu-north-1"},
+		&ssm.Parameter{Type: ssm.ParameterTypeSecureString.String(), ValueHidden: true},
+		&ssm.Metadata{},
 		true,
 	)
 
@@ -396,6 +437,7 @@ func TestHiddenSecureStringValueIsNotEmpty(t *testing.T) {
 func TestStatusesFilterKeepsMatchingStatuses(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a"})
 	require.NoError(t, err)
+
 	statuses := []Status{
 		{Item: inventory.Item{Path: "/app/a"}, Exists: true},
 		{Item: inventory.Item{Path: "/app/b"}, Exists: true},
@@ -408,7 +450,7 @@ func TestStatusesFilterKeepsMatchingStatuses(t *testing.T) {
 }
 
 func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing.T) {
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		params: map[string]ssm.Parameter{
 			itemKey("eu-north-1", "/app/a"): {Name: "/app/a", Region: "eu-north-1", Type: "String", Value: "one", Version: 1},
 			itemKey("us-east-1", "/app/b"):  {Name: "/app/b", Region: "us-east-1", Type: "SecureString", Value: "two", Version: 2},
@@ -431,7 +473,7 @@ func TestLoadStatusesWithoutItemsDiscoversParametersInSelectedRegions(t *testing
 }
 
 func TestLoadStatusesWithoutItemsKeepsMetadataWhenValuesAreNotIncluded(t *testing.T) {
-	client := fakeSSMClient{
+	client := &fakeSSMClient{
 		region: "eu-north-1",
 		metas: map[string]ssm.Metadata{
 			itemKey("eu-north-1", "/app/meta-only"): {Name: "/app/meta-only", Type: "String", Tier: "Standard", Description: "desc"},

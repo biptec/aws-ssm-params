@@ -9,9 +9,9 @@ import (
 )
 
 type editorOptions struct {
-	opts Options
-	editorState
-	current Status
+	opts *Options
+	*editorState
+	current *Status
 }
 
 type (
@@ -21,23 +21,24 @@ type (
 	overwriteOptions         []overwriteItem
 )
 
-func newEditorOptions(m model) editorOptions {
-	return editorOptions{opts: m.opts, editorState: m.editorState, current: m.currentStatus()}
+func newEditorOptions(m model) *editorOptions {
+	current := m.currentStatus()
+	return &editorOptions{opts: &m.opts, editorState: &m.editorState, current: &current}
 }
 
-func (m editorOptions) currentStatus() Status {
-	return m.current
+func (m *editorOptions) currentStatus() Status {
+	return *m.current
 }
 
-func (m editorOptions) currentItem() inventory.Item {
+func (m *editorOptions) currentItem() inventory.Item {
 	return m.current.Item
 }
 
-func (m editorOptions) fieldAllowed(field string) bool {
+func (m *editorOptions) fieldAllowed(field string) bool {
 	return m.opts.Fields.Allows(field)
 }
 
-func (m editorOptions) editFieldAllowed(field editField) bool {
+func (m *editorOptions) editFieldAllowed(field editField) bool {
 	switch field {
 	case editFieldFilePath:
 		return true
@@ -106,19 +107,21 @@ func overwriteItems() overwriteOptions {
 
 // initialEditType chooses the type shown when opening an editor.
 // Existing parameters preserve their AWS type, while missing/new parameters default to SecureString.
-func (m editorOptions) initialEditType() ssm.ParameterType {
+func (m *editorOptions) initialEditType() ssm.ParameterType {
 	current := m.currentStatus().Type
 	if parameterType, err := ssm.ParseParameterType(current); err == nil {
 		return parameterType
 	}
+
 	return ssm.DefaultParameterType
 }
 
 // normalizedEditType returns a valid parameter type even if edit state has not been initialized yet.
-func (m editorOptions) normalizedEditType() ssm.ParameterType {
+func (m *editorOptions) normalizedEditType() ssm.ParameterType {
 	if m.editType.IsValid() {
 		return m.editType
 	}
+
 	return ssm.DefaultParameterType
 }
 
@@ -128,6 +131,7 @@ func (items parameterTypeOptions) index(value ssm.ParameterType) int {
 			return i
 		}
 	}
+
 	return 0
 }
 
@@ -137,29 +141,32 @@ func (items parameterTypeOptions) indexByHotkey(key string) (int, bool) {
 			return i, true
 		}
 	}
+
 	return 0, false
 }
 
-func (m editorOptions) initialEditTier() ssm.ParameterTier {
+func (m *editorOptions) initialEditTier() ssm.ParameterTier {
 	current := m.currentStatus().Tier
 	if tier, err := ssm.ParseParameterTier(current); err == nil {
 		return tier
 	}
+
 	return ssm.DefaultParameterTier
 }
 
-func (m editorOptions) normalizedEditTier() ssm.ParameterTier {
+func (m *editorOptions) normalizedEditTier() ssm.ParameterTier {
 	if m.editTier.IsValid() {
 		return m.editTier
 	}
+
 	return ssm.DefaultParameterTier
 }
 
-func (m editorOptions) shouldShowPoliciesField() bool {
+func (m *editorOptions) shouldShowPoliciesField() bool {
 	return m.editFieldAllowed(editFieldPolicies) && m.normalizedEditTier() == ssm.ParameterTierAdvanced
 }
 
-func (m editorOptions) shouldShowOverwriteField() bool {
+func (m *editorOptions) shouldShowOverwriteField() bool {
 	return m.editFieldAllowed(editFieldOverwrite) && (m.editNewParameter || !m.currentStatus().Exists)
 }
 
@@ -169,6 +176,7 @@ func (items parameterTierOptions) index(value ssm.ParameterTier) int {
 			return i
 		}
 	}
+
 	return 0
 }
 
@@ -178,21 +186,24 @@ func (items parameterTierOptions) indexByHotkey(key string) (int, bool) {
 			return i, true
 		}
 	}
+
 	return 0, false
 }
 
-func (m editorOptions) initialEditDataType() ssm.ParameterDataType {
+func (m *editorOptions) initialEditDataType() ssm.ParameterDataType {
 	current := m.currentStatus().DataType
 	if dataType, err := ssm.ParseParameterDataType(current); err == nil {
 		return dataType
 	}
+
 	return ssm.DefaultParameterDataType
 }
 
-func (m editorOptions) normalizedEditDataType() ssm.ParameterDataType {
+func (m *editorOptions) normalizedEditDataType() ssm.ParameterDataType {
 	if m.editDataType.IsValid() {
 		return m.editDataType
 	}
+
 	return ssm.DefaultParameterDataType
 }
 
@@ -202,6 +213,7 @@ func (items parameterDataTypeOptions) index(value ssm.ParameterDataType) int {
 			return i
 		}
 	}
+
 	return 0
 }
 
@@ -211,6 +223,7 @@ func (items parameterDataTypeOptions) indexByHotkey(key string) (int, bool) {
 			return i, true
 		}
 	}
+
 	return 0, false
 }
 
@@ -220,6 +233,7 @@ func (items overwriteOptions) index(value bool) int {
 			return i
 		}
 	}
+
 	return 0
 }
 
@@ -229,34 +243,40 @@ func (items overwriteOptions) indexByHotkey(key string) (int, bool) {
 			return i, true
 		}
 	}
+
 	return 0, false
 }
 
 // initialEditRegion chooses the default concrete region when editing a parameter.
 // For wildcard rows it prefers the first configured region so saving never targets "*" accidentally.
-func (m editorOptions) initialEditRegion() string {
+func (m *editorOptions) initialEditRegion() string {
 	item := m.currentItem()
 	if item.Region != "" && item.Region != "*" {
 		return item.Region
 	}
+
 	regions := m.regionOptions()
 	if len(regions) > 0 {
 		return regions[0]
 	}
+
 	if m.opts.Region != "all regions" {
 		return m.opts.Region
 	}
+
 	return ""
 }
 
 // regionOptions returns the concrete regions available for saving the current value.
-func (m editorOptions) regionOptions() []string {
+func (m *editorOptions) regionOptions() []string {
 	if len(m.opts.Regions) > 0 {
 		return append([]string(nil), m.opts.Regions...)
 	}
+
 	if m.opts.Region != "" && m.opts.Region != "all regions" && m.opts.Region != "-" {
 		return []string{m.opts.Region}
 	}
+
 	return nil
 }
 
@@ -265,15 +285,19 @@ func prettyPoliciesForEditor(raw string) string {
 	if raw == "" {
 		return ""
 	}
+
 	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return raw
 	}
+
 	decoded = canonicalPoliciesForEditor(decoded)
+
 	out, err := json.MarshalIndent(decoded, "", "  ")
 	if err != nil {
 		return raw
 	}
+
 	return string(out)
 }
 
@@ -282,15 +306,19 @@ func normalizePoliciesForAWS(raw string) string {
 	if raw == "" {
 		return ""
 	}
+
 	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return raw
 	}
+
 	decoded = canonicalPoliciesForEditor(decoded)
+
 	out, err := json.Marshal(decoded)
 	if err != nil {
 		return raw
 	}
+
 	return string(out)
 }
 
@@ -301,6 +329,7 @@ func canonicalPoliciesForEditor(value any) any {
 		for _, item := range v {
 			out = append(out, canonicalPolicyItem(item))
 		}
+
 		return out
 	default:
 		return canonicalPolicyItem(v)
@@ -312,10 +341,12 @@ func canonicalPolicyItem(value any) any {
 	if !ok {
 		return value
 	}
+
 	policyText, ok := v["PolicyText"]
 	if !ok {
 		return value
 	}
+
 	switch text := policyText.(type) {
 	case string:
 		var decoded any
@@ -325,5 +356,6 @@ func canonicalPolicyItem(value any) any {
 	case map[string]any, []any:
 		return canonicalPoliciesForEditor(text)
 	}
+
 	return value
 }

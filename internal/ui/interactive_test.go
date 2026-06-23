@@ -20,7 +20,7 @@ import (
 )
 
 func TestMergeStatusBatchReplacesWildcardPendingRow(t *testing.T) {
-	m := newModel(context.Background(), fakeSSMClient{}, []inventory.Item{{Path: "/app/api/password", Region: "*"}}, Options{})
+	m := newModel(context.Background(), &fakeSSMClient{}, []inventory.Item{{Path: "/app/api/password", Region: "*"}}, &Options{})
 
 	m.mergeStatusBatch([]Status{{Item: inventory.Item{Path: "/app/api/password", Region: "eu-north-1"}, Exists: true, Type: "SecureString"}})
 
@@ -31,20 +31,20 @@ func TestMergeStatusBatchReplacesWildcardPendingRow(t *testing.T) {
 }
 
 func TestUpdateLoadingAllowsQuitWhileLongLoadIsRunning(t *testing.T) {
-	_, cmd := model{}.updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	_, cmd := (model{modelState: &modelState{}}).updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
 }
 
 func TestUpdateLoadingIgnoresUnrelatedKeys(t *testing.T) {
-	_, cmd := model{}.updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	_, cmd := (model{modelState: &modelState{}}).updateLoading(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
 
 	assert.Nil(t, cmd)
 }
 
 func TestLoadingStartsWithCenteredSpinnerOverlay(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 80
 	m.height = 20
 
@@ -57,7 +57,7 @@ func TestLoadingStartsWithCenteredSpinnerOverlay(t *testing.T) {
 }
 
 func TestLoadingProgressKeepsStatusLineMessage(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 90
 	m.height = 20
 
@@ -75,7 +75,7 @@ func TestLoadingProgressKeepsStatusLineMessage(t *testing.T) {
 }
 
 func TestStatusBatchKeepsLoadingOverlayUntilFinalLoad(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 80
 	m.height = 20
 
@@ -88,7 +88,7 @@ func TestStatusBatchKeepsLoadingOverlayUntilFinalLoad(t *testing.T) {
 }
 
 func TestLoadingSpinnerTickAdvancesWhileLoading(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 
 	updated, cmd := m.Update(loadingTickMsg{})
 	m = updated.(model)
@@ -99,19 +99,20 @@ func TestLoadingSpinnerTickAdvancesWhileLoading(t *testing.T) {
 
 func TestNewModelStoresContextForAsyncLoad(t *testing.T) {
 	type contextKey struct{}
+
 	ctx := context.WithValue(context.Background(), contextKey{}, "value")
 
-	m := newModel(ctx, nil, nil, Options{})
+	m := newModel(ctx, nil, nil, &Options{})
 
-	require.NotNil(t, m.ctx)
-	assert.Equal(t, "value", m.ctx.Value(contextKey{}))
+	require.NotNil(t, m.contextProvider())
+	assert.Equal(t, "value", m.contextProvider().Value(contextKey{}))
 }
 
 func TestStartMultilinePreservesExistingParameterType(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/log-level", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "debug"}}
 
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
@@ -119,7 +120,7 @@ func TestStartMultilinePreservesExistingParameterType(t *testing.T) {
 }
 
 func TestUpdateTypeSelectChangesEditTypeAndReturnsToEditor(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeSecureString
 	m.editField = editFieldType
@@ -137,26 +138,27 @@ func TestUpdateTypeSelectChangesEditTypeAndReturnsToEditor(t *testing.T) {
 }
 
 func TestSaveValueCmdWritesSelectedParameterType(t *testing.T) {
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
 	item := inventory.Item{Path: "/app/hosts", Region: "eu-north-1"}
 
-	msg := saveValueCmd(context.Background(), client, item, item.Path, "api.example.com,www.example.com", ssm.ParameterTypeStringList, ssm.PutParameterOptions{Tier: ssm.ParameterTierStandard, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
+	msg := saveValueCmd(context.Background(), client, &item, item.Path, "api.example.com,www.example.com", ssm.ParameterTypeStringList, ssm.PutParameterOptions{Tier: ssm.ParameterTierStandard, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
 
 	updated, ok := msg.(statusUpdatedMsg)
 	require.True(t, ok)
 	require.NoError(t, updated.err)
+
 	stored := client.params[itemKey("eu-north-1", "/app/hosts")]
 	assert.Equal(t, ssm.ParameterTypeStringList.String(), stored.Type)
 	assert.Equal(t, "api.example.com,www.example.com", stored.Value)
 }
 
 func TestReplaceStatusPrefersMatchingRegion(t *testing.T) {
-	m := model{listState: listState{statuses: []Status{
+	m := model{modelState: &modelState{listState: listState{statuses: []Status{
 		{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "eu"},
 		{Item: inventory.Item{Path: "/app/value", Region: "us-east-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "us"},
-	}}}
+	}}}}
 
-	m.replaceStatus("/app/value", Status{Item: inventory.Item{Path: "/app/value", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
+	m.replaceStatus("/app/value", &Status{Item: inventory.Item{Path: "/app/value", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
 
 	assert.Equal(t, "eu", m.statuses[0].Value)
 	assert.Equal(t, "updated", m.statuses[1].Value)
@@ -164,38 +166,39 @@ func TestReplaceStatusPrefersMatchingRegion(t *testing.T) {
 }
 
 func TestDisplayValueShowsSecureStringWhenDecrypted(t *testing.T) {
-	m := model{runtimeState: runtimeState{width: 100}}
+	m := model{modelState: &modelState{runtimeState: runtimeState{width: 100}}}
 
-	assert.Equal(t, "secret", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
-	assert.Equal(t, "plain", m.displayValue(Status{Type: ssm.ParameterTypeString.String(), Value: "plain"}, false))
-	assert.Equal(t, "a,b", m.displayValue(Status{Type: ssm.ParameterTypeStringList.String(), Value: "a,b"}, false))
+	assert.Equal(t, "secret", m.displayValue(&Status{Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}, false))
+	assert.Equal(t, "plain", m.displayValue(&Status{Type: ssm.ParameterTypeString.String(), Value: "plain"}, false))
+	assert.Equal(t, "a,b", m.displayValue(&Status{Type: ssm.ParameterTypeStringList.String(), Value: "a,b"}, false))
 }
 
 func TestDisplayValueShowsEncryptedPlaceholderWithoutDecryption(t *testing.T) {
-	m := model{runtimeState: runtimeState{width: 100}}
+	m := model{modelState: &modelState{runtimeState: runtimeState{width: 100}}}
 
-	assert.Equal(t, "(encrypted)", m.displayValue(Status{Type: ssm.ParameterTypeSecureString.String()}, false))
+	assert.Equal(t, "(encrypted)", m.displayValue(&Status{Type: ssm.ParameterTypeSecureString.String()}, false))
 }
 
 func TestEncryptedPlaceholderUsesMutedValueStyleOnly(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
-	m := newModel(context.Background(), nil, nil, Options{NoColor: false, ShowColumns: []string{"value"}})
+
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: false, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 20
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
 
-	row := m.renderListRow(1, m.statuses[0], false, m.tableColumns([]int{0}))
+	row := m.renderListRow(1, &m.statuses[0], false, m.tableColumns([]int{0}))
 
 	assert.Contains(t, row, m.encryptedPlaceholder())
 	assert.NotContains(t, row, "\x1b[38;5;45m")
 }
 
 func TestDisplayValueRendersMultilineAsSingleLinePreview(t *testing.T) {
-	m := model{runtimeState: runtimeState{width: 80}}
+	m := model{modelState: &modelState{runtimeState: runtimeState{width: 80}}}
 	st := Status{Type: ssm.ParameterTypeString.String(), Value: "one\ntwo\nthree"}
 
-	preview := m.displayValue(st, true)
+	preview := m.displayValue(&st, true)
 
 	assert.Equal(t, `one\ntwo\nthree...`, preview)
 	assert.False(t, strings.Contains(preview, "\n"))
@@ -208,10 +211,10 @@ func TestOneLineValuePreviewTruncatesLongMultilineValues(t *testing.T) {
 }
 
 func TestStartMultilineInitializesEditableFields(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "hello"}}
 
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
@@ -225,12 +228,12 @@ func TestStartMultilineInitializesEditableFields(t *testing.T) {
 }
 
 func TestStartMultilineShowsEncryptedSecureStringPlaceholderWithoutDecryption(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.width = 80
 	m.height = 24
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/secret", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()}}
 
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	actual := updated.(model)
 
 	assert.Equal(t, screenTextArea, actual.screen)
@@ -241,7 +244,7 @@ func TestStartMultilineShowsEncryptedSecureStringPlaceholderWithoutDecryption(t 
 }
 
 func TestEncryptedSecureStringValueFieldBecomesEditableWhenFocused(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.width = 80
 	m.height = 24
 	m.screen = screenTextArea
@@ -279,7 +282,7 @@ func TestEncryptedSecureStringValueFieldBecomesEditableWhenFocused(t *testing.T)
 }
 
 func TestSavingChangedEncryptedSecureStringWithoutDecryptionRequiresValue(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editRegion = "eu-north-1"
 	m.editType = ssm.ParameterTypeSecureString
@@ -298,7 +301,7 @@ func TestSavingChangedEncryptedSecureStringWithoutDecryptionRequiresValue(t *tes
 }
 
 func TestSavingUnchangedEncryptedSecureStringWithoutDecryptionIsNoop(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editRegion = "eu-north-1"
 	m.editType = ssm.ParameterTypeSecureString
@@ -317,8 +320,8 @@ func TestSavingUnchangedEncryptedSecureStringWithoutDecryptionIsNoop(t *testing.
 }
 
 func TestSavingEncryptedSecureStringWithoutDecryptionAllowsReplacementValue(t *testing.T) {
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}}
-	m := newModel(context.Background(), client, nil, Options{})
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}}
+	m := newModel(context.Background(), client, nil, &Options{})
 	m.screen = screenTextArea
 	m.editRegion = "eu-north-1"
 	m.editType = ssm.ParameterTypeSecureString
@@ -332,6 +335,7 @@ func TestSavingEncryptedSecureStringWithoutDecryptionAllowsReplacementValue(t *t
 
 	require.NotNil(t, cmd)
 	assert.Empty(t, actual.errMessage)
+
 	msg := cmd()
 	result, ok := msg.(statusUpdatedMsg)
 	require.True(t, ok)
@@ -340,7 +344,7 @@ func TestSavingEncryptedSecureStringWithoutDecryptionAllowsReplacementValue(t *t
 }
 
 func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
-	m := newModel(context.Background(), fakeSSMClient{regions: []string{"eu-north-1", "us-east-1"}}, nil, Options{Region: "eu-north-1"})
+	m := newModel(context.Background(), &fakeSSMClient{regions: []string{"eu-north-1", "us-east-1"}}, nil, &Options{Region: "eu-north-1"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.editRegion = "eu-north-1"
@@ -454,7 +458,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 }
 
 func TestEditFieldsSupportArrowNavigationForSingleLineInputs(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldSSMPath
 	m.editPathInput.Focus()
@@ -471,7 +475,7 @@ func TestEditFieldsSupportArrowNavigationForSingleLineInputs(t *testing.T) {
 func TestEditFieldsSupportArrowNavigationInViNormalAndInsertModes(t *testing.T) {
 	for _, insertMode := range []bool{false, true} {
 		t.Run(fmt.Sprintf("insert=%v", insertMode), func(t *testing.T) {
-			m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "vi"})
+			m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi"})
 			m.screen = screenTextArea
 			m.editField = editFieldSSMPath
 			m.viInsertMode = insertMode
@@ -501,7 +505,7 @@ func TestEditFieldsUseKeymapNavigationBetweenSingleLineInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: tt.keymap})
+			m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: tt.keymap})
 			m.screen = screenTextArea
 			m.editField = editFieldSSMPath
 			m.viInsertMode = false
@@ -519,7 +523,7 @@ func TestEditFieldsUseKeymapNavigationBetweenSingleLineInputs(t *testing.T) {
 }
 
 func TestCompactExpandableFieldsSupportVerticalFieldNavigation(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -538,7 +542,7 @@ func TestCompactExpandableFieldsSupportVerticalFieldNavigation(t *testing.T) {
 }
 
 func TestExpandedExpandableFieldsKeepKeymapNavigationInsideTextarea(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -553,7 +557,7 @@ func TestExpandedExpandableFieldsKeepKeymapNavigationInsideTextarea(t *testing.T
 }
 
 func TestEditFieldArrowsStayInsideMultilineTextarea(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetValue("one\ntwo")
@@ -569,9 +573,10 @@ func TestEditFieldArrowsStayInsideMultilineTextarea(t *testing.T) {
 }
 
 func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("loaded-from-disk\nsecond-line"), 0o600))
+
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetValue("old")
@@ -587,7 +592,7 @@ func TestFileActionPopupLoadsValueFromFile(t *testing.T) {
 }
 
 func TestFileActionPopupWritesNonSecureValueToFile(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	path := t.TempDir() + "/value.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
@@ -596,6 +601,7 @@ func TestFileActionPopupWritesNonSecureValueToFile(t *testing.T) {
 	actual, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
+
 	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "plain-value", string(data))
@@ -605,7 +611,7 @@ func TestFileActionPopupWritesNonSecureValueToFile(t *testing.T) {
 }
 
 func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	path := t.TempDir() + "/secret.txt"
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeSecureString
@@ -618,6 +624,7 @@ func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
 	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
 	assert.Equal(t, fileWriteConfirmationSecure, m.pendingFileWrite)
 	assert.Empty(t, m.warningMessage)
+
 	_, err := os.Stat(path)
 	assert.True(t, os.IsNotExist(err))
 
@@ -625,6 +632,7 @@ func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
 	m = updated.(model)
 
 	assert.Nil(t, cmd)
+
 	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "secret-value", string(data))
@@ -633,27 +641,30 @@ func TestFileActionPopupRequiresYForSecureStringFileWrite(t *testing.T) {
 }
 
 func TestFileActionPopupReportsMissingFilePathForReadAndWrite(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetValue("value")
 
 	updated, cmd := submitFileActionPopup(t, m, "load", "")
 	m = updated
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, "File path is required.", m.errMessage)
 
 	m.errMessage = ""
 	updated, cmd = submitFileActionPopup(t, m, "write", "")
 	m = updated
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, "File path is required.", m.errMessage)
 }
 
 func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
 	m.editField = editFieldValue
@@ -672,6 +683,7 @@ func TestFileActionPopupRequiresYBeforeOverwritingExistingFile(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, popupNone, m.activePopup)
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
@@ -689,11 +701,11 @@ func TestPromptLineCountPreservesTrailingEmptyLines(t *testing.T) {
 }
 
 func TestRenderTextAreaScreenShowsAlignedSSMAndDescription(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeSecureString.String(), Value: "secret"}}
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	m = updated.(model)
 	m.editDescriptionInput.SetValue("Example parameter")
 
@@ -713,7 +725,7 @@ func TestRenderTextAreaScreenShowsAlignedSSMAndDescription(t *testing.T) {
 }
 
 func TestRenderTextAreaScreenDoesNotIndentValueWhenFilePathFocused(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -732,7 +744,7 @@ func TestRenderTextAreaScreenDoesNotIndentValueWhenFilePathFocused(t *testing.T)
 }
 
 func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Region: "eu-central-1"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-central-1"})
 	m.width = 120
 	m.height = 30
 	m.screen = screenRegionSelect
@@ -751,12 +763,12 @@ func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
 }
 
 func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
-	m := model{listState: listState{statuses: []Status{
+	m := model{modelState: &modelState{listState: listState{statuses: []Status{
 		{Item: inventory.Item{Path: "/old/path", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "eu"},
 		{Item: inventory.Item{Path: "/old/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "us"},
-	}}}
+	}}}}
 
-	m.replaceStatus("/old/path", Status{Item: inventory.Item{Path: "/new/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
+	m.replaceStatus("/old/path", &Status{Item: inventory.Item{Path: "/new/path", Region: "us-east-1"}, Type: ssm.ParameterTypeString.String(), Value: "updated"})
 
 	assert.Equal(t, "/old/path", m.statuses[0].Item.Path)
 	assert.Equal(t, "eu", m.statuses[0].Value)
@@ -765,7 +777,7 @@ func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
 }
 
 func TestOptionSelectorsSupportTabNavigation(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.editRegionOptions = []string{"eu-central-1", "us-east-1", "ap-southeast-1"}
 	m.regionCursor = 0
 
@@ -788,7 +800,7 @@ func TestOptionSelectorsSupportTabNavigation(t *testing.T) {
 }
 
 func TestWriteValueCreatesNewFileInExistingDirectory(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	dir := t.TempDir()
 	path := dir + "/new-value.txt"
 	m.screen = screenTextArea
@@ -798,6 +810,7 @@ func TestWriteValueCreatesNewFileInExistingDirectory(t *testing.T) {
 	m, cmd := submitFileActionPopup(t, m, "write", path)
 
 	assert.Nil(t, cmd)
+
 	data, err := fileio.ReadFile(path)
 	require.NoError(t, err)
 	assert.Equal(t, "created-value", string(data))
@@ -805,9 +818,10 @@ func TestWriteValueCreatesNewFileInExistingDirectory(t *testing.T) {
 }
 
 func TestWriteValueExpandsHomeDirectory(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+
 	m.screen = screenTextArea
 	m.editType = ssm.ParameterTypeString
 	m.textArea.SetValue("home-value")
@@ -815,6 +829,7 @@ func TestWriteValueExpandsHomeDirectory(t *testing.T) {
 	m, cmd := submitFileActionPopup(t, m, "write", "~/new-value.txt")
 
 	assert.Nil(t, cmd)
+
 	data, err := fileio.ReadFile(home + "/new-value.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "home-value", string(data))
@@ -822,7 +837,7 @@ func TestWriteValueExpandsHomeDirectory(t *testing.T) {
 }
 
 func TestUpdateHandlesCtrlCQuitConfirmationEverywhere(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.SetWidth(max(20, m.width-14))
@@ -839,12 +854,13 @@ func TestUpdateHandlesCtrlCQuitConfirmationEverywhere(t *testing.T) {
 
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	_ = updated.(model)
+
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
 }
 
 func TestUpdateHandlesCtrlQQuitConfirmationEverywhere(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenHelp
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlQ})
@@ -857,12 +873,13 @@ func TestUpdateHandlesCtrlQQuitConfirmationEverywhere(t *testing.T) {
 
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	_ = updated.(model)
+
 	require.NotNil(t, cmd)
 	assert.IsType(t, tea.QuitMsg{}, cmd())
 }
 
 func TestTransientMessagesClearOnNextUserAction(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.warningMessage = "warning"
@@ -878,7 +895,7 @@ func TestTransientMessagesClearOnNextUserAction(t *testing.T) {
 }
 
 func TestFooterStatusLineIsDynamic(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 
 	withoutStatus := m.renderFooterWithStatus("q back")
 	m.warningMessage = "warning"
@@ -890,7 +907,7 @@ func TestFooterStatusLineIsDynamic(t *testing.T) {
 }
 
 func TestEditorFooterKeepsHotkeysAtSameBottomOffset(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 
 	withoutStatus := m.renderFooterWithStatus("ctrl+s save")
 	m.warningMessage = "warning"
@@ -902,7 +919,7 @@ func TestEditorFooterKeepsHotkeysAtSameBottomOffset(t *testing.T) {
 }
 
 func TestMainScreenMessageIsRenderedOnlyInStatusArea(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 40
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "value"}}
@@ -918,7 +935,7 @@ func TestMainScreenMessageIsRenderedOnlyInStatusArea(t *testing.T) {
 }
 
 func TestEditScreenWithStatusDoesNotHideTopFields(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 20
 	m.screen = screenTextArea
@@ -937,7 +954,7 @@ func TestEditScreenWithStatusDoesNotHideTopFields(t *testing.T) {
 }
 
 func TestTextAreaContentHeightShrinksOnlyWhenStatusMessageExists(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.height = 30
 	m.screen = screenTextArea
 	m.editField = editFieldValue
@@ -955,7 +972,7 @@ func TestTextAreaContentHeightShrinksOnlyWhenStatusMessageExists(t *testing.T) {
 }
 
 func TestMainContentListHeightUsesStatusSpaceOnlyWhenMessageExists(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.height = 40
 
 	withoutStatusContent := m
@@ -977,6 +994,7 @@ func hotkeyOffsetFromBottom(view, hotkey string) int {
 			return len(lines) - i
 		}
 	}
+
 	return -1
 }
 
@@ -984,7 +1002,7 @@ func TestOptionNavigationWrapsAround(t *testing.T) {
 	assert.Equal(t, 0, nextCursor(2, 3))
 	assert.Equal(t, 2, previousCursor(0, 3))
 
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.editRegionOptions = []string{"eu-central-1", "us-east-1", "ap-southeast-1"}
 	m.regionCursor = 2
 	updated, _ := m.updateRegionSelect(tea.KeyMsg{Type: tea.KeyTab})
@@ -1009,12 +1027,11 @@ func TestCommonBottomLayoutKeepsLoadingAndHelpFootersStable(t *testing.T) {
 
 	for _, tt := range screens {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+			m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 			m.width = 120
 			m.height = 24
 			m.screen = tt.screen
 			m.loadingTitle = "Saving parameter..."
-			m.loadingLines = []string{"/app/value"}
 
 			withoutStatus := m.View()
 			m.warningMessage = `Are you sure you want to quit? Press "y" to confirm.`
@@ -1028,7 +1045,7 @@ func TestCommonBottomLayoutKeepsLoadingAndHelpFootersStable(t *testing.T) {
 }
 
 func TestRenderTextAreaDoesNotAddFakeRowsWhenHeightChanges(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenTextArea
@@ -1053,7 +1070,7 @@ func TestRenderTextAreaDoesNotAddFakeRowsWhenHeightChanges(t *testing.T) {
 }
 
 func TestBackspaceRemovesEmptyTextareaRows(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -1075,7 +1092,7 @@ func TestBackspaceRemovesEmptyTextareaRows(t *testing.T) {
 }
 
 func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenTextArea
@@ -1089,6 +1106,7 @@ func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
 	for i := range valueLines {
 		valueLines[i] = fmt.Sprintf("line-%02d", i+1)
 	}
+
 	m.textArea.SetValue(strings.Join(valueLines, "\n"))
 
 	before := m.View()
@@ -1106,23 +1124,25 @@ func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
 
 func blankValuePromptRows(view string) int {
 	count := 0
+
 	for _, line := range strings.Split(view, "\n") {
 		if strings.TrimSpace(line) == ">" {
 			count++
 		}
 	}
+
 	return count
 }
 
 func TestMainListUsesAvailableRowAboveFooter(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.height = 40
 
 	assert.Equal(t, m.listBlockHeight()-4, m.listBodyHeight())
 }
 
 func TestMainDetailsTogglePersistsAcrossNavigation(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenMain
@@ -1148,7 +1168,7 @@ func TestMainDetailsTogglePersistsAcrossNavigation(t *testing.T) {
 }
 
 func TestMainTabAndShiftTabMoveRows(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/app/one", Region: "eu-north-1"}, Exists: true},
@@ -1176,7 +1196,7 @@ func TestMainTabAndShiftTabMoveRows(t *testing.T) {
 }
 
 func TestMainUpperXDeletesVisibleParameters(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/app/one", Region: "eu-north-1"}, Exists: true},
@@ -1192,7 +1212,7 @@ func TestMainUpperXDeletesVisibleParameters(t *testing.T) {
 }
 
 func TestMainColumnsHotkeyOpensPopupWithoutChangingScreen(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -1208,7 +1228,7 @@ func TestMainColumnsHotkeyOpensPopupWithoutChangingScreen(t *testing.T) {
 }
 
 func TestColumnsPopupAppliesImmediatelyAndEscCloses(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupColumns
 	m.columnCursor = 0
@@ -1226,7 +1246,7 @@ func TestColumnsPopupAppliesImmediatelyAndEscCloses(t *testing.T) {
 }
 
 func TestColumnsPopupFooterReplacesMainFooter(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -1243,7 +1263,7 @@ func TestColumnsPopupFooterReplacesMainFooter(t *testing.T) {
 }
 
 func TestColumnsPopupShortcutsClosesToScreen(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupColumns
 
@@ -1261,7 +1281,7 @@ func TestColumnsPopupShortcutsClosesToScreen(t *testing.T) {
 }
 
 func TestSingleDeleteConfirmPopupUsesEnterEscWithoutTypedPhrase(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -1282,8 +1302,8 @@ func TestSingleDeleteConfirmPopupUsesEnterEscWithoutTypedPhrase(t *testing.T) {
 
 func TestSingleDeleteConfirmPopupEnterDeletesWithoutTypingPhrase(t *testing.T) {
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{itemKey("eu-north-1", item.Path): {Name: item.Path, Value: "value", Type: ssm.ParameterTypeString.String()}}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true})
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{itemKey("eu-north-1", item.Path): {Name: item.Path, Value: "value", Type: ssm.ParameterTypeString.String()}}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.activePopup = popupConfirm
 	m.confirmPrompt = "Delete selected parameter?"
@@ -1304,7 +1324,7 @@ func TestSingleDeleteConfirmPopupEnterDeletesWithoutTypingPhrase(t *testing.T) {
 }
 
 func TestRegionAndTypeSelectorsOpenAsPopups(t *testing.T) {
-	m := newModel(context.Background(), fakeSSMClient{regions: []string{"us-east-1", "eu-central-1"}}, nil, Options{NoColor: true, Region: "eu-central-1"})
+	m := newModel(context.Background(), &fakeSSMClient{regions: []string{"us-east-1", "eu-central-1"}}, nil, &Options{NoColor: true, Region: "eu-central-1"})
 	m.screen = screenTextArea
 	m.editField = editFieldRegion
 	m.editRegion = "eu-central-1"
@@ -1343,7 +1363,7 @@ func TestMainFooterDetailsLabelIsDynamic(t *testing.T) {
 }
 
 func TestViKeymapNavigatesMainRowsAndSupportsGG(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "vi", NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi", NoColor: true})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/app/one", Region: "eu-north-1"}, Exists: true},
@@ -1367,7 +1387,7 @@ func TestViKeymapNavigatesMainRowsAndSupportsGG(t *testing.T) {
 }
 
 func TestMainRandomShortcutIsMovedToEditor(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenMain
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true}}
 
@@ -1387,7 +1407,7 @@ func TestMainRandomShortcutIsMovedToEditor(t *testing.T) {
 }
 
 func TestRandomPopupInsertsIntoEditorWithoutSaving(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.pushPopup(popupRandomValue)
@@ -1403,19 +1423,19 @@ func TestRandomPopupInsertsIntoEditorWithoutSaving(t *testing.T) {
 }
 
 func TestShortcutsFollowSelectedKeymap(t *testing.T) {
-	emacs := newModel(context.Background(), nil, nil, Options{Keymap: "emacs"})
+	emacs := newModel(context.Background(), nil, nil, &Options{Keymap: "emacs"})
 	emacs.shortcutsFor = screenMain
 	assert.Contains(t, emacs.shortcutsText(), "ctrl+n")
 	assert.False(t, strings.Contains(emacs.shortcutsText(), "↓ / j / tab"))
 
-	vi := newModel(context.Background(), nil, nil, Options{Keymap: "vi"})
+	vi := newModel(context.Background(), nil, nil, &Options{Keymap: "vi"})
 	vi.shortcutsFor = screenMain
 	assert.Contains(t, vi.shortcutsText(), "↓ / j / tab")
 	assert.Contains(t, vi.shortcutsText(), "Home / gg")
 }
 
 func TestMainEnterEditsSelectedParameterAndEIsUnused(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.screen = screenMain
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
 
@@ -1430,7 +1450,7 @@ func TestMainEnterEditsSelectedParameterAndEIsUnused(t *testing.T) {
 }
 
 func TestMissingSelectedParameterShowsOnlyPathAndDashes(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/missing", Region: "eu-north-1"}, Exists: false, Type: ssm.ParameterTypeSecureString.String()}}
@@ -1453,7 +1473,7 @@ func TestMissingSelectedParameterShowsOnlyPathAndDashes(t *testing.T) {
 }
 
 func TestSelectedParameterBlocksDoNotRenderStatusField(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
@@ -1466,7 +1486,7 @@ func TestSelectedParameterBlocksDoNotRenderStatusField(t *testing.T) {
 }
 
 func TestColumnsScreenDoesNotOfferStatusColumn(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenColumns
@@ -1477,13 +1497,13 @@ func TestColumnsScreenDoesNotOfferStatusColumn(t *testing.T) {
 }
 
 func TestSaveValueRejectsEmptyValueBeforeAWSRequest(t *testing.T) {
-	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{})
+	m := newModel(context.Background(), &fakeSSMClient{}, nil, &Options{})
 	m.width = 120
 	m.height = 40
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "old"}}
 
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	m = updated.(model)
 	m.textArea.SetValue("")
 	m = m.focusEditField(editFieldValue)
@@ -1497,7 +1517,7 @@ func TestSaveValueRejectsEmptyValueBeforeAWSRequest(t *testing.T) {
 }
 
 func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.editField = editFieldValue
 
 	footer := m.textAreaFooterText()
@@ -1511,12 +1531,12 @@ func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
 }
 
 func TestViEditorStartsNormalAndInsertModeLabelsActiveTextField(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "vi", NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi", NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
 
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	m = updated.(model)
 	assert.False(t, m.viInsertMode)
 	assert.False(t, strings.Contains(m.renderTextAreaScreen(), "[INSERT]"))
@@ -1562,7 +1582,7 @@ func TestViEditorStartsNormalAndInsertModeLabelsActiveTextField(t *testing.T) {
 }
 
 func TestViEditorInsertModeTypesAndNormalModeCommandsDoNotType(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "vi"})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi"})
 	m.screen = screenTextArea
 	m.returnScreen = screenMain
 	m.editField = editFieldValue
@@ -1585,7 +1605,7 @@ func TestViEditorInsertModeTypesAndNormalModeCommandsDoNotType(t *testing.T) {
 }
 
 func TestViEditorNormalModeNavigatesAndDeletesValue(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "vi"})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi"})
 	m.screen = screenTextArea
 	m.returnScreen = screenMain
 	m.editField = editFieldValue
@@ -1626,7 +1646,7 @@ func TestViEditorNormalModeNavigatesAndDeletesValue(t *testing.T) {
 }
 
 func TestEmacsValueNavigationDoesNotMutateText(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "emacs"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -1647,7 +1667,7 @@ func TestEmacsValueNavigationDoesNotMutateText(t *testing.T) {
 }
 
 func TestQuestionMarkCanBeTypedAndCtrlSlashOpensShortcuts(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "emacs"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -1664,7 +1684,7 @@ func TestQuestionMarkCanBeTypedAndCtrlSlashOpensShortcuts(t *testing.T) {
 }
 
 func TestTextAreaLineNumbersAreAlignedByTotalLineCount(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 140
 	m.screen = screenTextArea
@@ -1675,6 +1695,7 @@ func TestTextAreaLineNumbersAreAlignedByTotalLineCount(t *testing.T) {
 	for i := range lines {
 		lines[i] = "x"
 	}
+
 	m.textArea.SetValue(strings.Join(lines, "\n"))
 
 	valueRows := strings.Join(m.renderTextAreaValueLines(100), "\n")
@@ -1684,7 +1705,7 @@ func TestTextAreaLineNumbersAreAlignedByTotalLineCount(t *testing.T) {
 }
 
 func TestMainDefaultHidesSelectedParameterAndDetailsToggleShowsExpanded(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenMain
@@ -1710,7 +1731,7 @@ func TestMainDefaultHidesSelectedParameterAndDetailsToggleShowsExpanded(t *testi
 }
 
 func TestMainDetailsToggleDoesNothingVisuallyForEmptyList(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 32
 	m.screen = screenMain
@@ -1724,7 +1745,7 @@ func TestMainDetailsToggleDoesNothingVisuallyForEmptyList(t *testing.T) {
 }
 
 func TestMainNewParameterOpensEditorFocusedOnSSMPath(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
 	m.screen = screenMain
 
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -1739,13 +1760,14 @@ func TestMainNewParameterOpensEditorFocusedOnSSMPath(t *testing.T) {
 }
 
 func TestNewParameterSaveValidatesPathAndValue(t *testing.T) {
-	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
+	m := newModel(context.Background(), &fakeSSMClient{}, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, "Name is required.", m.errMessage)
 	assert.Equal(t, screenTextArea, m.screen)
@@ -1753,15 +1775,16 @@ func TestNewParameterSaveValidatesPathAndValue(t *testing.T) {
 	m.editPathInput.SetValue("/app/new")
 	updated, cmd = m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, "Value is required.", m.errMessage)
 }
 
 func TestReplaceStatusAppendsNewParameterAndSelectsIt(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/old", Region: "eu-north-1"}, Exists: true}}
 
-	m.replaceStatus("", Status{Item: inventory.Item{Path: "/app/new", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"})
+	m.replaceStatus("", &Status{Item: inventory.Item{Path: "/app/new", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"})
 
 	require.Len(t, m.statuses, 2)
 	assert.Equal(t, "/app/new", m.statuses[1].Item.Path)
@@ -1769,7 +1792,7 @@ func TestReplaceStatusAppendsNewParameterAndSelectsIt(t *testing.T) {
 }
 
 func TestCursorRenderingDoesNotInsertExtraCharacterInsideText(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: false})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: false})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -1786,8 +1809,8 @@ func TestCursorRenderingDoesNotInsertExtraCharacterInsideText(t *testing.T) {
 }
 
 func TestNewParameterSaveCommandCreatesStatus(t *testing.T) {
-	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
+	client := &fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1796,6 +1819,7 @@ func TestNewParameterSaveCommandCreatesStatus(t *testing.T) {
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
+
 	require.NotNil(t, cmd)
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, "Saving parameter...", m.busyMessage)
@@ -1827,7 +1851,7 @@ func TestPrintableQCanBeTypedInEditableFields(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			m := newModel(context.Background(), nil, nil, Options{Keymap: tt.keymap})
+			m := newModel(context.Background(), nil, nil, &Options{Keymap: tt.keymap})
 			m.screen = screenTextArea
 			m.returnScreen = screenMain
 			m.editField = tt.field
@@ -1838,6 +1862,7 @@ func TestPrintableQCanBeTypedInEditableFields(t *testing.T) {
 			m = updated.(model)
 
 			assert.Equal(t, screenTextArea, m.screen)
+
 			switch tt.field {
 			case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldPolicies:
 			case editFieldSSMPath:
@@ -1854,7 +1879,7 @@ func TestPrintableQCanBeTypedInEditableFields(t *testing.T) {
 }
 
 func TestViNormalModeQStillBacksOutOfEditor(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{Keymap: "vi"})
+	m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi"})
 	m.screen = screenTextArea
 	m.returnScreen = screenMain
 	m.editField = editFieldValue
@@ -1870,7 +1895,7 @@ func TestViNormalModeQStillBacksOutOfEditor(t *testing.T) {
 func TestViInsertModeTypesOnAllEditableFieldsAndEscReturnsToNormal(t *testing.T) {
 	fields := []editField{editFieldSSMPath, editFieldFilePath, editFieldValue}
 	for _, field := range fields {
-		m := newModel(context.Background(), nil, nil, Options{Keymap: "vi"})
+		m := newModel(context.Background(), nil, nil, &Options{Keymap: "vi"})
 		m.screen = screenTextArea
 		m.returnScreen = screenMain
 		m.editField = field
@@ -1883,6 +1908,7 @@ func TestViInsertModeTypesOnAllEditableFieldsAndEscReturnsToNormal(t *testing.T)
 
 		updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a', 'b', 'c', '?'}})
 		m = updated.(model)
+
 		switch field {
 		case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldPolicies:
 		case editFieldSSMPath:
@@ -1904,7 +1930,8 @@ func TestViInsertModeTypesOnAllEditableFieldsAndEscReturnsToNormal(t *testing.T)
 
 func TestEditableTextInputsUseValueStyleInColorMode(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
-	m := newModel(context.Background(), nil, nil, Options{NoColor: false, Keymap: "vi"})
+
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: false, Keymap: "vi"})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -1925,8 +1952,9 @@ func TestEditableTextInputsUseValueStyleInColorMode(t *testing.T) {
 func TestNewParameterSaveKeepsNamesFileReadOnlyByDefault(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/old\n"), 0o600))
-	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile})
+
+	client := &fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1935,6 +1963,7 @@ func TestNewParameterSaveKeepsNamesFileReadOnlyByDefault(t *testing.T) {
 
 	updated, cmd := m.updateTextArea(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m = updated.(model)
+
 	require.NotNil(t, cmd)
 	msg := cmd()
 	statusMsg, ok := msg.(statusUpdatedMsg)
@@ -1951,8 +1980,9 @@ func TestNewParameterSaveKeepsNamesFileReadOnlyByDefault(t *testing.T) {
 func TestNewParameterSaveWithNamesFileUpdateAppendsPath(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/old\n"), 0o600))
-	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
+
+	client := &fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1974,8 +2004,9 @@ func TestNewParameterSaveWithNamesFileUpdateAppendsPath(t *testing.T) {
 func TestNewParameterSaveWithNamesFileUpdateDoesNotDuplicateExistingEntry(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/new # already tracked\n"), 0o600))
-	client := fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
+
+	client := &fakeSSMClient{params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1", Regions: []string{"eu-north-1"}, NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.screen = screenMain
 	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	m = updated.(model)
@@ -1994,13 +2025,16 @@ func TestNewParameterSaveWithNamesFileUpdateDoesNotDuplicateExistingEntry(t *tes
 
 func readFileString(t *testing.T, file string) string {
 	t.Helper()
+
 	data, err := fileio.ReadFile(file)
 	require.NoError(t, err)
+
 	return string(data)
 }
 
 func submitFileActionPopup(t *testing.T, m model, mode, path string) (model, tea.Cmd) {
 	t.Helper()
+
 	m.activePopup = popupFileAction
 	m.fileActionMode = mode
 	m.input.SetValue(path)
@@ -2008,11 +2042,12 @@ func submitFileActionPopup(t *testing.T, m model, mode, path string) (model, tea
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	actual, ok := updated.(model)
 	require.True(t, ok)
+
 	return actual, cmd
 }
 
 func TestNewParameterEditorDoesNotRenderPlaceholders(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "vi", Region: "eu-central-1", Regions: []string{"eu-central-1"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi", Region: "eu-central-1", Regions: []string{"eu-central-1"}})
 	m.width = 120
 	m.height = 30
 	m.screen = screenMain
@@ -2026,6 +2061,7 @@ func TestNewParameterEditorDoesNotRenderPlaceholders(t *testing.T) {
 
 func TestViInsertLabelsUseLabelStyleForEditableFields(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
+
 	cases := []struct {
 		name  string
 		field editField
@@ -2037,7 +2073,7 @@ func TestViInsertLabelsUseLabelStyleForEditableFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := newModel(context.Background(), nil, nil, Options{NoColor: false, Keymap: "vi", Region: "eu-central-1"})
+			m := newModel(context.Background(), nil, nil, &Options{NoColor: false, Keymap: "vi", Region: "eu-central-1"})
 			m.width = 120
 			m.height = 30
 			m.screen = screenTextArea
@@ -2059,7 +2095,8 @@ func TestViInsertLabelsUseLabelStyleForEditableFields(t *testing.T) {
 
 func TestEditTextInputLineKeepsColorWhenTerminalIsNarrow(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.ANSI256)
-	m := newModel(context.Background(), nil, nil, Options{NoColor: false, Keymap: "vi", Region: "eu-central-1"})
+
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: false, Keymap: "vi", Region: "eu-central-1"})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 86, Height: 24})
 	m = updated.(model)
 	m.screen = screenTextArea
@@ -2093,7 +2130,7 @@ func TestParseColumnOptionAcceptsOnlyAWSBackedOptionalColumns(t *testing.T) {
 }
 
 func TestInitialColumnsUseIndexAndPathAsBaseColumns(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 100
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/path", Region: "eu-central-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
@@ -2106,7 +2143,7 @@ func TestInitialColumnsUseIndexAndPathAsBaseColumns(t *testing.T) {
 }
 
 func TestColumnsOptionEnablesOptionalColumnsAfterIndexAndPath(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"region", "type", "value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"region", "type", "value"}})
 	m.width = 120
 	m.height = 30
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/path", Region: "eu-central-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
@@ -2132,7 +2169,7 @@ func TestColumnChooserShowsOnlyAWSBackedOptionalColumns(t *testing.T) {
 
 func TestDeleteWithoutNamesFileRemovesRowsFromUI(t *testing.T) {
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1"})
+	m := newModel(context.Background(), &fakeSSMClient{}, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: item, Exists: true}, {Item: inventory.Item{Path: "/app/keep", Region: "eu-north-1"}, Exists: true}}
 
@@ -2150,8 +2187,9 @@ func TestDeleteWithoutNamesFileRemovesRowsFromUI(t *testing.T) {
 func TestDeleteWithReadOnlyNamesFileMarksRowsMissing(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/delete\n"), 0o600))
+
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile})
+	m := newModel(context.Background(), &fakeSSMClient{}, nil, &Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile})
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: item, Exists: true}}
 
@@ -2171,8 +2209,9 @@ func TestDeleteWithReadOnlyNamesFileMarksRowsMissing(t *testing.T) {
 func TestDeleteWithNamesFileUpdateRemovesPathAndRow(t *testing.T) {
 	pathsFile := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(pathsFile, []byte("/app/delete\n/app/keep\n"), 0o600))
+
 	item := inventory.Item{Path: "/app/delete", Region: "eu-north-1"}
-	m := newModel(context.Background(), fakeSSMClient{}, nil, Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile, AllowNamesFileUpdate: true})
+	m := newModel(context.Background(), &fakeSSMClient{}, nil, &Options{NoColor: true, Region: "eu-north-1", NamesFile: pathsFile, AllowNamesFileUpdate: true})
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: item, Exists: true}, {Item: inventory.Item{Path: "/app/keep", Region: "eu-north-1"}, Exists: true}}
 
@@ -2189,7 +2228,7 @@ func TestDeleteWithNamesFileUpdateRemovesPathAndRow(t *testing.T) {
 }
 
 func TestSortPopupShortcutsShowLetterHotkeysOnlyInSortContext(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "type"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value", "type"}})
 	m.screen = screenMain
 	m.width = 120
 	m.height = 40
@@ -2208,7 +2247,7 @@ func TestSortPopupShortcutsShowLetterHotkeysOnlyInSortContext(t *testing.T) {
 }
 
 func TestValueActionsPopupAcceptsFooterHotkeys(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.activePopup = popupValueActions
 	m.editField = editFieldValue
@@ -2223,7 +2262,7 @@ func TestValueActionsPopupAcceptsFooterHotkeys(t *testing.T) {
 }
 
 func TestFileActionPopupConfirmsSecureWriteWarningWithY(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	path := t.TempDir() + "/secret.txt"
 	m.screen = screenTextArea
 	m.activePopup = popupFileAction
@@ -2235,6 +2274,7 @@ func TestFileActionPopupConfirmsSecureWriteWarningWithY(t *testing.T) {
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, popupFileWriteConfirm, m.activePopup)
 	assert.Equal(t, []popupKind{popupFileAction}, m.popupStack)
@@ -2242,6 +2282,7 @@ func TestFileActionPopupConfirmsSecureWriteWarningWithY(t *testing.T) {
 
 	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = updated.(model)
+
 	assert.Nil(t, cmd)
 	assert.Equal(t, popupNone, m.activePopup)
 	assert.Equal(t, fileWriteConfirmationNone, m.pendingFileWrite)
@@ -2249,7 +2290,7 @@ func TestFileActionPopupConfirmsSecureWriteWarningWithY(t *testing.T) {
 }
 
 func TestFileActionPopupUsesCompactInputWithVisibleCursor(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.activePopup = popupFileAction
 	m.fileActionMode = "write"
@@ -2268,20 +2309,21 @@ func TestFileActionPopupUsesCompactInputWithVisibleCursor(t *testing.T) {
 }
 
 func TestSaveValueCmdWritesSelectedParameterTier(t *testing.T) {
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
 	item := inventory.Item{Path: "/app/hosts", Region: "eu-north-1"}
 
-	msg := saveValueCmd(context.Background(), client, item, item.Path, "plain", ssm.ParameterTypeString, ssm.PutParameterOptions{Tier: ssm.ParameterTierAdvanced, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
+	msg := saveValueCmd(context.Background(), client, &item, item.Path, "plain", ssm.ParameterTypeString, ssm.PutParameterOptions{Tier: ssm.ParameterTierAdvanced, DataType: ssm.DefaultParameterDataType, Overwrite: true}, "", false)()
 
 	updated, ok := msg.(statusUpdatedMsg)
 	require.True(t, ok)
 	require.NoError(t, updated.err)
+
 	storedMeta := client.metas[itemKey("eu-north-1", "/app/hosts")]
 	assert.Equal(t, ssm.ParameterTierAdvanced.String(), storedMeta.Tier)
 }
 
 func TestEditorShowsPoliciesOnlyForAdvancedTier(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.width = 120
 	m.height = 30
@@ -2301,8 +2343,8 @@ func TestEditorShowsPoliciesOnlyForAdvancedTier(t *testing.T) {
 }
 
 func TestSaveValueOmitsPoliciesUnlessTierIsAdvanced(t *testing.T) {
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1"})
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	m.screen = screenTextArea
 	m.editPathInput.SetValue("/app/value")
 	m.editRegion = "eu-north-1"
@@ -2321,8 +2363,8 @@ func TestSaveValueOmitsPoliciesUnlessTierIsAdvanced(t *testing.T) {
 }
 
 func TestSaveValueClearsExistingPoliciesWhenAdvancedPoliciesEmptied(t *testing.T) {
-	client := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
-	m := newModel(context.Background(), client, nil, Options{NoColor: true, Region: "eu-north-1"})
+	client := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	m := newModel(context.Background(), client, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	item := inventory.Item{Path: "/app/value", Region: "eu-north-1"}
 	m.screen = screenTextArea
 	m.statuses = []Status{{Item: item, Exists: true, Type: ssm.ParameterTypeString.String(), Tier: ssm.ParameterTierAdvanced.String(), DataType: ssm.DefaultParameterDataType.String(), Value: "old", Policies: `[{"Type":"Expiration","Version":"1.0"}]`}}
@@ -2345,7 +2387,7 @@ func TestSaveValueClearsExistingPoliciesWhenAdvancedPoliciesEmptied(t *testing.T
 }
 
 func TestWrappedMultilineCursorRendersAndMovesAcrossVisualRows(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 40
 	m.height = 20
 	m.screen = screenTextArea
@@ -2356,7 +2398,7 @@ func TestWrappedMultilineCursorRendersAndMovesAcrossVisualRows(t *testing.T) {
 	m.textArea.SetValue(longLine + "\nnext")
 	m.setTextAreaCursorAbs(wrapWidth + 3)
 
-	view := strings.Join(m.renderMultilineFieldLines(editFieldValue, m.textArea, 4), "\n")
+	view := strings.Join(m.renderMultilineFieldLines(editFieldValue, &m.textArea, 4), "\n")
 	assert.Contains(t, view, "| "+strings.Repeat("d", 3)+"█")
 
 	m.setTextAreaCursorAbs(0)
@@ -2367,7 +2409,7 @@ func TestWrappedMultilineCursorRendersAndMovesAcrossVisualRows(t *testing.T) {
 }
 
 func TestTextAreaOldValueActionHotkeysAreDisabled(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -2382,6 +2424,7 @@ func TestTextAreaOldValueActionHotkeysAreDisabled(t *testing.T) {
 	for _, key := range keys {
 		updated, cmd := m.updateTextArea(key)
 		m = updated.(model)
+
 		assert.Nil(t, cmd)
 		assert.Equal(t, "keep", m.textArea.Value())
 		assert.Equal(t, popupNone, m.activePopup)
@@ -2390,16 +2433,16 @@ func TestTextAreaOldValueActionHotkeysAreDisabled(t *testing.T) {
 }
 
 func TestOverwriteFieldIsShownOnlyForNewParameters(t *testing.T) {
-	existing := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	existing := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	existing.width = 120
 	existing.height = 30
 	existing.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "value"}}
-	updated, _ := existing.startMultiline(screenMain)
+	updated, _ := existing.startMultiline()
 	existing = updated.(model)
 	assert.False(t, existing.shouldShowOverwriteField())
 	assert.False(t, strings.Contains(existing.renderTextAreaScreen(), "Overwrite:"))
 
-	created := newModel(context.Background(), nil, nil, Options{NoColor: true, Region: "eu-north-1"})
+	created := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	created.width = 120
 	created.height = 30
 	updated, _ = created.startNewParameter(screenMain)
@@ -2411,8 +2454,8 @@ func TestOverwriteFieldIsShownOnlyForNewParameters(t *testing.T) {
 }
 
 func TestSaveValueUsesOverwriteOnlyForNewParameters(t *testing.T) {
-	existingClient := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
-	existing := newModel(context.Background(), existingClient, nil, Options{NoColor: true, Region: "eu-north-1"})
+	existingClient := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	existing := newModel(context.Background(), existingClient, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	existing.screen = screenTextArea
 	existing.statuses = []Status{{Item: inventory.Item{Path: "/app/existing", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String(), Value: "old"}}
 	existing.editPathInput.SetValue("/app/existing")
@@ -2428,8 +2471,8 @@ func TestSaveValueUsesOverwriteOnlyForNewParameters(t *testing.T) {
 	require.NoError(t, statusMsg.err)
 	assert.True(t, existingClient.putOpts[itemKey("eu-north-1", "/app/existing")].Overwrite)
 
-	newClient := fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
-	created := newModel(context.Background(), newClient, nil, Options{NoColor: true, Region: "eu-north-1"})
+	newClient := &fakeSSMClient{region: "eu-north-1", params: map[string]ssm.Parameter{}, metas: map[string]ssm.Metadata{}, putOpts: map[string]ssm.PutParameterOptions{}}
+	created := newModel(context.Background(), newClient, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	created.screen = screenTextArea
 	created.editPathInput.SetValue("/app/new")
 	created.editRegion = "eu-north-1"
@@ -2446,7 +2489,7 @@ func TestSaveValueUsesOverwriteOnlyForNewParameters(t *testing.T) {
 }
 
 func TestSortHotkeyTogglesDirectionAndHeaderArrow(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"version"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"version"}})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/v1", Region: "eu-central-1"}, Exists: true, Version: 1},
@@ -2468,7 +2511,7 @@ func TestSortHotkeyTogglesDirectionAndHeaderArrow(t *testing.T) {
 }
 
 func TestPopupShowsInternalActionsAndBottomHotkeys(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
 	m.width = 100
@@ -2483,7 +2526,7 @@ func TestPopupShowsInternalActionsAndBottomHotkeys(t *testing.T) {
 }
 
 func TestColumnsPopupAppliesLiveAndEscKeepsChanges(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -2503,7 +2546,7 @@ func TestColumnsPopupAppliesLiveAndEscKeepsChanges(t *testing.T) {
 }
 
 func TestDefaultSortArrowIsShownForName(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -2517,7 +2560,7 @@ func TestDefaultSortArrowIsShownForName(t *testing.T) {
 }
 
 func TestNewParameterShowsOverwriteDefaultFalseFromExistingSelection(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Region: "eu-north-1"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-north-1"})
 	m.width = 120
 	m.height = 30
 	m.screen = screenMain
@@ -2533,7 +2576,7 @@ func TestNewParameterShowsOverwriteDefaultFalseFromExistingSelection(t *testing.
 }
 
 func TestExpandableFieldCompactsExpandsAndTogglesGutters(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -2569,7 +2612,7 @@ func TestPoliciesPrettyPrintAndNormalizePolicyText(t *testing.T) {
 }
 
 func TestEmacsCtrlKDeletesToRealLineEnd(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
@@ -2588,7 +2631,7 @@ func TestEmacsCtrlKDeletesToRealLineEnd(t *testing.T) {
 }
 
 func TestViDDeletesToRealLineEnd(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "vi"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi"})
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.viInsertMode = false
@@ -2606,7 +2649,7 @@ func TestViDDeletesToRealLineEnd(t *testing.T) {
 }
 
 func TestHiddenGuttersRenderTextAtLeftEdge(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 100
 	m.height = 30
 	m.screen = screenTextArea
@@ -2622,7 +2665,7 @@ func TestHiddenGuttersRenderTextAtLeftEdge(t *testing.T) {
 }
 
 func TestConfirmPopupInputPrefixIsNotLabelStyled(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.activePopup = popupConfirm
 	m.confirmPrompt = "Delete visible parameter(s)?"
 	m.confirmExpected = "DELETE ALL"
@@ -2630,6 +2673,7 @@ func TestConfirmPopupInputPrefixIsNotLabelStyled(t *testing.T) {
 
 	view := m.renderConfirmPopup()
 	assert.Contains(t, view, "Type ")
+
 	styledTypePrefix := labelStyle.Render("Type ")
 	if styledTypePrefix != "Type " {
 		assert.False(t, strings.Contains(view, styledTypePrefix))
@@ -2642,11 +2686,12 @@ func stringSliceContains(values []string, target string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 func TestMainDigitHotkeySortsByValue(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/b", Region: "eu-central-1"}, Exists: true, Value: "zebra", Type: ssm.ParameterTypeString.String()},
@@ -2663,7 +2708,7 @@ func TestMainDigitHotkeySortsByValue(t *testing.T) {
 }
 
 func TestApplySortUsesNaturalNumericOrder(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/v18", Region: "eu-central-1"}, Exists: true, Version: 18},
 		{Item: inventory.Item{Path: "/v2", Region: "eu-central-1"}, Exists: true, Version: 2},
@@ -2678,7 +2723,7 @@ func TestApplySortUsesNaturalNumericOrder(t *testing.T) {
 }
 
 func TestSortPopupTogglesColumnWithLetter(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"type"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"type"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
 	m.statuses = []Status{
@@ -2699,7 +2744,7 @@ func TestSortPopupTogglesColumnWithLetter(t *testing.T) {
 }
 
 func TestSortPopupNavigationMovesFocusAndSpaceApplies(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
 	m.setSortRules([]sortRule{{column: columnPath}})
@@ -2727,7 +2772,7 @@ func TestSortPopupNavigationMovesFocusAndSpaceApplies(t *testing.T) {
 }
 
 func TestSortPopupRendersCheckboxSelectionWithoutInlineHotkeys(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"value", "user"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"value", "user"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
 	m.setSortRules([]sortRule{{column: columnValue}})
@@ -2751,7 +2796,7 @@ func TestSortPopupRendersCheckboxSelectionWithoutInlineHotkeys(t *testing.T) {
 }
 
 func TestMultiSortUsesSelectedColumnOrderAndDirections(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.statuses = []Status{
 		{Item: inventory.Item{Path: "/a", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeString.String()},
 		{Item: inventory.Item{Path: "/c", Region: "eu-north-1"}, Exists: true, Type: ssm.ParameterTypeSecureString.String()},
@@ -2766,7 +2811,7 @@ func TestMultiSortUsesSelectedColumnOrderAndDirections(t *testing.T) {
 }
 
 func TestSortPopupDirectionAppliesToFocusedColumn(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, ShowColumns: []string{"type", "value"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, ShowColumns: []string{"type", "value"}})
 	m.screen = screenMain
 	m.activePopup = popupSort
 	m.statuses = []Status{
@@ -2794,7 +2839,7 @@ func TestSortPopupDirectionAppliesToFocusedColumn(t *testing.T) {
 }
 
 func TestBulkDeleteConfirmRendersInlinePhraseInputAndButtons(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenMain
 	m.width = 100
 	m.height = 30
@@ -2813,7 +2858,7 @@ func TestPopupActionLineStylesKeysSeparatelyFromDescriptions(t *testing.T) {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
 
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 
 	styled := m.popupActionLine("Enter apply   Esc cancel")
 
@@ -2822,7 +2867,7 @@ func TestPopupActionLineStylesKeysSeparatelyFromDescriptions(t *testing.T) {
 }
 
 func TestCompactExpandableCursorDoesNotInsertExtraCell(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{})
+	m := newModel(context.Background(), nil, nil, &Options{})
 	m.width = 80
 	m.height = 20
 	m.screen = screenTextArea
@@ -2831,13 +2876,13 @@ func TestCompactExpandableCursorDoesNotInsertExtraCell(t *testing.T) {
 	m.textArea.SetValue("abcdef")
 	m.setTextAreaCursorAbs(3)
 
-	plain := stripANSI(m.singleLineAreaView(editFieldValue, m.textArea, 11))
+	plain := stripANSI(m.singleLineAreaView(editFieldValue, &m.textArea, 11))
 
 	assert.Equal(t, "abcdef", plain)
 }
 
 func TestExpandableFieldCollapsesAfterEditedBackToOneLine(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -2858,7 +2903,7 @@ func TestExpandableFieldCollapsesAfterEditedBackToOneLine(t *testing.T) {
 }
 
 func TestPopupTransitionsReplaceParentPopup(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.activePopup = popupValueActions
 	m.editField = editFieldValue
@@ -2874,7 +2919,7 @@ func TestPopupTransitionsReplaceParentPopup(t *testing.T) {
 }
 
 func TestPoliciesActionsPopupClearsPolicies(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldPolicies
 	m.editTier = ssm.ParameterTierAdvanced
@@ -2893,7 +2938,7 @@ func TestPoliciesActionsPopupClearsPolicies(t *testing.T) {
 }
 
 func TestPoliciesActionsLoadPrettyPoliciesFromFile(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.screen = screenTextArea
 	m.editField = editFieldPolicies
 	m.editTier = ssm.ParameterTierAdvanced
@@ -2918,13 +2963,13 @@ func TestPoliciesActionsLoadPrettyPoliciesFromFile(t *testing.T) {
 }
 
 func TestUnsavedEditorExitRequiresConfirmation(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 40
 	m.screen = screenMain
 	m.returnScreen = screenMain
 	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Type: ssm.ParameterTypeString.String(), Value: "old", Exists: true}}
-	updated, _ := m.startMultiline(screenMain)
+	updated, _ := m.startMultiline()
 	m = updated.(model)
 	m.textArea.SetValue("changed")
 
@@ -2948,16 +2993,18 @@ func TestUnsavedEditorExitRequiresConfirmation(t *testing.T) {
 }
 
 func TestTextAreaPageDownKeepsCursorVisible(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "emacs"})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
 	m.width = 100
 	m.height = 20
 	m.screen = screenTextArea
 	m.editField = editFieldValue
 	m.textArea.Focus()
+
 	lines := make([]string, 0, 40)
 	for i := 0; i < 40; i++ {
 		lines = append(lines, fmt.Sprintf("line-%02d", i))
 	}
+
 	m.textArea.SetValue(strings.Join(lines, "\n"))
 	m.expandedFields[editFieldValue] = true
 
@@ -2967,7 +3014,7 @@ func TestTextAreaPageDownKeepsCursorVisible(t *testing.T) {
 	assert.Contains(t, view, "█")
 	assert.True(t, m.textAreaCursorAbs() > 0)
 
-	m = newModel(context.Background(), nil, nil, Options{NoColor: true, Keymap: "vi"})
+	m = newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi"})
 	m.width = 100
 	m.height = 20
 	m.screen = screenTextArea
@@ -2983,7 +3030,7 @@ func TestTextAreaPageDownKeepsCursorVisible(t *testing.T) {
 }
 
 func TestFileActionPopupKeepsInputFocusedAfterWriteError(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	path := filepath.Join(t.TempDir(), "missing", "value.txt")
 	m.screen = screenTextArea
 	m.activePopup = popupFileAction
@@ -3006,7 +3053,7 @@ func TestFileActionPopupKeepsInputFocusedAfterWriteError(t *testing.T) {
 }
 
 func TestFileActionPopupKeepsInputFocusedAfterLoadError(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	m.screen = screenTextArea
 	m.activePopup = popupFileAction
@@ -3027,9 +3074,10 @@ func TestFileActionPopupKeepsInputFocusedAfterLoadError(t *testing.T) {
 }
 
 func TestFileWriteConfirmEscReturnsToFilePathPopup(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	path := t.TempDir() + "/value.txt"
 	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+
 	m.screen = screenTextArea
 	m.width = 120
 	m.height = 40
@@ -3063,9 +3111,10 @@ func TestFileWriteConfirmEscReturnsToFilePathPopup(t *testing.T) {
 }
 
 func TestFileWriteConfirmShowsSecondConfirmAfterSecureConfirm(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	path := t.TempDir() + "/secret.txt"
 	require.NoError(t, os.WriteFile(path, []byte("old"), 0o600))
+
 	m.screen = screenTextArea
 	m.width = 120
 	m.height = 40
@@ -3097,7 +3146,7 @@ func TestFileWriteConfirmShowsSecondConfirmAfterSecureConfirm(t *testing.T) {
 }
 
 func TestEnterOnCompactExpandableFieldCreatesNewLine(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 120
 	m.height = 30
 	m.screen = screenTextArea
@@ -3110,16 +3159,17 @@ func TestEnterOnCompactExpandableFieldCreatesNewLine(t *testing.T) {
 	m = updated.(model)
 
 	assert.Equal(t, "short\n", m.textArea.Value())
-	line, offset := textAreaCursorLineOffset(m.textArea)
+	line, offset := textAreaCursorLineOffset(&m.textArea)
 	assert.Equal(t, 1, line)
 	assert.Equal(t, 0, offset)
+
 	view := m.renderTextAreaScreen()
 	assert.Contains(t, view, "1 │ short")
 	assert.Contains(t, view, "2 │ █")
 }
 
 func TestFieldsOptionLimitsColumnsDetailsAndEditor(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true, Fields: []string{"name", "type"}, ShowColumns: []string{"type", "value", "region"}})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Fields: []string{"name", "type"}, ShowColumns: []string{"type", "value", "region"}})
 	m.width = 120
 	m.height = 40
 	m.screen = screenMain
@@ -3163,7 +3213,7 @@ func TestOverlayPopupLinePreservesTextOutsidePopupBounds(t *testing.T) {
 }
 
 func TestOverlayPopupOnBodyOnlyReplacesPopupRectangle(t *testing.T) {
-	m := newModel(context.Background(), nil, nil, Options{NoColor: true})
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 	m.width = 20
 	m.height = 5
 	body := strings.Join([]string{

@@ -60,6 +60,7 @@ func exportCLICommand() *cli.Command {
 				if err != nil {
 					return err
 				}
+
 				return exportcmd.Run(ctx, options, os.Stdout)
 			})
 		},
@@ -71,6 +72,7 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 	if err != nil {
 		return &exportcmd.Options{}, err
 	}
+
 	fields, err := parseOutputFields(
 		stringSliceFlagValue(cmd, exportFlagOutputField, exportEnvOutputField),
 		exportFlagOutputField,
@@ -78,6 +80,7 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 	if err != nil {
 		return &exportcmd.Options{}, err
 	}
+
 	fieldMappings, err := parseFieldMappings(
 		stringSliceFlagValue(cmd, exportFlagMapField, exportEnvMapField),
 		exportFlagMapField,
@@ -85,24 +88,28 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 	if err != nil {
 		return &exportcmd.Options{}, err
 	}
+
 	keyField := strings.TrimSpace(cmd.String(exportFlagKeyField))
 	if err := validateKeyFieldOutputFields(keyField, fields); err != nil {
 		return &exportcmd.Options{}, err
 	}
+
 	basePath, err := app.ParseBasePath(cmd.String(exportFlagBasePath))
 	if err != nil {
 		return &exportcmd.Options{}, fmt.Errorf("--%s: %w", exportFlagBasePath, err)
 	}
+
 	scalarField, err := exportScalarField(cmd, fields)
 	if err != nil {
 		return &exportcmd.Options{}, err
 	}
+
 	global.WithDecryption = boolFlagValueAny(
 		cmd,
 		exportFlagWithDecryption,
-		false,
 		exportEnvWithDecryption,
 	)
+
 	return &exportcmd.Options{
 		Options:       global.Options,
 		Format:        textio.FormatType(cmd.String(exportFlagFormat)),
@@ -119,6 +126,7 @@ func exportScalarField(cmd *cli.Command, fields textio.Fields) (string, error) {
 	if !cmd.Bool(exportFlagScalar) {
 		return "", nil
 	}
+
 	rawFields := compactStrings(cmd.StringSlice(exportFlagOutputField))
 	if len(rawFields) != 1 || len(fields) != 1 {
 		return "", fmt.Errorf(
@@ -127,6 +135,7 @@ func exportScalarField(cmd *cli.Command, fields textio.Fields) (string, error) {
 			exportFlagOutputField,
 		)
 	}
+
 	return fields[0], nil
 }
 
@@ -134,6 +143,7 @@ func validateKeyFieldOutputFields(keyField string, outputFields textio.Fields) e
 	if keyField == "" {
 		return nil
 	}
+
 	for _, field := range outputFields {
 		if field == keyField {
 			return fmt.Errorf(
@@ -144,5 +154,6 @@ func validateKeyFieldOutputFields(keyField string, outputFields textio.Fields) e
 			)
 		}
 	}
+
 	return nil
 }

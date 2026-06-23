@@ -58,6 +58,7 @@ components:
 	items, err := scanValuesFile(file, "fallback")
 
 	require.NoError(t, err)
+
 	paths := itemPathsForTest(items)
 	assert.Contains(t, paths, "/custom/prod/org/api/DB_PASSWORD")
 	assert.Contains(t, paths, "/custom/prod/org/api/API_KEY")
@@ -97,5 +98,6 @@ func itemPathsForTest(items []Item) []string {
 	for _, item := range items {
 		paths = append(paths, item.Path)
 	}
+
 	return paths
 }

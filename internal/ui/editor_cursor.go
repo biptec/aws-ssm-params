@@ -37,13 +37,16 @@ func (component *editorCursor) moveActiveTextLine(delta int) {
 	if !isMultilineEditField(m.editField) {
 		return
 	}
+
 	if delta == 0 {
 		return
 	}
+
 	step := 1
 	if delta < 0 {
 		step = -1
 	}
+
 	for i := 0; i < absInt(delta); i++ {
 		component.moveActiveWrappedLine(step)
 	}
@@ -52,10 +55,12 @@ func (component *editorCursor) moveActiveTextLine(delta int) {
 func (component *editorCursor) moveActiveWrappedLine(delta int) {
 	value := component.activeTextValue()
 	width := component.contentWidth
+
 	lines, segments := multilineVisualSegments(value, width)
 	if len(segments) == 0 {
 		return
 	}
+
 	line, offset := component.activeTextCursorLineOffset()
 	currentVisual := cursorVisualSegmentIndex(lines, segments, line, offset, width)
 	currentSegment := segments[currentVisual]
@@ -73,22 +78,17 @@ func (component *editorCursor) activeTextCursorLineOffset() (line, offset int) {
 	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return 0, 0
 	case editFieldDescription:
-		return textAreaCursorLineOffset(m.editDescriptionArea)
+		return textAreaCursorLineOffset(&m.editDescriptionArea)
 	case editFieldPolicies:
-		return textAreaCursorLineOffset(m.editPoliciesArea)
+		return textAreaCursorLineOffset(&m.editPoliciesArea)
 	case editFieldValue:
-		return textAreaCursorLineOffset(m.textArea)
+		return textAreaCursorLineOffset(&m.textArea)
 	default:
 		return 0, 0
 	}
 }
 
-func textAreaCursorLineOffset(area interface {
-	Value() string
-	Line() int
-	LineInfo() textarea.LineInfo
-},
-) (line, offset int) {
+func textAreaCursorLineOffset(area *textarea.Model) (line, offset int) {
 	lines := strings.Split(area.Value(), "\n")
 	line = min(max(0, area.Line()), len(lines)-1)
 	lineInfo := area.LineInfo()
@@ -97,16 +97,19 @@ func textAreaCursorLineOffset(area interface {
 	// inside the underlying line so our custom renderer and wrapped navigation
 	// can keep the cursor on the correct visual continuation row.
 	offset = min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(lines[line])))
+
 	return line, offset
 }
 
 func multilineAbsPosition(lines []string, line, offset int) int {
 	line = min(max(0, line), len(lines)-1)
 	offset = min(max(0, offset), len([]rune(lines[line])))
+
 	abs := 0
 	for i := 0; i < line; i++ {
 		abs += len([]rune(lines[i])) + 1
 	}
+
 	return abs + offset
 }
 
@@ -164,30 +167,37 @@ func (component *editorCursor) activeTextWordBackward() {
 
 func (component *editorCursor) activeTextDeleteChar() {
 	value := []rune(component.activeTextValue())
+
 	pos := component.activeTextCursorAbs()
 	if pos < 0 || pos >= len(value) {
 		return
 	}
+
 	value = append(value[:pos], value[pos+1:]...)
 	component.setActiveTextValueAndCursor(string(value), pos)
 }
 
 func (component *editorCursor) activeTextDeleteToLineEnd() {
 	value := []rune(component.activeTextValue())
+
 	pos := component.activeTextCursorAbs()
 	if pos < 0 || pos > len(value) {
 		return
 	}
+
 	end := pos
 	for end < len(value) && value[end] != '\n' {
 		end++
 	}
+
 	if end == pos && end < len(value) && value[end] == '\n' {
 		end++
 	}
+
 	if end == pos {
 		return
 	}
+
 	value = append(value[:pos], value[end:]...)
 	component.setActiveTextValueAndCursor(string(value), pos)
 }
@@ -195,13 +205,16 @@ func (component *editorCursor) activeTextDeleteToLineEnd() {
 func (component *editorCursor) activeTextDeleteWordForward() {
 	value := []rune(component.activeTextValue())
 	pos := component.activeTextCursorAbs()
+
 	end := wordForwardIndex(value, pos)
 	if end <= pos && pos < len(value) {
 		end = pos + 1
 	}
+
 	if pos < 0 || pos >= len(value) || end > len(value) {
 		return
 	}
+
 	value = append(value[:pos], value[end:]...)
 	component.setActiveTextValueAndCursor(string(value), pos)
 }
@@ -209,10 +222,12 @@ func (component *editorCursor) activeTextDeleteWordForward() {
 func (component *editorCursor) activeTextDeleteWordBackward() {
 	value := []rune(component.activeTextValue())
 	pos := component.activeTextCursorAbs()
+
 	start := wordBackwardIndex(value, pos)
 	if start < 0 || start >= pos || pos > len(value) {
 		return
 	}
+
 	value = append(value[:start], value[pos:]...)
 	component.setActiveTextValueAndCursor(string(value), start)
 }
@@ -298,33 +313,30 @@ func (component *editorCursor) setActiveTextValueAndCursor(value string, pos int
 
 func (component *editorCursor) textAreaCursorAbs() int {
 	m := component.state
-	return textAreaCursorAbs(m.textArea)
+	return textAreaCursorAbs(&m.textArea)
 }
 
 func (component *editorCursor) descriptionAreaCursorAbs() int {
 	m := component.state
-	return textAreaCursorAbs(m.editDescriptionArea)
+	return textAreaCursorAbs(&m.editDescriptionArea)
 }
 
 func (component *editorCursor) policiesAreaCursorAbs() int {
 	m := component.state
-	return textAreaCursorAbs(m.editPoliciesArea)
+	return textAreaCursorAbs(&m.editPoliciesArea)
 }
 
-func textAreaCursorAbs(area interface {
-	Value() string
-	Line() int
-	LineInfo() textarea.LineInfo
-},
-) int {
+func textAreaCursorAbs(area *textarea.Model) int {
 	lines := strings.Split(area.Value(), "\n")
 	row := min(max(0, area.Line()), len(lines)-1)
 	lineInfo := area.LineInfo()
 	col := lineInfo.StartColumn + lineInfo.ColumnOffset
+
 	abs := 0
 	for i := 0; i < row; i++ {
 		abs += len([]rune(lines[i])) + 1
 	}
+
 	return abs + col
 }
 
@@ -350,28 +362,36 @@ func setTextAreaAbsPosition(area *textarea.Model, pos int) {
 	lines := strings.Split(value, "\n")
 	targetRow := 0
 	targetOffset := pos
+
 	for row, line := range lines {
 		lineLen := len([]rune(line))
 		if targetOffset <= lineLen || row == len(lines)-1 {
 			targetRow = row
 			targetOffset = min(targetOffset, lineLen)
+
 			break
 		}
+
 		targetOffset -= lineLen + 1
 	}
 
 	area.SetValue(value)
+
 	for area.Line() > 0 {
 		area.CursorUp()
 	}
+
 	area.CursorStart()
+
 	for area.Line() < targetRow {
 		previousLine := area.Line()
 		previousInfo := area.LineInfo()
 		area.CursorDown()
+
 		if area.Line() == previousLine && area.LineInfo() == previousInfo {
 			break
 		}
 	}
+
 	area.SetCursor(targetOffset)
 }

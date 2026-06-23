@@ -34,21 +34,26 @@ func parseOutputFields(values []string, flagName string) (textio.Fields, error) 
 	if len(parts) == 0 {
 		return nil, nil
 	}
+
 	seen := map[string]bool{}
+
 	fields := make(textio.Fields, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--%s accepts one value per flag; repeat --%s instead of using commas", flagName, flagName)
 		}
+
 		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(part))]
 		if !ok {
 			return nil, fmt.Errorf("unsupported --%s value %q", flagName, part)
 		}
+
 		if !seen[canonical] {
 			seen[canonical] = true
 			fields = append(fields, canonical)
 		}
 	}
+
 	return fields, nil
 }
 
@@ -57,28 +62,35 @@ func parseFieldMappings(values []string, flagName string) (textio.FieldMappings,
 	if len(parts) == 0 {
 		return nil, nil
 	}
+
 	seen := map[string]bool{}
+
 	mappings := make(textio.FieldMappings, 0, len(parts))
 	for _, part := range parts {
 		if strings.Contains(part, ",") {
 			return nil, fmt.Errorf("--%s accepts one value per flag; repeat --%s instead of using commas", flagName, flagName)
 		}
+
 		awsField, fileField, ok := strings.Cut(part, ":")
 		if !ok {
 			return nil, fmt.Errorf("--%s requires aws_field:file_field", flagName)
 		}
+
 		canonical, ok := supportedFields[strings.ToLower(strings.TrimSpace(awsField))]
 		if !ok {
 			return nil, fmt.Errorf("unsupported --%s AWS field %q", flagName, awsField)
 		}
+
 		fileField = strings.TrimSpace(fileField)
 		if fileField == "" {
 			return nil, fmt.Errorf("field mapping %q has empty file field", part)
 		}
+
 		if !seen[canonical] {
 			seen[canonical] = true
 			mappings = append(mappings, textio.FieldMapping{AWSName: canonical, FileName: fileField})
 		}
 	}
+
 	return mappings, nil
 }

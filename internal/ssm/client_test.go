@@ -26,23 +26,35 @@ type fakeSDKSSM struct {
 	deleteErr      error
 }
 
-func (f *fakeSDKSSM) GetParameters(_ context.Context, input *awsssm.GetParametersInput, _ ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
+func (f *fakeSDKSSM) GetParameters(ctx context.Context, input *awsssm.GetParametersInput, optionFns ...func(*awsssm.Options)) (*awsssm.GetParametersOutput, error) {
+	_, _ = ctx, optionFns
+
 	f.getInputs = append(f.getInputs, input)
+
 	return f.getOutput, nil
 }
 
-func (f *fakeSDKSSM) DescribeParameters(_ context.Context, input *awsssm.DescribeParametersInput, _ ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
+func (f *fakeSDKSSM) DescribeParameters(ctx context.Context, input *awsssm.DescribeParametersInput, optionFns ...func(*awsssm.Options)) (*awsssm.DescribeParametersOutput, error) {
+	_, _ = ctx, optionFns
+
 	f.describeInputs = append(f.describeInputs, input)
+
 	return f.describeOutput, nil
 }
 
-func (f *fakeSDKSSM) PutParameter(_ context.Context, input *awsssm.PutParameterInput, _ ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
+func (f *fakeSDKSSM) PutParameter(ctx context.Context, input *awsssm.PutParameterInput, optionFns ...func(*awsssm.Options)) (*awsssm.PutParameterOutput, error) {
+	_, _ = ctx, optionFns
+
 	f.putInputs = append(f.putInputs, input)
+
 	return &awsssm.PutParameterOutput{}, f.putErr
 }
 
-func (f *fakeSDKSSM) DeleteParameters(_ context.Context, input *awsssm.DeleteParametersInput, _ ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
+func (f *fakeSDKSSM) DeleteParameters(ctx context.Context, input *awsssm.DeleteParametersInput, optionFns ...func(*awsssm.Options)) (*awsssm.DeleteParametersOutput, error) {
+	_, _ = ctx, optionFns
+
 	f.deleteInputs = append(f.deleteInputs, input)
+
 	return &awsssm.DeleteParametersOutput{}, f.deleteErr
 }
 
@@ -57,7 +69,8 @@ func (f fakeRegionAPI) DescribeRegions(context.Context, *AWSClient) ([]awsRegion
 
 type fakeSDKSTS struct{ err error }
 
-func (f fakeSDKSTS) GetCallerIdentity(_ context.Context, _ *sts.GetCallerIdentityInput, _ ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+func (f fakeSDKSTS) GetCallerIdentity(ctx context.Context, input *sts.GetCallerIdentityInput, optionFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
+	_, _, _ = ctx, input, optionFns
 	return &sts.GetCallerIdentityOutput{}, f.err
 }
 

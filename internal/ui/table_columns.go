@@ -9,7 +9,6 @@ import (
 
 type tableState struct {
 	columns        map[columnName]bool
-	columnsDraft   map[columnName]bool
 	columnCursor   int
 	sortBy         columnName
 	sortDescending bool
@@ -41,7 +40,6 @@ const (
 func (component *tableColumnsComponent) openColumnsPopup() {
 	m := &component.model
 	m.columnCursor = 0
-	m.columnsDraft = nil
 	m.pushPopup(popupColumns)
 }
 
@@ -49,21 +47,26 @@ func (component *tableColumnsComponent) openColumnsPopup() {
 func (component tableColumnsComponent) updateColumns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	cols := m.allowedColumnItems()
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenColumns)
@@ -83,27 +86,33 @@ func (component tableColumnsComponent) updateColumns(msg tea.KeyMsg) (tea.Model,
 			m.columns[c] = false
 		}
 	}
+
 	return m, nil
 }
 
 func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	cols := m.allowedColumnItems()
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenColumns, popupColumns)
@@ -123,6 +132,7 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 			m.columns[c] = false
 		}
 	}
+
 	return m, nil
 }
 
@@ -145,10 +155,12 @@ func (component tableColumnsComponent) columnOptionLines() []string {
 	visible := m.columnsForRendering()
 	lines := make([]string, 0, 2+len(cols))
 	lines = append(lines, m.muted("# and NAME are always visible."), "")
+
 	for i, c := range cols {
 		checked := visible[c]
 		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor))
 	}
+
 	return lines
 }
 
@@ -207,12 +219,14 @@ func (column columnName) Field() string {
 func (component tableColumnsComponent) allowedColumnItems() []columnName {
 	m := component.model
 	items := columnItems()
+
 	out := make([]columnName, 0, len(items))
 	for _, column := range items {
 		if m.columnAllowed(column) {
 			out = append(out, column)
 		}
 	}
+
 	return out
 }
 
@@ -257,11 +271,13 @@ func defaultColumnVisibility(selected []string) map[columnName]bool {
 	for _, column := range columnItems() {
 		columns[column] = false
 	}
+
 	for _, name := range selected {
 		if column, ok := optionalColumnByName(name); ok {
 			columns[column] = true
 		}
 	}
+
 	return columns
 }
 
@@ -272,34 +288,41 @@ func ParseColumnOption(value string) ([]string, error) {
 	if len(names) == 0 {
 		return nil, nil
 	}
+
 	out := make([]string, 0, len(names))
 	seen := map[string]bool{}
+
 	for _, name := range names {
 		column, ok := optionalColumnByName(name)
 		if !ok {
 			return nil, fmt.Errorf("unsupported --show-column value %q; supported columns: %s", name, strings.Join(ValidColumnNames(), ","))
 		}
+
 		canonical := string(column)
 		if !seen[canonical] {
 			seen[canonical] = true
 			out = append(out, canonical)
 		}
 	}
+
 	return out, nil
 }
 
 // ValidColumnNames returns every column name accepted by --show-column.
 func ValidColumnNames() []string {
 	columns := append([]columnName{columnPath}, columnItems()...)
+
 	out := make([]string, 0, len(columns))
 	for _, column := range columns {
 		out = append(out, string(column))
 	}
+
 	return out
 }
 
 func compactColumnNames(value string) []string {
 	parts := strings.Split(value, ",")
+
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.ToLower(strings.TrimSpace(part))
@@ -307,6 +330,7 @@ func compactColumnNames(value string) []string {
 			out = append(out, part)
 		}
 	}
+
 	return out
 }
 
@@ -315,10 +339,12 @@ func optionalColumnByName(name string) (columnName, bool) {
 	if name == "name" || name == "path" {
 		return columnPath, true
 	}
+
 	for _, column := range columnItems() {
 		if name == string(column) {
 			return column, true
 		}
 	}
+
 	return "", false
 }

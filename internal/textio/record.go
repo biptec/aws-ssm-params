@@ -28,16 +28,16 @@ type Record struct {
 // Records is an ordered collection of import/export records.
 type Records []Record
 
-func (r Record) includesField(field string) bool {
+func (r *Record) includesField(field string) bool {
 	return r.Fields.Includes(field)
 }
 
 // HasField reports whether the record contains field. Records without an explicit field set represent all fields.
-func (r Record) HasField(field string) bool {
+func (r *Record) HasField(field string) bool {
 	return r.includesField(field)
 }
 
-func (r Record) fieldAny(field string) any {
+func (r *Record) fieldAny(field string) any {
 	switch field {
 	case FieldName:
 		return r.Path
@@ -61,11 +61,13 @@ func (r Record) fieldAny(field string) any {
 		if r.Version == 0 {
 			return ""
 		}
+
 		return r.Version
 	case FieldLen:
 		if r.Len == 0 {
 			return ""
 		}
+
 		return r.Len
 	case FieldSHA256:
 		return r.SHA256
@@ -76,7 +78,7 @@ func (r Record) fieldAny(field string) any {
 	}
 }
 
-func (r Record) fieldValue(field string) string {
+func (r *Record) fieldValue(field string) string {
 	value := r.fieldAny(field)
 	switch typed := value.(type) {
 	case string:

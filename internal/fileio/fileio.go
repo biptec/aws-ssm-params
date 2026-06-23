@@ -18,16 +18,19 @@ func Open(path string) (*os.File, error) {
 // OpenFile opens a local file path after anchoring the operation to the file's parent directory.
 func OpenFile(path string, flag int, perm fs.FileMode) (*os.File, error) {
 	cleanPath := filepath.Clean(path)
+
 	root, err := os.OpenRoot(filepath.Dir(cleanPath))
 	if err != nil {
 		return nil, errors.Wrapf(err, "open parent directory for %s", path)
 	}
+
 	defer func() { _ = root.Close() }()
 
 	file, err := root.OpenFile(filepath.Base(cleanPath), flag, perm)
 	if err != nil {
 		return nil, errors.Wrapf(err, "open file %s", path)
 	}
+
 	return file, nil
 }
 
@@ -43,6 +46,7 @@ func ReadFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "read file %s", path)
 	}
+
 	return data, nil
 }
 
@@ -52,12 +56,15 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 	if err != nil {
 		return err
 	}
+
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		return errors.Wrapf(err, "write file %s", path)
 	}
+
 	if err := file.Close(); err != nil {
 		return errors.Wrapf(err, "close file %s", path)
 	}
+
 	return nil
 }

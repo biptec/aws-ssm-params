@@ -67,6 +67,7 @@ func (m *popupState) pushNestedPopup(kind popupKind) {
 	if m.activePopup != popupNone {
 		m.popupStack = append(m.popupStack, m.activePopup)
 	}
+
 	m.activePopup = kind
 	m.pendingKeySequence = ""
 }
@@ -75,8 +76,10 @@ func (m *popupState) popPopup() {
 	if len(m.popupStack) == 0 {
 		m.activePopup = popupNone
 		m.pendingKeySequence = ""
+
 		return
 	}
+
 	last := len(m.popupStack) - 1
 	m.activePopup = m.popupStack[last]
 	m.popupStack = m.popupStack[:last]
@@ -89,10 +92,11 @@ func (m *popupState) clearPopupStack() {
 	m.pendingKeySequence = ""
 }
 
-func (m popupState) popupLayers() []popupKind {
+func (m *popupState) popupLayers() []popupKind {
 	layers := append([]popupKind(nil), m.popupStack...)
 	if m.activePopup != popupNone {
 		layers = append(layers, m.activePopup)
 	}
+
 	return layers
 }

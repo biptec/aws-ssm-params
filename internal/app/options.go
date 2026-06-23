@@ -33,15 +33,19 @@ func (cfg *Options) PrepareItems(ctx context.Context) (inventory.Items, error) {
 		cfg.ensureAllRegionsSeedRegion()
 		return items.WithDefaultRegion("*"), nil
 	}
+
 	if err := cfg.EnsureRegions(ctx); err != nil {
 		return nil, err
 	}
+
 	if len(items) == 0 {
 		return nil, nil
 	}
+
 	if len(cfg.Regions) > 1 {
 		return items.WithDefaultRegion("*"), nil
 	}
+
 	return items.WithDefaultRegion(cfg.Region), nil
 }
 
@@ -52,15 +56,19 @@ func (cfg *Options) EnsureRegions(ctx context.Context) error {
 	if cfg.AllRegions {
 		return nil
 	}
+
 	if cfg.Region == "" {
 		cfg.Region = ssm.ResolveConfiguredRegion(ctx, cfg.Profile)
 	}
+
 	if cfg.Region == "" {
 		return errors.New("AWS region is required")
 	}
+
 	if len(cfg.Regions) == 0 {
 		cfg.Regions = []string{cfg.Region}
 	}
+
 	return nil
 }
 

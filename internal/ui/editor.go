@@ -16,7 +16,6 @@ type editorState struct {
 	editFileInput        textinput.Model
 
 	editField           editField
-	editDirection       editDirection
 	viInsertMode        bool
 	editRegionOptions   []string
 	pendingFileWrite    fileWriteConfirmation
@@ -48,13 +47,6 @@ const (
 	editFieldDescription
 	editFieldPolicies
 	editFieldFilePath
-)
-
-type editDirection int
-
-const (
-	editDirectionNext editDirection = iota
-	editDirectionPrevious
 )
 
 type fileWriteConfirmation int
@@ -106,4 +98,21 @@ type editSnapshot struct {
 	description   string
 	policies      string
 	value         string
+}
+
+func (snapshot *editSnapshot) isZero() bool {
+	return *snapshot == (editSnapshot{})
+}
+
+func (snapshot *editSnapshot) equal(other *editSnapshot) bool {
+	return snapshot.name == other.name &&
+		snapshot.region == other.region &&
+		snapshot.parameterType == other.parameterType &&
+		snapshot.tier == other.tier &&
+		snapshot.dataType == other.dataType &&
+		snapshot.overwrite == other.overwrite &&
+		snapshot.newParameter == other.newParameter &&
+		snapshot.description == other.description &&
+		snapshot.policies == other.policies &&
+		snapshot.value == other.value
 }

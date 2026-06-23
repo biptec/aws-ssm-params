@@ -21,6 +21,7 @@ func LoadStatusesWithProgress(ctx context.Context, client ssm.Client, items inve
 // It wraps the shared batch loader with a uilive writer so repeated progress updates repaint cleanly.
 func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
 	writer := uilive.New()
+
 	writer.Start()
 	defer writer.Stop()
 
@@ -30,6 +31,7 @@ func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, 
 // LoadFilteredStatusesWithProgressForRegions discovers parameters with filter groups and prints progress.
 func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, groups filter.Groups, includeValues bool, regions []string) Statuses {
 	writer := uilive.New()
+
 	writer.Start()
 	defer writer.Stop()
 
@@ -43,6 +45,7 @@ func writeLoadProgress(writer io.Writer) LoadProgress {
 		} else {
 			_, _ = fmt.Fprintf(writer, "Loading parameters %d/%d...\n", done, total)
 		}
+
 		for _, item := range chunk {
 			_, _ = fmt.Fprintf(writer, "%s\n", item.Path)
 		}

@@ -20,40 +20,51 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		if !allowFromExpanded && m.isCurrentExpandableFieldExpanded() {
 			return m, nil, false
 		}
+
 		switch action {
 		case navPrevious:
 			resetFileConfirmation()
+
 			updated, cmd := m.focusPreviousEditField()
+
 			return updated, cmd, true
 		case navNext:
 			resetFileConfirmation()
+
 			updated, cmd := m.focusNextEditField()
+
 			return updated, cmd, true
 		case navNone, navPageUp, navPageDown, navFirst, navLast:
 			return m, nil, false
 		}
+
 		return m, nil, false
 	}
 
 	key := msg.String()
 	beforeEditField := m.editField
+
 	beforeExpandableValue := ""
 	if isExpandableEditField(beforeEditField) {
 		beforeExpandableValue = m.expandableFieldValue(beforeEditField)
 	}
+
 	if key == "ctrl+l" && isExpandableEditField(m.editField) {
 		m.showGutters = !m.showGutters
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && isEditableTextField(m.editField) {
 		if isHelpKey(key) {
 			m.openShortcuts(screenTextArea)
 			return m, nil
 		}
+
 		if m.viInsertMode {
 			if key == "esc" {
 				m.viInsertMode = false
 				m.pendingKeySequence = ""
+
 				return m, nil
 			}
 		} else {
@@ -63,26 +74,33 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 					return updated, cmd
 				}
 			}
+
 			switch key {
 			case "q", "esc", "ctrl+g":
 				return m.requestEditorBack()
 			case "enter", "ctrl+j":
 				resetFileConfirmation()
+
 				if m.expandCompactFieldIfNeeded() {
 					return m, nil
 				}
+
 				if m.editField == editFieldRegion {
 					return m.openRegionSelect()
 				}
+
 				if m.editField == editFieldType {
 					return m.startTypeSelect(screenTextArea)
 				}
+
 				if m.editField == editFieldTier {
 					return m.startTierSelect(screenTextArea)
 				}
+
 				if m.editField == editFieldDataType {
 					return m.startDataTypeSelect(screenTextArea)
 				}
+
 				if m.editField == editFieldOverwrite {
 					return m.startOverwriteSelect(screenTextArea)
 				}
@@ -93,12 +111,15 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 				if m.openActionsPopupForFocusedField() {
 					return m, nil
 				}
+
 				return m, nil
 			}
+
 			if updated, handled := m.updateViTextFieldNormal(key); handled {
 				updated.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
 				return updated, nil
 			}
+
 			return m, nil
 		}
 	}
@@ -111,20 +132,25 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		if key == "q" && m.shouldTypePrintableQInEditField() {
 			break
 		}
+
 		return m.requestEditorBack()
 	}
+
 	if action, ok := m.editorNavigationAction(key); ok {
 		allowFromExpanded := action == navPrevious && key == "shift+tab" || action == navNext && key == "tab"
 		if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
 			return updated, cmd
 		}
 	}
+
 	switch key {
 	case "enter", "ctrl+j":
 		resetFileConfirmation()
+
 		if m.expandCompactFieldIfNeeded() {
 			return m, nil
 		}
+
 		switch m.editField {
 		case editFieldValue, editFieldDescription, editFieldPolicies, editFieldFilePath:
 		case editFieldSSMPath:
@@ -145,6 +171,7 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 	case "alt+e":
 		resetFileConfirmation()
 		m.openActionsPopupForFocusedField()
+
 		return m, nil
 	case "y":
 		switch m.pendingFileWrite {
@@ -152,10 +179,12 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		case fileWriteConfirmationSecure:
 			m.pendingFileWrite = fileWriteConfirmationNone
 			m.warningMessage = ""
+
 			return m.writeValueToFile(true, false)
 		case fileWriteConfirmationOverwrite:
 			m.pendingFileWrite = fileWriteConfirmationNone
 			m.warningMessage = ""
+
 			return m.writeValueToFile(true, true)
 
 		default:
@@ -164,15 +193,19 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		if !isMultilineEditField(m.editField) {
 			break
 		}
+
 		resetFileConfirmation()
 		m.moveActiveMultilinePage(1)
+
 		return m, nil
 	case "alt+v", "pageup", "pgup":
 		if !isMultilineEditField(m.editField) {
 			break
 		}
+
 		resetFileConfirmation()
 		m.moveActiveMultilinePage(-1)
+
 		return m, nil
 	case "ctrl+k":
 		if isMultilineEditField(m.editField) && m.keymapStyle() != keymapEmacs {
@@ -193,6 +226,7 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 	}
 
 	var cmd tea.Cmd
+
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
@@ -208,10 +242,12 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 
 	default:
 	}
+
 	m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
+
 	return m, cmd
 }

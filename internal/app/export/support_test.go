@@ -91,7 +91,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 		Description: "API key",
 	}
 
-	record := recordFromStatus(status, textio.Fields{textio.FieldName, textio.FieldValue})
+	record := recordFromStatus(&status, textio.Fields{textio.FieldName, textio.FieldValue})
 
 	assert.Equal(t, textio.Fields{textio.FieldName, textio.FieldValue}, record.Fields)
 	assert.Equal(t, "secret", record.Value)
@@ -103,6 +103,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
 	basePath, err := app.ParseBasePath("/app/prod")
 	require.NoError(t, err)
+
 	r := runner{
 		basePath:     basePath,
 		recordFields: textio.Fields{textio.FieldName, textio.FieldValue},
@@ -137,6 +138,7 @@ func TestRecordsPreserveAbsoluteNamesWithoutBasePath(t *testing.T) {
 func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
 	basePath, err := app.ParseBasePath("/app/prod")
 	require.NoError(t, err)
+
 	r := runner{
 		basePath:     basePath,
 		recordFields: textio.Fields{textio.FieldName},

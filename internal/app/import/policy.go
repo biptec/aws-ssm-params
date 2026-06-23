@@ -35,6 +35,7 @@ func (policy Policy) operation(exists bool) (writeOperation, PolicyAction) {
 	if exists {
 		return writeOperationUpdate, policy.OnUpdate
 	}
+
 	return writeOperationCreate, policy.OnCreate
 }
 
@@ -56,16 +57,20 @@ func askWriteConfirmation(action writeOperation, region, name string) (bool, err
 	if action == writeOperationUpdate {
 		questionAction = "Update"
 	}
+
 	if region != "" {
 		_, _ = fmt.Fprintf(tty, "%s parameter %s in %s? [y/N] ", questionAction, name, region)
 	} else {
 		_, _ = fmt.Fprintf(tty, "%s parameter %s? [y/N] ", questionAction, name)
 	}
+
 	answer, err := bufio.NewReader(tty).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, errors.Wrap(err, "read write confirmation")
 	}
+
 	answer = strings.ToLower(strings.TrimSpace(answer))
+
 	return answer == "y" || answer == "yes", nil
 }
 
@@ -88,6 +93,7 @@ func logSkipped(logger *slog.Logger, operation writeOperation, policy PolicyActi
 	if logger == nil {
 		return
 	}
+
 	logger.Info("record skipped", "action", string(operation), "policy", string(policy), "region", region, "name", name)
 }
 
@@ -95,6 +101,7 @@ func logRecordError(logger *slog.Logger, operation writeOperation, region, name 
 	if logger == nil {
 		return
 	}
+
 	logger.Error("record failed", "action", string(operation), "region", region, "name", name, "error", err)
 }
 
@@ -102,5 +109,6 @@ func logContinueOnError(logger *slog.Logger, region, name string) {
 	if logger == nil {
 		return
 	}
+
 	logger.Info("continuing after record error", "region", region, "name", name)
 }

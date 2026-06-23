@@ -17,30 +17,37 @@ type tableViewComponent struct {
 // Missing parameters only have an expected name, so every field except Name is displayed as a dash.
 func (component tableViewComponent) renderSelectedParameterBlock(full bool) string {
 	m := component.model
+
 	st := m.currentStatus()
 	if st.Item.Path == "" {
 		return m.renderBox("Selected Parameter", []string{"No parameters found."}, 8)
 	}
 
-	fields := m.selectedParameterFields(st, full)
+	fields := m.selectedParameterFields(&st, full)
+
 	labelWidth := 6
 	if full {
 		labelWidth = 11
 	}
+
 	lines := m.renderFieldPairs(fields, labelWidth)
+
 	return m.renderBox("Selected Parameter", lines, len(lines)+2)
 }
 
-func (component tableViewComponent) selectedParameterFields(st Status, full bool) [][2]string {
+func (component tableViewComponent) selectedParameterFields(st *Status, full bool) [][2]string {
 	m := component.model
+
 	if st.isMissing() {
 		if full {
 			return m.filterSelectedParameterFields([][2]string{{"Name", st.Item.Path}, {"Region", "-"}, {"Type", "-"}, {"Tier", "-"}, {"DataType", "-"}, {"Policies", "-"}, {"Version", "-"}, {"Len", "-"}, {"SHA256", "-"}, {"Description", "-"}, {"User", "-"}, {"Date", "-"}, {"Value", "-"}})
 		}
+
 		return m.filterSelectedParameterFields([][2]string{{"Name", st.Item.Path}, {"Region", "-"}, {"Type", "-"}, {"Date", "-"}, {"Value", "-"}})
 	}
 
 	value := m.displayValue(st, full)
+
 	fields := [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 	if full {
 		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, max(20, m.boxInnerWidth()-18))}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
@@ -48,6 +55,7 @@ func (component tableViewComponent) selectedParameterFields(st Status, full bool
 			fields = append(fields, [2]string{"Error", st.Error})
 		}
 	}
+
 	return m.filterSelectedParameterFields(fields)
 }
 
@@ -56,17 +64,20 @@ func (component tableViewComponent) filterSelectedParameterFields(fields [][2]st
 	if len(m.opts.Fields) == 0 {
 		return fields
 	}
+
 	out := make([][2]string, 0, len(fields))
 	for _, pair := range fields {
 		if m.detailFieldAllowed(pair[0]) {
 			out = append(out, pair)
 		}
 	}
+
 	return out
 }
 
 func (component tableViewComponent) detailFieldAllowed(label string) bool {
 	m := component.model
+
 	switch strings.ToLower(strings.TrimSpace(label)) {
 	case "name":
 		return true
@@ -101,21 +112,26 @@ func (component tableViewComponent) detailFieldAllowed(label string) bool {
 
 // displayValue returns the user-facing value for selected blocks and VALUE table cells.
 // SecureString values are shown when decrypted; otherwise the UI renders an encrypted placeholder.
-func (component tableViewComponent) displayValue(st Status, full bool) string {
+func (component tableViewComponent) displayValue(st *Status, full bool) string {
 	m := component.model
+
 	if st.Pending {
 		return "-"
 	}
+
 	if st.Item.Path != "" && st.isMissing() {
 		return "-"
 	}
+
 	if m.shouldDisplayEncryptedValue(st) {
 		return encryptedPlaceholderText
 	}
+
 	width := max(20, m.boxInnerWidth()-22)
 	if full {
 		width = max(20, m.boxInnerWidth()-18)
 	}
+
 	return oneLineValuePreview(st.Value, width)
 }
 
@@ -123,29 +139,35 @@ func oneLineValuePreview(value string, width int) string {
 	if value == "" {
 		return "-"
 	}
+
 	if width < 4 {
 		width = 4
 	}
+
 	normalized := strings.ReplaceAll(value, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	multiline := strings.Contains(normalized, "\n")
 	preview := strings.ReplaceAll(normalized, "\n", `\n`)
+
 	suffix := ""
 	if multiline {
 		suffix = "..."
 	}
+
 	available := width - len(suffix)
 	if available < 1 {
 		available = 1
 	}
+
 	runes := []rune(preview)
 	if len(runes) > available {
 		return string(runes[:available]) + "..."
 	}
+
 	return preview + suffix
 }
 
-func (component tableViewComponent) shouldDisplayEncryptedValue(st Status) bool {
+func (component tableViewComponent) shouldDisplayEncryptedValue(st *Status) bool {
 	m := component.model
 	return !st.Pending && st.HasSensitiveValue() && st.Value == "" && !m.opts.ShowSecureValues
 }
@@ -172,15 +194,18 @@ func (component tableViewComponent) renderListBlock() string {
 	lines := []string{"  " + header, m.divider(divider)}
 
 	bodyHeight := m.listBodyHeight()
+
 	start := 0
 	if m.selected >= bodyHeight {
 		start = m.selected - bodyHeight + 1
 	}
+
 	end := min(len(vis), start+bodyHeight)
 	for row := start; row < end; row++ {
-		st := m.statuses[vis[row]]
+		st := &m.statuses[vis[row]]
 		lines = append(lines, m.renderListRow(row+1, st, row == m.selected, columns))
 	}
+
 	for len(lines) < 2+bodyHeight {
 		lines = append(lines, "")
 	}
@@ -193,6 +218,7 @@ func (component tableViewComponent) renderListBlock() string {
 			lines = append(lines, m.filteredLine())
 		}
 	}
+
 	return m.renderBox(title, lines, m.listBlockHeight())
 }
 
@@ -207,6 +233,7 @@ type tableColumn struct {
 func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 	m := component.model
 	keys := []columnName{columnIndex, columnPath}
+
 	visibleColumns := m.columnsForRendering()
 	for _, key := range columnItems() {
 		if m.columnAllowed(key) && visibleColumns[key] {
@@ -217,15 +244,18 @@ func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 	cols := make([]tableColumn, 0, len(keys))
 	for _, key := range keys {
 		header := m.columnHeader(key)
+
 		width := lipgloss.Width(header)
 		if key == columnIndex {
 			width = max(width, len(strconv.Itoa(max(1, len(vis)))))
 		}
+
 		for row, idx := range vis {
-			st := m.statuses[idx]
+			st := &m.statuses[idx]
 			value := m.tableCellValue(key, row+1, st)
 			width = max(width, lipgloss.Width(value))
 		}
+
 		cols = append(cols, tableColumn{key: key, header: header, width: width})
 	}
 
@@ -235,8 +265,10 @@ func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 		if idx < 0 {
 			break
 		}
+
 		cols[idx].width--
 	}
+
 	return cols
 }
 
@@ -245,10 +277,12 @@ func tableColumnsWidth(cols []tableColumn) int {
 	if len(cols) == 0 {
 		return 0
 	}
+
 	total := 2 * (len(cols) - 1)
 	for _, col := range cols {
 		total += col.width
 	}
+
 	return total
 }
 
@@ -256,16 +290,19 @@ func tableColumnsWidth(cols []tableColumn) int {
 func widestShrinkableColumn(cols []tableColumn) int {
 	idx := -1
 	width := -1
+
 	for i, col := range cols {
 		minWidth := columnMinWidth(col.key, col.header)
 		if col.width <= minWidth {
 			continue
 		}
+
 		if col.width > width {
 			idx = i
 			width = col.width
 		}
 	}
+
 	return idx
 }
 
@@ -288,75 +325,93 @@ func columnMinWidth(key columnName, header string) int {
 // renderListHeader pads and styles the table header row.
 func (component tableViewComponent) renderListHeader(cols []tableColumn) string {
 	m := component.model
+
 	parts := make([]string, 0, len(cols))
 	for _, col := range cols {
 		parts = append(parts, pad(col.header, col.width))
 	}
+
 	s := strings.Join(parts, "  ")
 	if m.opts.NoColor {
 		return s
 	}
+
 	return tableHeaderStyle.Render(s)
 }
 
 // renderListRow renders one status row with selection and status-based coloring.
-func (component tableViewComponent) renderListRow(index int, st Status, selected bool, cols []tableColumn) string {
+func (component tableViewComponent) renderListRow(index int, st *Status, selected bool, cols []tableColumn) string {
 	m := component.model
+
 	parts := make([]string, 0, len(cols))
 	for _, col := range cols {
 		parts = append(parts, m.renderListCell(col, index, st))
 	}
+
 	row := strings.Join(parts, "  ")
+
 	plain := stripANSI(row)
 	if selected {
 		return m.selectedMarker() + m.rowText(st, plain, true)
 	}
+
 	if styled := m.rowText(st, plain, false); styled != plain {
 		return "  " + styled
 	}
+
 	return "  " + row
 }
 
-func (component tableViewComponent) renderListCell(col tableColumn, index int, st Status) string {
+func (component tableViewComponent) renderListCell(col tableColumn, index int, st *Status) string {
 	m := component.model
+
 	value := truncateInline(m.tableCellValue(col.key, index, st), col.width)
 	if col.key == columnValue && m.shouldDisplayEncryptedValue(st) {
 		value = m.encryptedPlaceholder()
 	}
+
 	return pad(value, col.width)
 }
 
 // rowText applies row-level styling based on selection and status severity.
-func (component tableViewComponent) rowText(st Status, row string, selected bool) string {
+func (component tableViewComponent) rowText(st *Status, row string, selected bool) string {
 	m := component.model
 	if selected {
 		return m.selectedRow(row)
 	}
+
 	label := st.DisplayLabel()
 	if label == "ERROR" {
 		if m.opts.NoColor {
 			return row
 		}
+
 		return lipgloss.NewStyle().Foreground(errFg).Render(row)
 	}
+
 	if label == "LOADING" || label == "MISSING" {
 		if m.opts.NoColor {
 			return row
 		}
+
 		return lipgloss.NewStyle().Foreground(missFg).Render(row)
 	}
+
 	if label == "EMPTY" {
 		if m.opts.NoColor {
 			return row
 		}
+
 		return lipgloss.NewStyle().Foreground(emptyFg).Render(row)
 	}
+
 	return row
 }
 
 // tableCellValue returns the raw display value for one dynamic table column.
-func (component tableViewComponent) tableCellValue(key columnName, index int, st Status) string {
+func (component tableViewComponent) tableCellValue(key columnName, index int, st *Status) string {
 	m := component.model
+
 	switch key {
 	case columnIndex:
 		return strconv.Itoa(index)
@@ -403,11 +458,13 @@ func (component tableViewComponent) selectedParameterBlockHeight() int {
 	if !m.selectedExpanded {
 		return 0
 	}
+
 	st := m.currentStatus()
 	if st.Item.Path == "" {
 		return 0
 	}
-	return len(m.renderFieldPairs(m.selectedParameterFields(st, true), 11)) + 2
+
+	return len(m.renderFieldPairs(m.selectedParameterFields(&st, true), 11)) + 2
 }
 
 func (component tableViewComponent) listBodyHeight() int {
@@ -417,5 +474,6 @@ func (component tableViewComponent) listBodyHeight() int {
 	if m.searchMode || m.effectiveQuery != "" {
 		reserved += 2
 	}
+
 	return max(3, m.listBlockHeight()-reserved)
 }

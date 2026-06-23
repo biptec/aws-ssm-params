@@ -24,7 +24,7 @@ type uiBackend interface {
 	writeFile(string, []byte, fs.FileMode) error
 	statFile(string) (fs.FileInfo, error)
 	randomValue(string, string) (string, error)
-	saveParameter(context.Context, inventory.Item, string, string, ssm.ParameterType, ssm.PutParameterOptions, string, bool) statusUpdatedMsg
+	saveParameter(context.Context, *inventory.Item, string, string, ssm.ParameterType, ssm.PutParameterOptions, string, bool) statusUpdatedMsg
 	deleteParameters(context.Context, inventory.Items, string, bool) deleteDoneMsg
 }
 
@@ -41,6 +41,7 @@ func (localFileStore) readFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
 	}
+
 	return data, nil
 }
 
@@ -48,6 +49,7 @@ func (localFileStore) writeFile(path string, data []byte, mode fs.FileMode) erro
 	if err := fileio.WriteFile(path, data, mode); err != nil {
 		return fmt.Errorf("%w", err)
 	}
+
 	return nil
 }
 
@@ -56,6 +58,7 @@ func (localFileStore) statFile(path string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
 	}
+
 	return info, nil
 }
 
@@ -72,6 +75,7 @@ func (backend defaultBackend) fileStore() fileStore {
 	if backend.files == nil {
 		return localFileStore{}
 	}
+
 	return backend.files
 }
 
@@ -79,7 +83,9 @@ func (backend defaultBackend) loadStatuses(ctx context.Context, items inventory.
 	if len(groups) > 0 && len(items) == 0 {
 		return LoadFilteredStatusesBatchForRegions(ctx, backend.client, groups, includeValues, regions, progress)
 	}
+
 	statuses := LoadStatusesBatchForRegionsStream(ctx, backend.client, items, includeValues, regions, progress, batch)
+
 	return statuses.Filter(groups)
 }
 
@@ -88,6 +94,7 @@ func (backend defaultBackend) listRegions(ctx context.Context) ([]string, error)
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
 	}
+
 	return regions, nil
 }
 
@@ -119,50 +126,63 @@ func (defaultBackend) randomValue(kind, customLength string) (string, error) {
 		if err != nil || n <= 0 {
 			return "", errors.New("invalid byte length")
 		}
+
 		value, err := randomx.Base64(n)
+
 		return value, errors.Wrap(err, "generate custom base64 random value")
 	default:
 		return "", errors.New("unknown random value generator")
 	}
 }
 
-func (backend defaultBackend) saveParameter(ctx context.Context, item inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) statusUpdatedMsg {
-	if item.Region == "*" {
-		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", item.Path)}
+func (backend defaultBackend) saveParameter(ctx context.Context, item *inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) statusUpdatedMsg {
+	savedItem := *item
+	if savedItem.Region == "*" {
+		return statusUpdatedMsg{path: savedItem.Path, oldPath: oldPath, err: fmt.Errorf("cannot save %s without a concrete AWS region", savedItem.Path)}
 	}
-	regionalClient := backend.client.ForRegion(item.Region)
-	if err := regionalClient.PutParameterWithOptions(ctx, item.Path, value, parameterType, opts); err != nil {
-		return statusUpdatedMsg{path: item.Path, oldPath: oldPath, err: err}
+
+	regionalClient := backend.client.ForRegion(savedItem.Region)
+	if err := regionalClient.PutParameterWithOptions(ctx, savedItem.Path, value, parameterType, opts); err != nil {
+		return statusUpdatedMsg{path: savedItem.Path, oldPath: oldPath, err: err}
 	}
+
 	appendedToNamesFile := false
+
 	if pathsFile != "" && allowNamesFileUpdate {
-		appended, err := (inventory.PathsFile{Path: pathsFile}).Append(item.Path)
+		appended, err := (inventory.PathsFile{Path: pathsFile}).Append(savedItem.Path)
 		if err != nil {
-			st := LoadStatuses(ctx, regionalClient, inventory.Items{item}, true)[0]
-			return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: "Updated " + item.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", item.Path, pathsFile, err)}
+			st := LoadStatuses(ctx, regionalClient, inventory.Items{savedItem}, true)[0]
+			return statusUpdatedMsg{path: savedItem.Path, oldPath: oldPath, status: st, message: "Updated " + savedItem.Path, warning: fmt.Sprintf("Could not append %s to %s: %v", savedItem.Path, pathsFile, err)}
 		}
+
 		if appended {
 			appendedToNamesFile = true
-			item.Kind = "path-file"
-			item.Source = pathsFile
+			savedItem.Kind = "path-file"
+			savedItem.Source = pathsFile
 		}
 	}
-	st := LoadStatuses(ctx, regionalClient, inventory.Items{item}, true)[0]
-	message := "Updated " + item.Path
+
+	st := LoadStatuses(ctx, regionalClient, inventory.Items{savedItem}, true)[0]
+
+	message := "Updated " + savedItem.Path
 	if appendedToNamesFile {
 		message += " and added it to " + pathsFile
 	}
-	return statusUpdatedMsg{path: item.Path, oldPath: oldPath, status: st, message: message}
+
+	return statusUpdatedMsg{path: savedItem.Path, oldPath: oldPath, status: st, message: message}
 }
 
 func (backend defaultBackend) deleteParameters(ctx context.Context, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) deleteDoneMsg {
 	byRegion := map[string][]string{}
+
 	for _, item := range items {
 		if item.Region == "*" {
 			continue
 		}
+
 		byRegion[item.Region] = append(byRegion[item.Region], item.Path)
 	}
+
 	for region, paths := range byRegion {
 		if err := backend.client.ForRegion(region).DeleteMany(ctx, paths); err != nil {
 			return deleteDoneMsg{items: items, err: err}
@@ -174,8 +194,10 @@ func (backend defaultBackend) deleteParameters(ctx context.Context, items invent
 		if _, err := (inventory.PathsFile{Path: pathsFile}).Remove(items.Paths()); err != nil {
 			return deleteDoneMsg{items: items, warning: fmt.Sprintf("Could not update %s after delete: %v", pathsFile, err)}
 		}
+
 		removeRows = true
 	}
+
 	return deleteDoneMsg{items: items, removeRows: removeRows}
 }
 
@@ -183,5 +205,6 @@ func backendFor(m model) uiBackend {
 	if m.backend != nil {
 		return m.backend
 	}
+
 	return newDefaultBackend(m.client)
 }

@@ -20,50 +20,43 @@ type PathsFile struct {
 	Path string
 }
 
-// Load reads a simple newline-based SSM inventory file.
-// Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
-// duplicates are removed, and the final list is sorted to make downstream output deterministic.
-func (pathsFile PathsFile) Load() (Items, error) {
-	file, err := fileio.Open(pathsFile.Path)
-	if err != nil {
-		return nil, errors.Wrapf(err, "open paths file %s", pathsFile.Path)
-	}
-	defer func() { _ = file.Close() }()
-
-	items, err := LoadPaths(file, pathsFile.Path)
-	if err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 // LoadPaths reads newline-based SSM inventory content from reader.
 // Empty lines and comments are ignored, inline comments are stripped, paths must be absolute SSM names,
 // duplicates are removed, and the final list is sorted to make downstream output deterministic.
 func LoadPaths(reader io.Reader, source string) (Items, error) {
 	seen := map[string]bool{}
+
 	var items Items
+
 	scanner := bufio.NewScanner(reader)
+
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
+
 		raw := pathFileLinePath(scanner.Text())
 		if raw == "" {
 			continue
 		}
+
 		if !strings.HasPrefix(raw, "/") {
 			return nil, fmt.Errorf("invalid SSM name in %s:%d: %s", source, lineNo, raw)
 		}
+
 		if seen[raw] {
 			continue
 		}
+
 		seen[raw] = true
 		items = append(items, Item{Path: raw, Kind: "path-file", Source: source, SecretName: path.Base(raw)})
 	}
+
 	if err := scanner.Err(); err != nil {
 		return nil, errors.Wrapf(err, "scan paths from %s", source)
 	}
+
 	sort.Slice(items, func(i, j int) bool { return items[i].Path < items[j].Path })
+
 	return items, nil
 }
 
@@ -74,15 +67,18 @@ func (pathsFile PathsFile) Append(parameterPath string) (bool, error) {
 	if parameterPath == "" {
 		return false, errors.New("SSM name is required")
 	}
+
 	if !strings.HasPrefix(parameterPath, "/") {
 		return false, fmt.Errorf("invalid SSM name: %s", parameterPath)
 	}
 
 	cleanPath := filepath.Clean(pathsFile.Path)
+
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil && !os.IsNotExist(err) {
 		return false, errors.Wrapf(err, "read paths file %s", pathsFile.Path)
 	}
+
 	if pathFileContainsPath(string(data), parameterPath) {
 		return false, nil
 	}
@@ -91,14 +87,18 @@ func (pathsFile PathsFile) Append(parameterPath string) (bool, error) {
 	if len(data) > 0 && !strings.HasSuffix(string(data), "\n") {
 		prefix = "\n"
 	}
+
 	file, err := fileio.OpenFile(pathsFile.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return false, errors.Wrapf(err, "open paths file %s", pathsFile.Path)
 	}
+
 	defer func() { _ = file.Close() }()
+
 	if _, err := file.WriteString(prefix + parameterPath + "\n"); err != nil {
 		return false, errors.Wrapf(err, "append path to %s", pathsFile.Path)
 	}
+
 	return true, nil
 }
 
@@ -109,6 +109,7 @@ func pathFileContainsPath(content, parameterPath string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -116,47 +117,60 @@ func pathFileContainsPath(content, parameterPath string) bool {
 // Lines that contain a matching path followed by an inline comment are removed as a whole.
 func (pathsFile PathsFile) Remove(parameterPaths []string) (int, error) {
 	targets := map[string]bool{}
+
 	for _, parameterPath := range parameterPaths {
 		parameterPath = strings.TrimSpace(parameterPath)
 		if parameterPath != "" {
 			targets[parameterPath] = true
 		}
 	}
+
 	if len(targets) == 0 {
 		return 0, nil
 	}
+
 	cleanPath := filepath.Clean(pathsFile.Path)
+
 	data, err := fileio.ReadFile(cleanPath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "read paths file %s", cleanPath)
 	}
+
 	parts := strings.SplitAfter(string(data), "\n")
 	remaining := make([]string, 0, len(parts))
 	removed := 0
+
 	for _, line := range parts {
 		if line == "" {
 			continue
 		}
+
 		if targets[pathFileLinePath(line)] {
 			removed++
 			continue
 		}
+
 		remaining = append(remaining, line)
 	}
+
 	if removed == 0 {
 		return 0, nil
 	}
+
 	file, err := fileio.OpenFile(cleanPath, os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return 0, errors.Wrapf(err, "open paths file %s", cleanPath)
 	}
+
 	if _, err := file.WriteString(strings.Join(remaining, "")); err != nil {
 		_ = file.Close()
 		return 0, errors.Wrapf(err, "write paths file %s", cleanPath)
 	}
+
 	if err := file.Close(); err != nil {
 		return 0, errors.Wrapf(err, "close paths file %s", cleanPath)
 	}
+
 	return removed, nil
 }
 
@@ -165,8 +179,10 @@ func pathFileLinePath(line string) string {
 	if raw == "" || strings.HasPrefix(raw, "#") {
 		return ""
 	}
+
 	if i := strings.Index(raw, "#"); i >= 0 {
 		raw = strings.TrimSpace(raw[:i])
 	}
+
 	return raw
 }

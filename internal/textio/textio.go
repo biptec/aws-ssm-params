@@ -19,14 +19,14 @@ const (
 // Reader decodes records from the input stream captured by NewReader.
 // Field mappings describe file-field names, while keyField identifies a field encoded as an object key.
 type Reader interface {
-	Import(fieldMaps FieldMappings, keyField string) (Records, error)
+	Import(FieldMappings, string) (Records, error)
 }
 
 // Writer encodes records to the output stream captured by NewWriter.
 // ExportScalar writes one selected field; Export writes complete mapped records.
 type Writer interface {
-	ExportScalar(records Records, field, keyField string) error
-	Export(records Records, fieldMaps FieldMappings, keyField string) error
+	ExportScalar(Records, string, string) error
+	Export(Records, FieldMappings, string) error
 }
 
 // TextIO is the complete codec contract implemented by every supported format.

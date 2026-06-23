@@ -53,13 +53,16 @@ func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 	if values.AppName == "" {
 		values.AppName = fallbackAppName
 	}
+
 	if values.GlobalEnvironment == "" {
 		values.GlobalEnvironment = values.SecretsEnvironment
 	}
 
 	var items []Item
+
 	if values.SecretsEnabled && values.SecretsProvider == "aws-ssm-params" {
 		prefix := defaultString(values.SecretsPrefix, "/app-infra")
+
 		env := defaultString(values.SecretsEnvironment, values.GlobalEnvironment)
 		for _, key := range values.SecretsKeys {
 			items = append(items, Item{
@@ -81,6 +84,7 @@ func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 			if component.TLSCertKey != "" {
 				items = append(items, Item{Path: component.TLSCertKey, Kind: "tls.crt", Source: filepath.ToSlash(path), App: values.AppName, Component: componentName, SecretName: component.TLSSecretName})
 			}
+
 			if component.TLSKeyKey != "" {
 				items = append(items, Item{Path: component.TLSKeyKey, Kind: "tls.key", Source: filepath.ToSlash(path), App: values.AppName, Component: componentName, SecretName: component.TLSSecretName})
 			}
@@ -89,10 +93,12 @@ func scanValuesFile(path, fallbackAppName string) ([]Item, error) {
 		if component.BackupEnabled {
 			prefix := defaultString(component.BackupPrefix, "/app-infra")
 			env := defaultString(component.BackupEnvironment, values.GlobalEnvironment)
+
 			domains := component.BackupDomains
 			if len(domains) == 0 && component.BackupDomain != "" {
 				domains = []string{component.BackupDomain}
 			}
+
 			for _, domain := range domains {
 				items = append(
 					items,
@@ -116,6 +122,7 @@ func joinSSM(parts ...string) string {
 			clean = append(clean, part)
 		}
 	}
+
 	return "/" + strings.Join(clean, "/")
 }
 
@@ -124,5 +131,6 @@ func defaultString(value, fallback string) string {
 	if value == "" {
 		return fallback
 	}
+
 	return value
 }

@@ -15,9 +15,9 @@ import (
 )
 
 type runtimeState struct {
-	ctx    context.Context
-	items  inventory.Items
-	loadCh chan tea.Msg
+	contextProvider func() context.Context
+	items           inventory.Items
+	loadCh          chan tea.Msg
 
 	width  int
 	height int
@@ -31,7 +31,6 @@ type runtimeState struct {
 	busyMessage    string
 
 	loadingTitle        string
-	loadingLines        []string
 	loadingSpinnerFrame int
 
 	pendingQuit    bool
@@ -40,20 +39,23 @@ type runtimeState struct {
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
 // The function returns only after the user quits the TUI or Bubble Tea reports an error.
-func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Items, opts Options) error {
+func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Items, opts *Options) error {
 	m := newModel(ctx, client, items, opts)
+
 	programOptions := []tea.ProgramOption{tea.WithAltScreen()}
 	if opts.UseInputTTY {
 		programOptions = append(programOptions, tea.WithInputTTY())
 	}
+
 	p := tea.NewProgram(m, programOptions...)
 	_, err := p.Run()
+
 	return errors.Wrap(err, "run interactive TUI")
 }
 
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
-func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opts Options) model {
+func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opts *Options) model {
 	sortRules := parseInitialSortOptions(opts.Sort)
 	sortBy, sortDescending := sortRules.primary()
 	input := textinput.New()
@@ -99,8 +101,12 @@ func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opt
 	descriptionArea.MaxHeight = 0
 	descriptionArea.ShowLineNumbers = false
 
-	m := model{client: client, backend: newDefaultBackend(client), opts: opts}
-	m.ctx = ctx
+	m := model{modelState: &modelState{
+		client:  client,
+		backend: newDefaultBackend(client),
+		opts:    *opts,
+	}}
+	m.contextProvider = func() context.Context { return ctx }
 	m.items = items
 	m.statuses = pendingStatuses(items)
 	m.loadCh = make(chan tea.Msg)
@@ -120,13 +126,15 @@ func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opt
 	m.sortRules = sortRules
 	m.expandedFields = map[editField]bool{}
 	m.showGutters = true
+
 	return m
 }
 
-func configureTextInputStyles(input *textinput.Model, opts Options) {
+func configureTextInputStyles(input *textinput.Model, opts *Options) {
 	if opts.NoColor {
 		return
 	}
+
 	input.TextStyle = valueStyle
 	input.Cursor.TextStyle = valueStyle
 	input.Cursor.Style = valueStyle
@@ -138,7 +146,9 @@ func startLoadCmdWithBackend(ctx context.Context, backend uiBackend, items inven
 	return func() tea.Msg {
 		go func() {
 			loader := func(done, total int, region string, chunk inventory.Items) {
-				ch <- progressMsg{done: done, total: total, region: region, items: append(inventory.Items(nil), chunk...)}
+				_ = chunk
+
+				ch <- progressMsg{done: done, total: total, region: region}
 			}
 			emitBatch := func(statuses Statuses) {
 				statuses = statuses.Filter(groups)
@@ -146,9 +156,11 @@ func startLoadCmdWithBackend(ctx context.Context, backend uiBackend, items inven
 					ch <- statusBatchMsg(append(Statuses(nil), statuses...))
 				}
 			}
+
 			statuses := backend.loadStatuses(ctx, items, groups, regions, includeValues, loader, emitBatch)
 			ch <- loadedMsg(statuses)
 		}()
+
 		return nil
 	}
 }

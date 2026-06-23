@@ -11,7 +11,7 @@ import (
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
-func metadataFromSDK(region string, param ssmtypes.ParameterMetadata) Metadata {
+func metadataFromSDK(region string, param *ssmtypes.ParameterMetadata) Metadata {
 	return Metadata{
 		Name:        aws.ToString(param.Name),
 		Region:      region,
@@ -29,6 +29,7 @@ func formatModifiedTime(value *time.Time) string {
 	if value == nil || value.IsZero() {
 		return ""
 	}
+
 	return value.Format(time.RFC1123)
 }
 
@@ -41,17 +42,21 @@ func formatModifiedDate(value any) string {
 		if value <= 0 {
 			return ""
 		}
+
 		return time.Unix(int64(value), 0).Format(time.RFC1123)
 	case string:
 		if value == "" {
 			return ""
 		}
+
 		if number, err := strconv.ParseFloat(value, 64); err == nil {
 			return time.Unix(int64(number), 0).Format(time.RFC1123)
 		}
+
 		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
 			return parsed.Format(time.RFC1123)
 		}
+
 		return value
 	default:
 		return fmt.Sprint(value)
@@ -67,10 +72,12 @@ func formatPolicies(value any) string {
 	case []ssmtypes.ParameterInlinePolicy:
 		return policiesFromInlinePolicies(value)
 	}
+
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Sprint(value)
 	}
+
 	return normalizePolicyJSON(string(encoded))
 }
 
@@ -79,6 +86,7 @@ func policiesFromInlinePolicies(policies []ssmtypes.ParameterInlinePolicy) strin
 	for _, policy := range policies {
 		items = appendPolicyJSON(items, aws.ToString(policy.PolicyText))
 	}
+
 	return marshalPolicyItems(items)
 }
 
@@ -87,10 +95,12 @@ func normalizePolicyJSON(raw string) string {
 	if raw == "" || raw == "null" || raw == "{}" {
 		return ""
 	}
+
 	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return raw
 	}
+
 	return marshalPolicyItems(appendPolicyValue(nil, decoded))
 }
 
@@ -99,10 +109,12 @@ func appendPolicyJSON(items []any, raw string) []any {
 	if raw == "" {
 		return items
 	}
+
 	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
 		return append(items, raw)
 	}
+
 	return appendPolicyValue(items, decoded)
 }
 
@@ -114,11 +126,13 @@ func appendPolicyValue(items []any, value any) []any {
 		for _, item := range value {
 			items = appendPolicyValue(items, item)
 		}
+
 		return items
 	case map[string]any:
 		if policyText, ok := value["PolicyText"]; ok {
 			return appendPolicyValue(items, policyText)
 		}
+
 		return append(items, value)
 	case string:
 		return appendPolicyJSON(items, value)
@@ -131,13 +145,16 @@ func marshalPolicyItems(items []any) string {
 	if len(items) == 0 {
 		return ""
 	}
+
 	encoded, err := json.Marshal(items)
 	if err != nil {
 		return fmt.Sprint(items)
 	}
+
 	trimmed := strings.TrimSpace(string(encoded))
 	if trimmed == "null" || trimmed == "[]" || trimmed == "{}" {
 		return ""
 	}
+
 	return trimmed
 }

@@ -13,6 +13,7 @@ func TestLoadTUIInventoryFromPipedStdin(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	require.NoError(t, err)
 	t.Cleanup(func() { os.Stdin = oldStdin })
+
 	os.Stdin = reader
 
 	_, err = writer.WriteString("# comment\n/app/from-stdin\n/app/second # inline comment\n")

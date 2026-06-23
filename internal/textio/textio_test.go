@@ -11,6 +11,7 @@ import (
 
 func TestExportDotenvWritesSSMCommentsAndQuotedValues(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{
 		{Path: "/app/prod/api/password", Value: "secret with spaces"},
 		{Path: "/app/prod/api/multiline", Value: "line1\nline2"},
@@ -25,6 +26,7 @@ func TestExportDotenvWritesSSMCommentsAndQuotedValues(t *testing.T) {
 
 func TestExportDotenvPreservesParameterTypeMetadata(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/log-level", Value: "debug", Type: "String"}}
 
 	err := (&DotEnv{writer: &out}).Export(records, nil, "")
@@ -35,6 +37,7 @@ func TestExportDotenvPreservesParameterTypeMetadata(t *testing.T) {
 
 func TestExportDotenvUsesRelativeRecordPath(t *testing.T) {
 	var out bytes.Buffer
+
 	records := Records{{Path: "api/token", Fields: Fields{FieldName, FieldValue}, Value: "secret"}}
 
 	err := (&DotEnv{writer: &out}).Export(records, nil, "")
@@ -45,6 +48,7 @@ func TestExportDotenvUsesRelativeRecordPath(t *testing.T) {
 
 func TestExportDotenvRejectsKeyCollisionsBeforeWriting(t *testing.T) {
 	var out bytes.Buffer
+
 	records := Records{
 		{Path: "api/token", Value: "first"},
 		{Path: "api-token", Value: "second"},
@@ -124,6 +128,7 @@ func TestTextIOImportUsesBoundDotenvFormat(t *testing.T) {
 
 func TestNewWriterUsesBoundJSONOutput(t *testing.T) {
 	var output bytes.Buffer
+
 	writer := NewWriter(FormatJSON, &output)
 
 	err := writer.Export(Records{{Path: "/app/token", Fields: Fields{"name", "value"}, Value: "secret"}}, nil, "name")
@@ -200,6 +205,7 @@ func TestImportJSONSupportsFullRecordObjects(t *testing.T) {
 
 func TestExportJSONKeepsExplicitEmptyValueField(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"value"}, Value: ""}}
 
 	err := (&JSON{writer: &out}).Export(records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "")
@@ -210,6 +216,7 @@ func TestExportJSONKeepsExplicitEmptyValueField(t *testing.T) {
 
 func TestExportJSONKeepsKeyedExplicitEmptyValueField(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: ""}}
 
 	err := (&JSON{writer: &out}).Export(records, []FieldMapping{{AWSName: "value", FileName: "value"}}, "name")
@@ -220,11 +227,13 @@ func TestExportJSONKeepsKeyedExplicitEmptyValueField(t *testing.T) {
 
 func TestExportYAMLUsesArrayShapeAndMappings(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "type", "value"}, Type: "SecureString", Value: "secret"}}
 
 	err := (&YAML{writer: &out}).Export(records, []FieldMapping{{AWSName: "name", FileName: "path"}, {AWSName: "type", FileName: "kind"}, {AWSName: "value", FileName: "secret"}}, "")
 
 	require.NoError(t, err)
+
 	yaml := out.String()
 	assert.Contains(t, yaml, "- kind: SecureString")
 	assert.Contains(t, yaml, "  path: /app/prod/api/key")
@@ -233,11 +242,13 @@ func TestExportYAMLUsesArrayShapeAndMappings(t *testing.T) {
 
 func TestExportYAMLUsesKeyedShape(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: "secret"}}
 
 	err := (&YAML{writer: &out}).Export(records, nil, "name")
 
 	require.NoError(t, err)
+
 	yaml := out.String()
 	assert.Contains(t, yaml, "/app/prod/api/key:")
 	assert.Contains(t, yaml, "  value: secret")
@@ -280,6 +291,7 @@ func TestImportYAMLReadsKeyedRecords(t *testing.T) {
 
 func TestExportJSONUsesTypedShapeWhenTypeMetadataExists(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/log-level", Value: "debug", Type: "String"}}
 
 	err := (&JSON{writer: &out}).exportLegacyRecords(records)
@@ -292,6 +304,7 @@ func TestExportJSONUsesTypedShapeWhenTypeMetadataExists(t *testing.T) {
 
 func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{
 		Path:        "/app/prod/api/key",
 		Fields:      []string{"name", "region", "type", "tier", "data-type", "description", "value", "date", "version", "len", "sha256", "user"},
@@ -311,6 +324,7 @@ func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
 	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
+
 	json := out.String()
 	assert.Contains(t, json, `"/app/prod/api/key": {`)
 	assert.Contains(t, json, `"region": "eu-north-1"`)
@@ -328,6 +342,7 @@ func TestExportJSONIncludesRequestedMetadataFields(t *testing.T) {
 
 func TestExportJSONUsesObjectShapeForValueOnlyFields(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "value"}, Value: "secret", Type: "SecureString"}}
 
 	err := (&JSON{writer: &out}).exportLegacyRecords(records)
@@ -338,11 +353,13 @@ func TestExportJSONUsesObjectShapeForValueOnlyFields(t *testing.T) {
 
 func TestExportJSONCanExportMetadataWithoutValue(t *testing.T) {
 	var out bytes.Buffer
+
 	records := []Record{{Path: "/app/prod/api/key", Fields: []string{"name", "type", "date"}, Type: "String", Value: "secret", Date: "2026-06-17T00:00:00Z"}}
 
 	err := (&JSON{writer: &out}).exportLegacyRecords(records)
 
 	require.NoError(t, err)
+
 	json := out.String()
 	assert.Contains(t, json, `"type": "String"`)
 	assert.Contains(t, json, `"date": "2026-06-17T00:00:00Z"`)
@@ -351,6 +368,7 @@ func TestExportJSONCanExportMetadataWithoutValue(t *testing.T) {
 
 func TestExportScalarLinesWritesOneValuePerLine(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
+
 	var out bytes.Buffer
 
 	err := (&DotEnv{writer: &out}).ExportScalar(records, "value", "")
@@ -361,6 +379,7 @@ func TestExportScalarLinesWritesOneValuePerLine(t *testing.T) {
 
 func TestExportJSONScalarWritesArray(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
+
 	var out bytes.Buffer
 
 	err := (&JSON{writer: &out}).ExportScalar(records, "value", "")
@@ -371,6 +390,7 @@ func TestExportJSONScalarWritesArray(t *testing.T) {
 
 func TestExportJSONScalarWritesKeyedMap(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
+
 	var out bytes.Buffer
 
 	err := (&JSON{writer: &out}).ExportScalar(records, "value", "name")
@@ -381,6 +401,7 @@ func TestExportJSONScalarWritesKeyedMap(t *testing.T) {
 
 func TestExportYAMLScalarWritesKeyedMap(t *testing.T) {
 	records := []Record{{Path: "/app/a", Value: "secret-a"}, {Path: "/app/b", Value: "secret-b"}}
+
 	var out bytes.Buffer
 
 	err := (&YAML{writer: &out}).ExportScalar(records, "value", "name")

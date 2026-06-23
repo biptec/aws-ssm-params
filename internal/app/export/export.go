@@ -34,6 +34,7 @@ func Run(ctx context.Context, opts *Options, output io.Writer) error {
 	if err != nil {
 		return err
 	}
+
 	return r.run(ctx)
 }
 
@@ -58,12 +59,14 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
+
 	client := ssm.NewClient(ssm.ClientConfig{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
 		WithDecryption: opts.WithDecryption,
 		Logger:         opts.Logger,
 	})
+
 	regions := append([]string(nil), opts.Regions...)
 	if opts.AllRegions {
 		regions, err = client.ListRegions(ctx)
@@ -73,6 +76,7 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 	}
 
 	fields := fieldsForOptions(opts.Fields)
+
 	return &runner{
 		opts:         opts,
 		client:       client,
@@ -91,17 +95,21 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 func (r *runner) run(ctx context.Context) error {
 	statuses := r.loadStatuses(ctx)
 	r.sortRules.sort(statuses)
+
 	records, err := r.records(statuses)
 	if err != nil {
 		return errors.WithStack(err)
 	}
+
 	if r.scalarField != "" {
 		return errors.Wrap(
 			r.writer.ExportScalar(records, r.scalarField, r.keyField),
 			"write scalar export",
 		)
 	}
+
 	mappings := r.fieldMaps.WithDefaults().ForFields(r.recordFields)
+
 	return errors.Wrap(r.writer.Export(records, mappings, r.keyField), "write export")
 }
 
@@ -130,9 +138,11 @@ func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {
 			r.regions,
 		)
 	}
+
 	if len(r.items) > 0 {
 		return statuses.Filter(r.opts.FilterGroups)
 	}
+
 	return statuses
 }
 
@@ -142,13 +152,17 @@ func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
 		if !statuses[i].Exists {
 			continue
 		}
-		record := recordFromStatus(statuses[i], r.recordFields)
+
+		record := recordFromStatus(&statuses[i], r.recordFields)
+
 		path, err := r.basePath.Relativize(record.Path)
 		if err != nil {
 			return nil, errors.Wrap(err, "make export parameter name relative")
 		}
+
 		record.Path = path
 		records = append(records, record)
 	}
+
 	return records, nil
 }

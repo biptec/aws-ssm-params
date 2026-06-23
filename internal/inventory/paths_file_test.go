@@ -3,26 +3,22 @@ package inventory
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/biptec/aws-ssm-params/internal/fileio"
-
-	"github.com/cockroachdb/errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPathsFileLoadIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "paths.txt")
-	require.NoError(t, writeTestFile(file, `
+func TestLoadPathsIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
+	items, err := LoadPaths(strings.NewReader(`
 # full-line comment
 /app/prod/z/password # inline comment
 /app/prod/a/token
 /app/prod/z/password
-`))
-
-	items, err := (PathsFile{Path: file}).Load()
+`), "paths.txt")
 
 	require.NoError(t, err)
 	require.Len(t, items, 2)
@@ -32,11 +28,8 @@ func TestPathsFileLoadIgnoresCommentsDeduplicatesAndSorts(t *testing.T) {
 	assert.Equal(t, "/app/prod/z/password", items[1].Path)
 }
 
-func TestPathsFileLoadRejectsRelativePaths(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "paths.txt")
-	require.NoError(t, writeTestFile(file, "relative/path\n"))
-
-	items, err := (PathsFile{Path: file}).Load()
+func TestLoadPathsRejectsRelativePaths(t *testing.T) {
+	items, err := LoadPaths(strings.NewReader("relative/path\n"), "paths.txt")
 
 	require.Error(t, err)
 	assert.Nil(t, items)
@@ -57,14 +50,11 @@ func TestPathFileLinePathNormalizesAllSupportedLineForms(t *testing.T) {
 	assert.Equal(t, "/app/token", pathFileLinePath(tests["inline comment"]))
 }
 
-func writeTestFile(path, content string) error {
-	return errors.Wrapf(os.WriteFile(path, []byte(content), 0o600), "write test file %s", path)
-}
-
 func writeTempFile(t *testing.T, content string) string {
 	t.Helper()
 	file := filepath.Join(t.TempDir(), "paths.txt")
 	require.NoError(t, os.WriteFile(file, []byte(content), 0o600))
+
 	return file
 }
 
@@ -93,8 +83,10 @@ func TestPathsFileAppendAddsMissingNewlineBeforeAppending(t *testing.T) {
 
 func readTempFile(t *testing.T, file string) string {
 	t.Helper()
+
 	data, err := fileio.ReadFile(file)
 	require.NoError(t, err)
+
 	return string(data)
 }
 

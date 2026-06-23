@@ -20,7 +20,9 @@ func newCLIApp(rawArgs []string) *cli.Command {
 		Usage:                 "Manage AWS SSM parameters",
 		UsageText:             appName + " [global options] <command> [command options]",
 		EnableShellCompletion: true,
-		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
+		Before: func(ctx context.Context, command *cli.Command) (context.Context, error) {
+			_ = command
+
 			return ctx, rejectCommaSeparatedFlagArgs(
 				rawArgs,
 				flagRegion,
@@ -28,10 +30,13 @@ func newCLIApp(rawArgs []string) *cli.Command {
 			)
 		},
 		Flags: globalFlags(),
-		Action: func(_ context.Context, cmd *cli.Command) error {
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			_ = ctx
+
 			if cmd.Args().Len() > 0 {
 				return fmt.Errorf("unknown command: %s", cmd.Args().First())
 			}
+
 			return cli.ShowRootCommandHelp(cmd)
 		},
 		Commands: []*cli.Command{
@@ -44,9 +49,11 @@ func newCLIApp(rawArgs []string) *cli.Command {
 
 func main() {
 	ctx := context.Background()
+
 	cliApp := newCLIApp(os.Args[1:])
 	if err := cliApp.Run(ctx, os.Args); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, "ERROR:", err)
+
 		os.Exit(1)
 	}
 }

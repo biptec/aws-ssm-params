@@ -16,8 +16,8 @@ type shortcuts struct {
 	visibleSortOptions []sortItem
 }
 
-func newShortcuts(m model) shortcuts {
-	return shortcuts{
+func newShortcuts(m model) *shortcuts {
+	return &shortcuts{
 		screen:             m.screen,
 		shortcutsFor:       m.shortcutsFor,
 		shortcutsPopupFor:  m.shortcutsPopupFor,
@@ -29,15 +29,15 @@ func newShortcuts(m model) shortcuts {
 	}
 }
 
-func (m shortcuts) keymapStyle() keymapStyle {
+func (m *shortcuts) keymapStyle() keymapStyle {
 	return m.keys.keymapStyle()
 }
 
-func (m shortcuts) popupSortItems() []sortItem {
+func (m *shortcuts) popupSortItems() []sortItem {
 	return m.popupSortOptions
 }
 
-func (m shortcuts) visibleSortItems() []sortItem {
+func (m *shortcuts) visibleSortItems() []sortItem {
 	return m.visibleSortOptions
 }
 
@@ -47,6 +47,7 @@ func mainFooterText(detailsShown bool) string {
 	if detailsShown {
 		detailsAction = "d hide details"
 	}
+
 	return "ctrl+/ help • enter edit • n new • " + detailsAction + " • / search • c columns • s sort • x delete • X delete visible • esc quit"
 }
 
@@ -54,7 +55,7 @@ func searchFooterText() string {
 	return "ctrl+/ help • esc close"
 }
 
-func (m shortcuts) popupFooterText(kind popupKind) string {
+func (m *shortcuts) popupFooterText(kind popupKind) string {
 	switch kind {
 	case popupNone:
 		return ""
@@ -72,6 +73,7 @@ func (m shortcuts) popupFooterText(kind popupKind) string {
 		return "ctrl+/ help • enter select • b base64 • x hex • u uuid • c custom • esc cancel"
 	case popupFileAction:
 		button := "confirm"
+
 		switch m.fileActionMode {
 		case "load":
 			button = "load"
@@ -80,6 +82,7 @@ func (m shortcuts) popupFooterText(kind popupKind) string {
 		case "random-custom":
 			button = "generate"
 		}
+
 		return "ctrl+/ help • enter " + button + " • esc cancel"
 	case popupFileWriteConfirm:
 		return "ctrl+/ help • enter yes • esc cancel"
@@ -102,58 +105,71 @@ func (m shortcuts) popupFooterText(kind popupKind) string {
 	}
 }
 
-func (m shortcuts) sortPopupScreenFooter() string {
+func (m *shortcuts) sortPopupScreenFooter() string {
 	sortItems := m.popupSortItems()
 	parts := make([]string, 0, 2+len(sortItems)+1)
+
 	parts = append(parts, "ctrl+/ help", "d direction")
 	for _, item := range sortItems {
 		parts = append(parts, item.hotkey+" "+strings.ToLower(item.label))
 	}
+
 	parts = append(parts, "esc close")
+
 	return strings.Join(parts, " • ")
 }
 
 // shortcutsText returns the context-sensitive shortcut reference shown by the Shortcuts screen.
-func (m shortcuts) shortcutsText() string {
+func (m *shortcuts) shortcutsText() string {
 	forScreen := m.shortcutsFor
 	if forScreen == 0 && m.screen == screenHelp {
 		forScreen = screenMain
 	}
+
 	if m.shortcutsPopupFor != popupNone {
 		return m.popupShortcutsText(m.shortcutsPopupFor)
 	}
-	sections := []string{m.actionsShortcuts(forScreen), m.sortShortcuts(forScreen), m.navigationShortcuts(forScreen), globalShortcuts(forScreen)}
+
+	sections := []string{m.actionsShortcuts(forScreen), m.sortShortcuts(forScreen), m.navigationShortcuts(forScreen), globalShortcuts()}
 	out := []string{}
+
 	for _, section := range sections {
 		section = strings.TrimSpace(section)
 		if section == "" {
 			continue
 		}
+
 		if len(out) > 0 {
 			out = append(out, "")
 		}
+
 		out = append(out, strings.Split(section, "\n")...)
 	}
+
 	return strings.Join(out, "\n")
 }
 
-func (m shortcuts) popupShortcutsText(kind popupKind) string {
-	sections := []string{m.popupActionsShortcuts(kind), m.popupSortShortcuts(kind), m.popupNavigationShortcuts(kind), globalShortcuts(m.shortcutsFor)}
+func (m *shortcuts) popupShortcutsText(kind popupKind) string {
+	sections := []string{m.popupActionsShortcuts(kind), m.popupSortShortcuts(kind), m.popupNavigationShortcuts(kind), globalShortcuts()}
 	out := []string{}
+
 	for _, section := range sections {
 		section = strings.TrimSpace(section)
 		if section == "" {
 			continue
 		}
+
 		if len(out) > 0 {
 			out = append(out, "")
 		}
+
 		out = append(out, strings.Split(section, "\n")...)
 	}
+
 	return strings.Join(out, "\n")
 }
 
-func (m shortcuts) popupActionsShortcuts(kind popupKind) string {
+func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	switch kind {
 	case popupNone, popupShortcuts, popupConfirm:
 		return ""
@@ -240,19 +256,22 @@ func (m shortcuts) popupActionsShortcuts(kind popupKind) string {
 	}
 }
 
-func (m shortcuts) popupSortShortcuts(kind popupKind) string {
+func (m *shortcuts) popupSortShortcuts(kind popupKind) string {
 	if kind != popupSort {
 		return ""
 	}
+
 	lines := []string{"Sort"}
 	for _, item := range m.popupSortItems() {
 		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, item.column.Label()))
 	}
+
 	lines = append(lines, "  d            toggle selected direction")
+
 	return strings.Join(lines, "\n")
 }
 
-func (m shortcuts) popupNavigationShortcuts(kind popupKind) string {
+func (m *shortcuts) popupNavigationShortcuts(kind popupKind) string {
 	switch kind {
 	case popupNone, popupShortcuts, popupConfirm, popupFileAction, popupFileWriteConfirm, popupUnsavedChanges:
 		return ""
@@ -263,7 +282,7 @@ func (m shortcuts) popupNavigationShortcuts(kind popupKind) string {
 	}
 }
 
-func (m shortcuts) actionsShortcuts(forScreen screen) string {
+func (m *shortcuts) actionsShortcuts(forScreen screen) string {
 	switch forScreen {
 	case screenHelp:
 		return ""
@@ -287,6 +306,7 @@ func (m shortcuts) actionsShortcuts(forScreen screen) string {
   alt+e        value/policies actions popup
   y            confirm pending file write warning`)
 			}
+
 			return strings.TrimSpace(`Actions
   i            insert mode
   ctrl+s       save
@@ -294,6 +314,7 @@ func (m shortcuts) actionsShortcuts(forScreen screen) string {
   y            confirm pending file write warning
   esc / q / ctrl+g  back`)
 		}
+
 		return strings.TrimSpace(`Actions
   ctrl+s       save
   alt+e        value/policies actions popup
@@ -323,22 +344,25 @@ func (m shortcuts) actionsShortcuts(forScreen screen) string {
 	}
 }
 
-func (m shortcuts) sortShortcuts(forScreen screen) string {
+func (m *shortcuts) sortShortcuts(forScreen screen) string {
 	if forScreen != screenMain {
 		return ""
 	}
+
 	items := m.visibleSortItems()
 	if len(items) == 0 {
 		return ""
 	}
+
 	lines := []string{"Sort"}
 	for _, item := range items {
 		lines = append(lines, fmt.Sprintf("  %-12s sort by %s", item.hotkey, item.column.Label()))
 	}
+
 	return strings.Join(lines, "\n")
 }
 
-func (m shortcuts) navigationShortcuts(forScreen screen) string {
+func (m *shortcuts) navigationShortcuts(forScreen screen) string {
 	if forScreen == screenMain || forScreen == screenColumns || forScreen == screenRegionSelect || forScreen == screenTypeSelect {
 		if m.keymapStyle() == keymapVi {
 			return strings.TrimSpace(`Navigation
@@ -349,6 +373,7 @@ func (m shortcuts) navigationShortcuts(forScreen screen) string {
   Home / gg                  first row/option
   End / G                    last row/option`)
 		}
+
 		return strings.TrimSpace(`Navigation
   ↑ / ctrl+p / shift+tab     previous row/option
   ↓ / ctrl+n / tab           next row/option
@@ -357,6 +382,7 @@ func (m shortcuts) navigationShortcuts(forScreen screen) string {
   Home / alt+<               first row/option
   End / alt+>                last row/option`)
 	}
+
 	if forScreen == screenTextArea {
 		if m.keymapStyle() == keymapVi {
 			return strings.TrimSpace(`Mode
@@ -382,6 +408,7 @@ Editing
   db                         delete previous word
   ctrl+l                     show/hide line numbers`)
 		}
+
 		return strings.TrimSpace(`Navigation
   tab                        next field
   shift+tab                  previous field
@@ -398,10 +425,11 @@ Editing
   alt+backspace              delete previous word
   ctrl+l                     show/hide line numbers`)
 	}
+
 	return ""
 }
 
-func globalShortcuts(_ screen) string {
+func globalShortcuts() string {
 	return strings.TrimSpace(`Global
   ctrl+/       open shortcuts`)
 }

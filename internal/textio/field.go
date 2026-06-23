@@ -35,6 +35,7 @@ func (fields Fields) Contains(field string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -55,8 +56,10 @@ func (fields Fields) With(additions ...string) Fields {
 		if field == "" || out.Contains(field) {
 			continue
 		}
+
 		out = append(out, field)
 	}
+
 	return out
 }
 
@@ -65,6 +68,7 @@ func (fields Fields) RequiresValues() bool {
 	if len(fields) == 0 {
 		return true
 	}
+
 	return fields.Contains(FieldValue) ||
 		fields.Contains(FieldLen) ||
 		fields.Contains(FieldSHA256) ||

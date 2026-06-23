@@ -44,6 +44,7 @@ func canonicalAWSValue(field, value string) string {
 			return "text"
 		}
 	}
+
 	return value
 }
 
@@ -53,20 +54,26 @@ func hasMeta(pattern string) bool {
 
 func literalPrefix(pattern string) string {
 	var b strings.Builder
+
 	for i := 0; i < len(pattern); i++ {
 		if strings.ContainsRune("*?[]", rune(pattern[i])) {
 			break
 		}
+
 		if i+1 < len(pattern) && strings.ContainsRune("@?+*!", rune(pattern[i])) && pattern[i+1] == '(' {
 			break
 		}
+
 		if pattern[i] == '\\' && i+1 < len(pattern) {
 			i++
 			b.WriteByte(pattern[i])
+
 			continue
 		}
+
 		b.WriteByte(pattern[i])
 	}
+
 	return b.String()
 }
 
@@ -74,9 +81,11 @@ func simpleContainsLiteral(pattern string) (string, bool) {
 	if !strings.HasPrefix(pattern, "*") || !strings.HasSuffix(pattern, "*") || len(pattern) < 3 {
 		return "", false
 	}
+
 	middle := strings.Trim(pattern, "*")
 	if middle == "" || hasMeta(middle) {
 		return "", false
 	}
+
 	return middle, true
 }

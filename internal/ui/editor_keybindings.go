@@ -14,6 +14,7 @@ func (component editorKeybindingsComponent) updateEmacsTextFieldKey(key string) 
 	if m.keymapStyle() != keymapEmacs || !isEditableTextField(m.editField) {
 		return m, false
 	}
+
 	switch key {
 	case "ctrl+f", "right":
 		m.moveActiveTextCursor(1)
@@ -58,6 +59,7 @@ func (component editorKeybindingsComponent) updateEmacsTextFieldKey(key string) 
 		m.activeTextDeleteWordBackward()
 		return m, true
 	}
+
 	return m, false
 }
 
@@ -66,10 +68,12 @@ func (component editorKeybindingsComponent) updateViTextFieldNormal(key string) 
 	if _, consumed := (&m).handlePendingEditSequence(key); consumed {
 		return m, true
 	}
+
 	switch key {
 	case "i":
 		m.viInsertMode = true
 		m = m.focusEditField(m.editField)
+
 		return m, true
 	case "h", "left":
 		m.moveActiveTextCursor(-1)
@@ -117,6 +121,7 @@ func (component editorKeybindingsComponent) updateViTextFieldNormal(key string) 
 		m.activeTextDeleteChar()
 		return m, true
 	}
+
 	return m, false
 }
 
@@ -125,8 +130,10 @@ func (component *editorKeybindingsComponent) handlePendingEditSequence(key strin
 	if m.pendingKeySequence == "" {
 		return false, false
 	}
+
 	pending := m.pendingKeySequence
 	m.pendingKeySequence = ""
+
 	switch pending + key {
 	case "gg":
 		m.activeTextStart()

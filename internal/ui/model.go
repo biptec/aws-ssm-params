@@ -65,10 +65,15 @@ var loadingSpinnerFrames = []string{"|", "/", "-", "\\"}
 
 type loadingTickMsg struct{}
 
-// model is the full Bubble Tea application state.
-// It stores immutable inputs such as the SSM client and inventory, dynamic data such as loaded statuses/search state,
-// and per-screen state such as cursors, text inputs, confirmation prompts, and loading messages.
+// model is a lightweight handle to the full Bubble Tea application state.
+// Keeping the state behind one pointer prevents Bubble Tea updates and focused
+// components from repeatedly copying the large text editor models.
 type model struct {
+	*modelState
+}
+
+// modelState stores immutable dependencies, dynamic data, and per-screen state.
+type modelState struct {
 	client  ssm.Client
 	backend uiBackend
 	opts    Options
@@ -80,11 +85,20 @@ type model struct {
 	popupState
 }
 
+func (m model) clone() model {
+	if m.modelState == nil {
+		return model{modelState: &modelState{}}
+	}
+
+	state := *m.modelState
+
+	return model{modelState: &state}
+}
+
 // progressMsg is sent from the background status loader to update the loading screen with the current region/chunk.
 type progressMsg struct {
 	done, total int
 	region      string
-	items       inventory.Items
 }
 
 // statusBatchMsg streams partial status rows while the initial loader is still running.
@@ -144,6 +158,7 @@ func pendingStatuses(items inventory.Items) Statuses {
 	for _, item := range items {
 		statuses = append(statuses, Status{Item: item, Pending: true})
 	}
+
 	return statuses
 }
 
@@ -151,41 +166,53 @@ func (m *model) mergeStatusBatch(batch Statuses) {
 	if len(batch) == 0 {
 		return
 	}
+
 	incoming := map[string]*Status{}
 	removePendingPath := map[string]bool{}
+
 	for i := range batch {
 		status := &batch[i]
 		if status.Item.Path == "" {
 			continue
 		}
+
 		incoming[itemKey(status.Item.Region, status.Item.Path)] = status
 		if status.Item.Region != "" && status.Item.Region != "*" {
 			removePendingPath[status.Item.Path] = true
 		}
 	}
+
 	if len(incoming) == 0 {
 		return
 	}
+
 	used := map[string]bool{}
+
 	merged := make(Statuses, 0, len(m.statuses)+len(incoming))
 	for i := range m.statuses {
 		status := m.statuses[i]
+
 		key := itemKey(status.Item.Region, status.Item.Path)
 		if next, ok := incoming[key]; ok {
 			merged = append(merged, *next)
 			used[key] = true
+
 			continue
 		}
+
 		if status.Pending && removePendingPath[status.Item.Path] && (status.Item.Region == "" || status.Item.Region == "*") {
 			continue
 		}
+
 		merged = append(merged, status)
 	}
+
 	for key, status := range incoming {
 		if !used[key] {
 			merged = append(merged, *status)
 		}
 	}
+
 	m.statuses = merged
 	m.applySortWithRules(m.sortRulesOrDefault())
 	m.ensureSelection()
@@ -194,6 +221,7 @@ func (m *model) mergeStatusBatch(batch Statuses) {
 func (m *model) openActionsPopupForFocusedField() bool {
 	component := editorActionsComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	return component.openActionsPopupForFocusedField()
 }
 
@@ -315,6 +343,7 @@ func (m *model) setTextAreaCursorAbs(pos int) {
 func (m *model) openFileWriteConfirmation(kind fileWriteConfirmation) {
 	component := editorIOComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.openFileWriteConfirmation(kind)
 }
 
@@ -336,6 +365,7 @@ func (m model) fileActionContents() string {
 func (m *model) startConfirm(prompt, expected string, items inventory.Items, ret screen) {
 	component := editorIOComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.startConfirm(prompt, expected, items, ret)
 }
 
@@ -377,6 +407,7 @@ func (m model) updateViTextFieldNormal(key string) (model, bool) {
 func (m *model) handlePendingEditSequence(key string) (handled, consumed bool) {
 	component := editorKeybindingsComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	return component.handlePendingEditSequence(key)
 }
 
@@ -435,9 +466,9 @@ func (m model) regionOptions() []string {
 	return component.regionOptions()
 }
 
-func (m model) startMultiline(ret screen) (tea.Model, tea.Cmd) {
+func (m model) startMultiline() (tea.Model, tea.Cmd) {
 	component := editorStateComponent{model: m}
-	return component.startMultiline(ret)
+	return component.startMultiline()
 }
 
 func (m model) startNewParameter(ret screen) (tea.Model, tea.Cmd) {
@@ -453,6 +484,7 @@ func (m model) focusEditField(field editField) model {
 func (m *model) blurEditFields() {
 	component := editorStateComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.blurEditFields()
 }
 
@@ -464,6 +496,7 @@ func (m model) requestEditorBack() (tea.Model, tea.Cmd) {
 func (m *model) discardEditorChanges() {
 	component := editorStateComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.discardEditorChanges()
 }
 
@@ -487,9 +520,9 @@ func (m model) focusPreviousEditField() (tea.Model, tea.Cmd) {
 	return component.focusPreviousEditField()
 }
 
-func (m model) moveToEditField(field editField, direction editDirection) (tea.Model, tea.Cmd) {
+func (m model) moveToEditField(field editField) (tea.Model, tea.Cmd) {
 	component := editorStateComponent{model: m}
-	return component.moveToEditField(field, direction)
+	return component.moveToEditField(field)
 }
 
 func (m model) editFieldOrder() []editField {
@@ -562,12 +595,12 @@ func (m model) renderTextAreaValueLines(maxRows int) []string {
 	return component.renderTextAreaValueLines(maxRows)
 }
 
-func (m model) renderExpandableField(field editField, label string, area textarea.Model, labelWidth, maxRows int, hasNext bool) []string {
+func (m model) renderExpandableField(field editField, label string, area *textarea.Model, labelWidth, maxRows int, hasNext bool) []string {
 	component := editorViewComponent{model: m}
 	return component.renderExpandableField(field, label, area, labelWidth, maxRows, hasNext)
 }
 
-func (m model) shouldRenderExpandedField(field editField, area textarea.Model, labelWidth int) bool {
+func (m model) shouldRenderExpandedField(field editField, area *textarea.Model, labelWidth int) bool {
 	component := editorViewComponent{model: m}
 	return component.shouldRenderExpandedField(field, area, labelWidth)
 }
@@ -577,7 +610,7 @@ func (m model) singleLineFieldWidth(labelWidth int) int {
 	return component.singleLineFieldWidth(labelWidth)
 }
 
-func (m model) singleLineAreaView(field editField, area textarea.Model, labelWidth int) string {
+func (m model) singleLineAreaView(field editField, area *textarea.Model, labelWidth int) string {
 	component := editorViewComponent{model: m}
 	return component.singleLineAreaView(field, area, labelWidth)
 }
@@ -590,6 +623,7 @@ func (m model) expandableFieldValue(field editField) string {
 func (m *model) collapseExpandedFieldAfterEdit(field editField, before string) {
 	component := editorViewComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.collapseExpandedFieldAfterEdit(field, before)
 }
 
@@ -601,12 +635,14 @@ func (m model) canRenderCompactValue(value string, labelWidth int) bool {
 func (m *model) expandCompactFieldIfNeeded() bool {
 	component := editorViewComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	return component.expandCompactFieldIfNeeded()
 }
 
 func (m *model) insertNewlineInActiveExpandableField() {
 	component := editorViewComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.insertNewlineInActiveExpandableField()
 }
 
@@ -615,7 +651,7 @@ func (m model) isCurrentExpandableFieldExpanded() bool {
 	return component.isCurrentExpandableFieldExpanded()
 }
 
-func (m model) renderMultilineFieldLines(field editField, area textarea.Model, maxRows int) []string {
+func (m model) renderMultilineFieldLines(field editField, area *textarea.Model, maxRows int) []string {
 	component := editorViewComponent{model: m}
 	return component.renderMultilineFieldLines(field, area, maxRows)
 }
@@ -640,7 +676,7 @@ func (m model) editFieldLine(field editField, name, renderedValue string, labelW
 	return component.editFieldLine(field, name, renderedValue, labelWidth)
 }
 
-func (m model) editTextInputFieldLine(field editField, name string, input textinput.Model, labelWidth int) string {
+func (m model) editTextInputFieldLine(field editField, name string, input *textinput.Model, labelWidth int) string {
 	component := editorViewComponent{model: m}
 	return component.editTextInputFieldLine(field, name, input, labelWidth)
 }
@@ -663,6 +699,7 @@ func (m model) editOptionValue(field editField, value string) string {
 func (m *model) moveActiveMultilinePage(direction int) {
 	component := editorViewComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.moveActiveMultilinePage(direction)
 }
 
@@ -686,6 +723,7 @@ func (m model) editorNavigationAction(key string) (navigationAction, bool) {
 func (m model) handlePendingNavigationSequence(key string) (navigationAction, bool, bool) {
 	pending := m.pendingKeySequence
 	m.pendingKeySequence = ""
+
 	return newKeymap(m).resolvePendingNavigationSequence(pending, key)
 }
 
@@ -697,6 +735,7 @@ func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *model) applyMainNavigation(action navigationAction) {
 	component := mainScreenComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.applyMainNavigation(action)
 }
 
@@ -920,12 +959,12 @@ func (m model) multiSelectLine(label string, checked, focused bool) string {
 	return component.multiSelectLine(label, checked, focused)
 }
 
-func (m model) popupInputLine(label string, input textinput.Model, inputWidth int) string {
+func (m model) popupInputLine(label string, input *textinput.Model, inputWidth int) string {
 	component := newBoxRenderer(m)
 	return component.popupInputLine(label, input, inputWidth)
 }
 
-func (m model) popupInputLinePlainPrefix(prefix string, input textinput.Model, inputWidth int) string {
+func (m model) popupInputLinePlainPrefix(prefix string, input *textinput.Model, inputWidth int) string {
 	component := newBoxRenderer(m)
 	return component.popupInputLinePlainPrefix(prefix, input, inputWidth)
 }
@@ -1008,10 +1047,12 @@ func (m model) filteredLine() string {
 
 func (m model) renderFooterWithStatus(text string) string {
 	footer := m.renderFooter(text)
+
 	status := m.renderStatusMessage()
 	if status == "" {
 		return strings.Join([]string{" ", footer, " "}, "\n")
 	}
+
 	return strings.Join([]string{" ", status, " ", footer, " "}, "\n")
 }
 
@@ -1041,6 +1082,7 @@ func (m model) shortcutsText() string {
 func (m *model) openColumnsPopup() {
 	component := tableColumnsComponent{model: *m}
 	defer func() { *m = component.model }()
+
 	component.openColumnsPopup()
 }
 
@@ -1159,7 +1201,7 @@ func (m model) renderSelectedParameterBlock(full bool) string {
 	return component.renderSelectedParameterBlock(full)
 }
 
-func (m model) selectedParameterFields(st Status, full bool) [][2]string {
+func (m model) selectedParameterFields(st *Status, full bool) [][2]string {
 	component := tableViewComponent{model: m}
 	return component.selectedParameterFields(st, full)
 }
@@ -1174,12 +1216,12 @@ func (m model) detailFieldAllowed(label string) bool {
 	return component.detailFieldAllowed(label)
 }
 
-func (m model) displayValue(st Status, full bool) string {
+func (m model) displayValue(st *Status, full bool) string {
 	component := tableViewComponent{model: m}
 	return component.displayValue(st, full)
 }
 
-func (m model) shouldDisplayEncryptedValue(st Status) bool {
+func (m model) shouldDisplayEncryptedValue(st *Status) bool {
 	component := tableViewComponent{model: m}
 	return component.shouldDisplayEncryptedValue(st)
 }
@@ -1209,22 +1251,22 @@ func (m model) renderListHeader(cols []tableColumn) string {
 	return component.renderListHeader(cols)
 }
 
-func (m model) renderListRow(index int, st Status, selected bool, cols []tableColumn) string {
+func (m model) renderListRow(index int, st *Status, selected bool, cols []tableColumn) string {
 	component := tableViewComponent{model: m}
 	return component.renderListRow(index, st, selected, cols)
 }
 
-func (m model) renderListCell(col tableColumn, index int, st Status) string {
+func (m model) renderListCell(col tableColumn, index int, st *Status) string {
 	component := tableViewComponent{model: m}
 	return component.renderListCell(col, index, st)
 }
 
-func (m model) rowText(st Status, row string, selected bool) string {
+func (m model) rowText(st *Status, row string, selected bool) string {
 	component := tableViewComponent{model: m}
 	return component.rowText(st, row, selected)
 }
 
-func (m model) tableCellValue(key columnName, index int, st Status) string {
+func (m model) tableCellValue(key columnName, index int, st *Status) string {
 	component := tableViewComponent{model: m}
 	return component.tableCellValue(key, index, st)
 }
@@ -1252,7 +1294,7 @@ func (m model) listBodyHeight() int {
 // Init starts the asynchronous status load and the loading spinner.
 func (m model) Init() tea.Cmd {
 	return tea.Batch(
-		startLoadCmdWithBackend(m.ctx, backendFor(m), m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh),
+		startLoadCmdWithBackend(m.contextProvider(), backendFor(m), m.items, m.opts.FilterGroups, m.opts.Regions, m.opts.IncludeValues, m.loadCh),
 		waitForLoad(m.loadCh),
 		tickLoadingSpinner(),
 	)
@@ -1274,16 +1316,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editPoliciesArea.SetHeight(max(1, msg.Height-10))
 		m.editDescriptionArea.SetWidth(max(20, msg.Width-14))
 		m.editDescriptionArea.SetHeight(max(1, msg.Height-10))
+
 		return m, nil
 
 	case progressMsg:
 		m.loadingTitle = "Loading parameters"
-		m.loadingLines = nil
+
 		if msg.region != "" {
 			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d from %s region...", msg.done, msg.total, msg.region)
 		} else {
 			m.busyMessage = fmt.Sprintf("Loading parameters %d/%d...", msg.done, msg.total)
 		}
+
 		return m, waitForLoad(m.loadCh)
 
 	case loadingTickMsg:
@@ -1291,6 +1335,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadingSpinnerFrame = (m.loadingSpinnerFrame + 1) % len(loadingSpinnerFrames)
 			return m, tickLoadingSpinner()
 		}
+
 		return m, nil
 
 	case statusBatchMsg:
@@ -1303,8 +1348,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screen = screenMain
 		m.busyMessage = ""
 		m.loadingTitle = ""
-		m.loadingLines = nil
 		m.ensureSelection()
+
 		return m, nil
 
 	case statusUpdatedMsg:
@@ -1312,18 +1357,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errMessage = msg.err.Error()
 			m.screen = m.returnScreen
+
 			return m, nil
 		}
+
 		matchPath := msg.oldPath
 		if matchPath == "" {
 			matchPath = msg.path
 		}
-		m.replaceStatus(matchPath, msg.status)
+
+		m.replaceStatus(matchPath, &msg.status)
 		m.ensureSelection()
 		m.message = msg.message
 		m.warningMessage = msg.warning
 		m.errMessage = ""
 		m.screen = m.returnScreen
+
 		return m, nil
 
 	case deleteDoneMsg:
@@ -1331,20 +1380,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errMessage = msg.err.Error()
 			m.screen = m.returnScreen
+
 			return m, nil
 		}
+
 		if msg.removeRows {
 			m.removeItemRows(msg.items)
 		} else {
 			for _, item := range msg.items {
-				m.markMissingItem(item)
+				m.markMissingItem(&item)
 			}
 		}
+
 		m.message = fmt.Sprintf("Deleted %d parameter(s)", len(msg.items))
 		m.warningMessage = msg.warning
 		m.errMessage = ""
 		m.screen = m.returnScreen
 		m.ensureSelection()
+
 		return m, nil
 
 	case tea.KeyMsg:
@@ -1352,19 +1405,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.pendingQuit && key == "y" {
 			return m, tea.Quit
 		}
+
 		if key == "ctrl+c" || key == "ctrl+q" {
 			m.message = ""
 			m.errMessage = ""
-			m.warningMessage = quitConfirmationMessage(key)
+			m.warningMessage = quitConfirmationMessage()
 			m.pendingQuit = true
 			m.pendingQuitKey = key
 			m.pendingFileWrite = fileWriteConfirmationNone
+
 			return m, nil
 		}
+
 		fileWriteConfirmKey := m.pendingFileWrite != fileWriteConfirmationNone && (key == "y" || key == "enter" || key == "ctrl+j" || key == "esc" || key == "q" || key == "ctrl+g" || m.activePopup == popupFileWriteConfirm)
 		if !fileWriteConfirmKey {
 			m.clearTransientStatus()
 		}
+
 		if m.activePopup != popupNone {
 			switch m.activePopup {
 			case popupNone:
@@ -1428,8 +1485,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.textArea, cmd = m.textArea.Update(msg)
 		}
+
 		return m, cmd
 	}
+
 	return m, nil
 }
 
@@ -1443,6 +1502,7 @@ func (m model) View() string {
 		if m.searchMode {
 			footer = searchFooterText()
 		}
+
 		return m.renderPage(footer, func(content model) string { return content.renderMainScreen() })
 	case screenTextArea:
 		return m.renderPage(m.textAreaFooterText(), func(content model) string { return content.renderTextAreaScreen() })
@@ -1465,13 +1525,17 @@ func (m model) renderPage(footerText string, renderBody func(model) string) stri
 	if m.activePopup != popupNone {
 		footerText = m.popupFooterText(m.activePopup)
 	}
+
 	bottom := m.renderFooterWithStatus(footerText)
-	content := m
+
+	content := m.clone()
 	if m.height > 0 {
 		content.height = max(1, m.height-countLines(bottom))
 	}
+
 	body := renderBody(content)
 	body = content.renderPopupStack(body)
+
 	return m.renderFullscreen(body, bottom)
 }
 
@@ -1483,5 +1547,6 @@ func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "esc":
 		return m, tea.Quit
 	}
+
 	return m, nil
 }

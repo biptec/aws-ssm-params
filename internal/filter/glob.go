@@ -25,10 +25,12 @@ func Compile(pattern string) (Matcher, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("empty pattern")
 	}
+
 	context := matchContext{pattern: pattern}
 	if err := context.validatePattern(); err != nil {
 		return nil, err
 	}
+
 	return globMatcher{pattern: pattern}, nil
 }
 
@@ -39,6 +41,7 @@ func (matcher globMatcher) Match(value string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -48,14 +51,17 @@ func (context matchContext) validatePattern() error {
 			i++
 			continue
 		}
+
 		if context.isExtglobStart(i) {
 			end, err := context.findGroupEnd(i + 1)
 			if err != nil {
 				return err
 			}
+
 			i = end
 		}
 	}
+
 	return nil
 }
 
@@ -63,6 +69,7 @@ func (context matchContext) match(patternIndex, valueIndex int) []int {
 	if patternIndex == len(context.pattern) {
 		return []int{valueIndex}
 	}
+
 	if valueIndex > len(context.value) {
 		return nil
 	}
@@ -75,31 +82,39 @@ func (context matchContext) match(patternIndex, valueIndex int) []int {
 	if char == '\\' {
 		return context.matchEscaped(patternIndex, valueIndex)
 	}
+
 	if char == '*' {
 		return context.matchRestAfterSegmentStar(patternIndex+1, valueIndex)
 	}
+
 	if char == '?' && !context.isExtglobStart(patternIndex) {
 		return context.matchSingleNonSlash(patternIndex+1, valueIndex)
 	}
+
 	if char == '[' {
 		return context.matchCharacterClass(patternIndex, valueIndex)
 	}
+
 	if context.isExtglobStart(patternIndex) {
 		return context.matchExtglob(patternIndex, valueIndex)
 	}
+
 	return context.matchLiteral(patternIndex, valueIndex)
 }
 
 func (context matchContext) matchEscaped(patternIndex, valueIndex int) []int {
 	literal := byte('\\')
+
 	nextPatternIndex := patternIndex + 1
 	if nextPatternIndex < len(context.pattern) {
 		literal = context.pattern[nextPatternIndex]
 		nextPatternIndex++
 	}
+
 	if valueIndex >= len(context.value) || context.value[valueIndex] != literal {
 		return nil
 	}
+
 	return context.match(nextPatternIndex, valueIndex+1)
 }
 
@@ -107,6 +122,7 @@ func (context matchContext) matchLiteral(patternIndex, valueIndex int) []int {
 	if valueIndex >= len(context.value) || context.value[valueIndex] != context.pattern[patternIndex] {
 		return nil
 	}
+
 	return context.match(patternIndex+1, valueIndex+1)
 }
 
@@ -114,15 +130,18 @@ func (context matchContext) matchSingleNonSlash(nextPatternIndex, valueIndex int
 	if valueIndex >= len(context.value) || context.value[valueIndex] == '/' {
 		return nil
 	}
+
 	return context.match(nextPatternIndex, valueIndex+1)
 }
 
 func (context matchContext) matchRestAfterSegmentStar(nextPatternIndex, valueIndex int) []int {
 	segmentEnd := context.nextSlash(valueIndex)
+
 	ends := make([]int, 0, segmentEnd-valueIndex+1)
 	for end := valueIndex; end <= segmentEnd; end++ {
 		ends = append(ends, context.match(nextPatternIndex, end)...)
 	}
+
 	return context.uniqueInts(ends)
 }
 
@@ -131,6 +150,7 @@ func (context matchContext) matchRestAfterGlobstar(nextPatternIndex, valueIndex 
 	for end := valueIndex; end <= len(context.value); end++ {
 		ends = append(ends, context.match(nextPatternIndex, end)...)
 	}
+
 	return context.uniqueInts(ends)
 }
 
@@ -139,13 +159,17 @@ func (context matchContext) matchCharacterClass(patternIndex, valueIndex int) []
 	if end < 0 {
 		return context.matchLiteral(patternIndex, valueIndex)
 	}
+
 	end += patternIndex + 1
+
 	if valueIndex >= len(context.value) || context.value[valueIndex] == '/' {
 		return nil
 	}
+
 	if !context.classMatches(context.pattern[patternIndex+1:end], context.value[valueIndex]) {
 		return nil
 	}
+
 	return context.match(end+1, valueIndex+1)
 }
 
@@ -155,39 +179,50 @@ func (matchContext) classMatches(class string, value byte) bool {
 		negated = true
 		class = class[1:]
 	}
+
 	matched := false
+
 	for i := 0; i < len(class); i++ {
 		if i+2 < len(class) && class[i+1] == '-' {
 			if value >= class[i] && value <= class[i+2] {
 				matched = true
 			}
+
 			i += 2
+
 			continue
 		}
+
 		if value == class[i] {
 			matched = true
 		}
 	}
+
 	if negated {
 		return !matched
 	}
+
 	return matched
 }
 
 func (context matchContext) matchExtglob(patternIndex, valueIndex int) []int {
 	operator := context.pattern[patternIndex]
 	openIndex := patternIndex + 1
+
 	closeIndex, err := context.findGroupEnd(openIndex)
 	if err != nil {
 		return nil
 	}
+
 	alternatives := context.splitAlternatives(context.pattern[openIndex+1 : closeIndex])
 	nextPatternIndex := closeIndex + 1
 	positions := context.extglobPositions(operator, alternatives, valueIndex)
+
 	ends := make([]int, 0, len(positions))
 	for _, position := range positions {
 		ends = append(ends, context.match(nextPatternIndex, position)...)
 	}
+
 	return context.uniqueInts(ends)
 }
 
@@ -199,6 +234,7 @@ func (context matchContext) extglobPositions(operator byte, alternatives []strin
 		positions := make([]int, 0, len(alternatives)+1)
 		positions = append(positions, valueIndex)
 		positions = append(positions, context.matchAlternatives(alternatives, valueIndex)...)
+
 		return context.uniqueInts(positions)
 	case '+':
 		return context.repeatAlternatives(alternatives, valueIndex, 1)
@@ -217,30 +253,37 @@ func (context matchContext) matchAlternatives(alternatives []string, valueIndex 
 		nested := matchContext{pattern: alternative, value: context.value}
 		positions = append(positions, nested.match(0, valueIndex)...)
 	}
+
 	return context.uniqueInts(positions)
 }
 
 func (context matchContext) repeatAlternatives(alternatives []string, valueIndex, minimum int) []int {
 	positions := make([]int, 0, len(alternatives)+1)
 	seenDepth := map[int]int{valueIndex: 0}
+
 	queue := []repeatState{{position: valueIndex, count: 0}}
 	for len(queue) > 0 {
 		state := queue[0]
 		queue = queue[1:]
+
 		if state.count >= minimum {
 			positions = append(positions, state.position)
 		}
+
 		for _, next := range context.matchAlternatives(alternatives, state.position) {
 			if next == state.position {
 				continue
 			}
+
 			if previous, ok := seenDepth[next]; ok && previous <= state.count+1 {
 				continue
 			}
+
 			seenDepth[next] = state.count + 1
 			queue = append(queue, repeatState{position: next, count: state.count + 1})
 		}
 	}
+
 	return context.uniqueInts(positions)
 }
 
@@ -249,6 +292,7 @@ func (context matchContext) negativeAlternatives(alternatives []string, valueInd
 	if !context.alternativesMayMatchSlash(alternatives) {
 		limit = context.nextSlash(valueIndex)
 	}
+
 	positions := make([]int, 0, limit-valueIndex+1)
 	for end := valueIndex; end <= limit; end++ {
 		candidate := context.value[valueIndex:end]
@@ -256,6 +300,7 @@ func (context matchContext) negativeAlternatives(alternatives []string, valueInd
 			positions = append(positions, end)
 		}
 	}
+
 	return context.uniqueInts(positions)
 }
 
@@ -265,6 +310,7 @@ func (matchContext) alternativesMayMatchSlash(alternatives []string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -277,6 +323,7 @@ func (matchContext) matchesAnyAlternativeFull(alternatives []string, value strin
 			}
 		}
 	}
+
 	return false
 }
 
@@ -299,16 +346,20 @@ func (matchContext) isExtglobOperator(value byte) bool {
 
 func (context matchContext) findGroupEnd(openIndex int) (int, error) {
 	depth := 1
+
 	for i := openIndex + 1; i < len(context.pattern); i++ {
 		if context.pattern[i] == '\\' {
 			i++
 			continue
 		}
+
 		if context.isExtglobStart(i) {
 			depth++
 			i++
+
 			continue
 		}
+
 		switch context.pattern[i] {
 		case '(':
 			depth++
@@ -319,6 +370,7 @@ func (context matchContext) findGroupEnd(openIndex int) (int, error) {
 			}
 		}
 	}
+
 	return 0, fmt.Errorf("unclosed extglob group in %q", context.pattern)
 }
 
@@ -326,17 +378,21 @@ func (context matchContext) splitAlternatives(value string) []string {
 	alternatives := []string{}
 	start := 0
 	depth := 0
+
 	nested := matchContext{pattern: value}
 	for i := 0; i < len(value); i++ {
 		if value[i] == '\\' {
 			i++
 			continue
 		}
+
 		if nested.isExtglobStart(i) {
 			depth++
 			i++
+
 			continue
 		}
+
 		switch value[i] {
 		case '(':
 			depth++
@@ -351,7 +407,9 @@ func (context matchContext) splitAlternatives(value string) []string {
 			}
 		}
 	}
+
 	alternatives = append(alternatives, value[start:])
+
 	return alternatives
 }
 
@@ -360,6 +418,7 @@ func (context matchContext) nextSlash(start int) int {
 	if index < 0 {
 		return len(context.value)
 	}
+
 	return start + index
 }
 
@@ -367,6 +426,8 @@ func (matchContext) uniqueInts(values []int) []int {
 	if len(values) < 2 {
 		return values
 	}
+
 	slices.Sort(values)
+
 	return slices.Compact(values)
 }

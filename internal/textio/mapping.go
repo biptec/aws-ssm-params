@@ -7,26 +7,31 @@ type FieldMappings []FieldMapping
 func (mappings FieldMappings) objects(records Records, keyField string) []map[string]any {
 	objects := make([]map[string]any, 0, len(records))
 	for i := range records {
-		objects = append(objects, mappings.object(records[i], keyField))
+		objects = append(objects, mappings.object(&records[i], keyField))
 	}
+
 	return objects
 }
 
 // object projects one record and omits the field represented by an outer object key.
-func (mappings FieldMappings) object(record Record, keyField string) map[string]any {
+func (mappings FieldMappings) object(record *Record, keyField string) map[string]any {
 	object := map[string]any{}
+
 	for _, mapping := range mappings {
 		if mapping.AWSName == keyField {
 			continue
 		}
+
 		value := record.fieldAny(mapping.AWSName)
 		if value == nil || value == "" {
 			if mapping.AWSName != FieldValue || !record.includesField(FieldValue) {
 				continue
 			}
 		}
+
 		object[mapping.FileName] = value
 	}
+
 	return object
 }
 
@@ -41,15 +46,18 @@ func (mappings FieldMappings) WithDefaults() FieldMappings {
 	if len(mappings) == 0 {
 		return defaults
 	}
+
 	overrides := make(map[string]string, len(mappings))
 	for _, mapping := range mappings {
 		overrides[mapping.AWSName] = mapping.FileName
 	}
+
 	for i := range defaults {
 		if fileName, ok := overrides[defaults[i].AWSName]; ok {
 			defaults[i].FileName = fileName
 		}
 	}
+
 	return defaults
 }
 
@@ -60,6 +68,7 @@ func (mappings FieldMappings) Find(awsName string) (FieldMapping, bool) {
 			return mapping, true
 		}
 	}
+
 	return FieldMapping{}, false
 }
 
@@ -71,6 +80,7 @@ func (mappings FieldMappings) ForFields(fields Fields) FieldMappings {
 			out = append(out, mapping)
 		}
 	}
+
 	return out
 }
 

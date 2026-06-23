@@ -17,8 +17,8 @@ type styleRenderer struct {
 	busyMessage    string
 }
 
-func newStyleRenderer(m model) styleRenderer {
-	return styleRenderer{
+func newStyleRenderer(m model) *styleRenderer {
+	return &styleRenderer{
 		noColor:        m.opts.NoColor,
 		query:          m.query,
 		effectiveQuery: m.effectiveQuery,
@@ -30,98 +30,108 @@ func newStyleRenderer(m model) styleRenderer {
 	}
 }
 
-func (renderer styleRenderer) label(s string) string {
+func (renderer *styleRenderer) label(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return labelStyle.Render(s)
 }
 
-func (renderer styleRenderer) value(s string) string {
+func (renderer *styleRenderer) value(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return valueStyle.Render(s)
 }
 
-func (renderer styleRenderer) muted(s string) string {
+func (renderer *styleRenderer) muted(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return mutedStyle.Render(s)
 }
 
-func (renderer styleRenderer) encryptedPlaceholder() string {
+func (renderer *styleRenderer) encryptedPlaceholder() string {
 	return renderer.muted(encryptedPlaceholderText)
 }
 
-func (renderer styleRenderer) divider(s string) string {
+func (renderer *styleRenderer) divider(s string) string {
 	return strings.Repeat(" ", lipgloss.Width(s))
 }
 
-func (renderer styleRenderer) frame(s string) string {
+func (renderer *styleRenderer) frame(s string) string {
 	return strings.Repeat(" ", lipgloss.Width(s))
 }
 
-func (renderer styleRenderer) selectedRow(s string) string {
+func (renderer *styleRenderer) selectedRow(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return selectedRowStyle.Render(s)
 }
 
-func (renderer styleRenderer) selectedMarker() string {
+func (renderer *styleRenderer) selectedMarker() string {
 	if renderer.noColor {
 		return "| "
 	}
+
 	return lipgloss.NewStyle().Foreground(selectedFg).Render("| ")
 }
 
-func (renderer styleRenderer) searchLine() string {
+func (renderer *styleRenderer) searchLine() string {
 	line := "Search > " + renderer.query
 	if renderer.searchInvalid {
 		return renderer.applyErr(line)
 	}
+
 	return renderer.searchPrompt() + renderer.value(renderer.query)
 }
 
-func (renderer styleRenderer) filteredLine() string {
+func (renderer *styleRenderer) filteredLine() string {
 	return renderer.filteredPrompt() + renderer.value(renderer.effectiveQuery)
 }
 
-func (renderer styleRenderer) searchPrompt() string {
+func (renderer *styleRenderer) searchPrompt() string {
 	if renderer.noColor {
 		return "Search > "
 	}
+
 	return searchStyle.Render("Search > ")
 }
 
-func (renderer styleRenderer) filteredPrompt() string {
+func (renderer *styleRenderer) filteredPrompt() string {
 	if renderer.noColor {
 		return "Filtered > "
 	}
+
 	return searchStyle.Render("Filtered > ")
 }
 
-func (renderer styleRenderer) applyErr(s string) string {
+func (renderer *styleRenderer) applyErr(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return errorStyle.Render(s)
 }
 
-func (renderer styleRenderer) applyWarning(s string) string {
+func (renderer *styleRenderer) applyWarning(s string) string {
 	if renderer.noColor {
 		return s
 	}
+
 	return warningStyle.Render(s)
 }
 
-func quitConfirmationMessage(_ string) string {
+func quitConfirmationMessage() string {
 	return `Are you sure you want to quit? Press "y" to confirm.`
 }
 
-func (renderer styleRenderer) renderStatusMessage() string {
+func (renderer *styleRenderer) renderStatusMessage() string {
 	switch {
 	case renderer.errMessage != "":
 		return renderer.applyErr(renderer.errMessage)

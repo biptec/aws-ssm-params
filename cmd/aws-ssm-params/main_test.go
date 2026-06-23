@@ -27,7 +27,9 @@ const (
 
 func TestCLIHelpShowsTUICommand(t *testing.T) {
 	cliApp := newCLIApp([]string{"--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, "--help"})
@@ -46,7 +48,9 @@ func TestCLIHelpShowsTUICommand(t *testing.T) {
 
 func TestTUIHelpUsesShowColumnFlag(t *testing.T) {
 	cliApp := newCLIApp([]string{tuiCommandName, "--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, tuiCommandName, "--help"})
@@ -77,12 +81,15 @@ func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 
 	for _, args := range cases {
 		cliApp := newCLIApp(args[1:])
+
 		var out bytes.Buffer
+
 		cliApp.Writer = &out
 
 		err := cliApp.Run(context.Background(), args)
 
 		require.NoError(t, err)
+
 		for _, legacyEnvName := range legacyEnvNames {
 			assert.NotContains(t, out.String(), legacyEnvName, strings.Join(args, " "))
 		}
@@ -91,7 +98,9 @@ func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 
 func TestCLIHelpShowsNativeAWSRegionAndProfileAliases(t *testing.T) {
 	cliApp := newCLIApp([]string{"--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, "--help"})
@@ -106,7 +115,9 @@ func TestCLIHelpShowsNativeAWSRegionAndProfileAliases(t *testing.T) {
 
 func TestInteractiveCommandIsRemoved(t *testing.T) {
 	cliApp := newCLIApp([]string{removedCommandInteractive, "--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, removedCommandInteractive, "--help"})
@@ -128,7 +139,9 @@ func TestGetAndPutCommandsAreRemoved(t *testing.T) {
 
 func TestUnknownCommandReturnsError(t *testing.T) {
 	cliApp := newCLIApp([]string{unknownCommandName})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, unknownCommandName})
@@ -157,7 +170,9 @@ func TestTUIRejectsRemovedNameFlag(t *testing.T) {
 
 func TestExportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 	cliApp := newCLIApp([]string{exportCommandName, "--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, exportCommandName, "--help"})
@@ -175,7 +190,9 @@ func TestExportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 
 func TestImportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 	cliApp := newCLIApp([]string{importCommandName, "--help"})
+
 	var out bytes.Buffer
+
 	cliApp.Writer = &out
 
 	err := cliApp.Run(context.Background(), []string{appName, importCommandName, "--help"})

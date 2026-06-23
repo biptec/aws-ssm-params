@@ -15,6 +15,7 @@ import (
 func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a", "name:/app/c"})
 	require.NoError(t, err)
+
 	records := Records{
 		{Path: "/app/a", Value: "a"},
 		{Path: "/app/b", Value: "b"},
@@ -28,7 +29,7 @@ func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 }
 
 func TestDefaultOptionsRespectFieldScope(t *testing.T) {
-	defaults := ssmPutOptionsForTest(t, "standard", "text", "description")
+	defaults := ssmPutOptionsForTest(t, "description")
 
 	options := defaultOptionsForFields(defaults, textio.Fields{textio.FieldName, textio.FieldValue})
 
@@ -69,9 +70,9 @@ func TestApplyBasePathToRecordsRejectsRelativeNamesWithoutBase(t *testing.T) {
 func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T) {
 	record := textio.Record{Path: "/app/value", Fields: textio.Fields{textio.FieldName, textio.FieldValue}, Value: "secret"}
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
-	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
+	defaults := ssmPutOptionsForTest(t, "")
 
-	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, cloud, true)
+	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, true)
 
 	require.NoError(t, err)
 	assert.Empty(t, opts.Policies)
@@ -89,9 +90,9 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 		DataType: ssm.DefaultParameterDataType.String(),
 		Policies: `[{"Type":"Expiration"}]`,
 	}
-	defaults := ssmPutOptionsForTest(t, "standard", "text", "")
+	defaults := ssmPutOptionsForTest(t, "")
 
-	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, cloud, true)
+	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, true)
 
 	require.NoError(t, err)
 	assert.Equal(t, "[{}]", opts.Policies)
@@ -112,9 +113,10 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 		Description: "from file",
 		Policies:    `[{"Type":"Expiration"}]`,
 	}
-	defaults := ssmPutOptionsForTest(t, "standard", "text", "default desc")
+	defaults := ssmPutOptionsForTest(t, "default desc")
 
-	opts, err := (OptionsResolver{defaults: defaults}).forRecord(record, ssm.Metadata{}, false)
+	cloud := ssm.Metadata{}
+	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Advanced", opts.Tier.String())
@@ -123,11 +125,13 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 	assert.Equal(t, `[{"Type":"Expiration"}]`, opts.Policies)
 }
 
-func ssmPutOptionsForTest(t *testing.T, tierValue, dataTypeValue, description string) ssm.PutParameterOptions {
+func ssmPutOptionsForTest(t *testing.T, description string) ssm.PutParameterOptions {
 	t.Helper()
-	tier, err := ssm.ParseParameterTier(tierValue)
+
+	tier, err := ssm.ParseParameterTier("standard")
 	require.NoError(t, err)
-	dataType, err := ssm.ParseParameterDataType(dataTypeValue)
+	dataType, err := ssm.ParseParameterDataType("text")
 	require.NoError(t, err)
+
 	return ssm.PutParameterOptions{Tier: tier, DataType: dataType, Description: description}
 }

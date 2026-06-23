@@ -56,7 +56,8 @@ func globalFlags() []cli.Flag {
 }
 
 func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions, error) {
-	allRegions := boolFlagValueAny(cmd, flagAllRegions, false, envAllRegions)
+	allRegions := boolFlagValueAny(cmd, flagAllRegions, envAllRegions)
+
 	regions := dedupeStrings(stringSliceFlagValue(cmd, flagRegion, envRegion, envAWSRegion))
 	if allRegions && len(regions) > 0 {
 		return globalOptions{}, fmt.Errorf(
@@ -65,7 +66,9 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 			flagAllRegions,
 		)
 	}
+
 	profile := stringFlagValueAny(cmd, flagProfile, "", envProfile, envAWSProfile)
+
 	region := ""
 	if len(regions) > 0 {
 		region = regions[0]
@@ -74,22 +77,28 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 		if region == "" {
 			region = os.Getenv(envAWSDefaultRegion)
 		}
+
 		if region != "" {
 			regions = []string{region}
 		}
 	}
+
 	keymap := strings.ToLower(strings.TrimSpace(stringFlagValueAny(cmd, flagKeymap, "emacs", envKeymap)))
 	if keymap == "" {
 		keymap = "emacs"
 	}
+
 	if keymap != "emacs" && keymap != "vi" {
 		return globalOptions{}, fmt.Errorf("unsupported --%s %q; expected emacs or vi", flagKeymap, keymap)
 	}
+
 	filtersFile := strings.TrimSpace(stringFlagValueAny(cmd, flagFiltersFile, "", envFiltersFile))
+
 	filterGroups, err := parseFilterGroups(stringSliceFlagValue(cmd, flagFilter, envFilter), filtersFile)
 	if err != nil {
 		return globalOptions{}, err
 	}
+
 	return globalOptions{
 		Options: &app.Options{
 			Logger:       logging.FromContext(ctx),
@@ -99,7 +108,7 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 			Profile:      profile,
 			AllRegions:   allRegions,
 		},
-		NoColor: boolFlagValueAny(cmd, flagNoColor, false, envNoColor),
+		NoColor: boolFlagValueAny(cmd, flagNoColor, envNoColor),
 		Keymap:  keymap,
 	}, nil
 }

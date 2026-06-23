@@ -45,7 +45,9 @@ func (r *runner) run(ctx context.Context) error {
 	if err := r.prepare(ctx); err != nil {
 		return err
 	}
+
 	opts := r.opts.Options
+
 	client := ssm.NewClient(ssm.ClientConfig{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
@@ -55,10 +57,12 @@ func (r *runner) run(ctx context.Context) error {
 	if err := client.CheckAccess(ctx); err != nil {
 		return errors.Wrap(err, "check AWS access")
 	}
+
 	regionLabel, regions, err := r.regionSelection(ctx, client)
 	if err != nil {
 		return err
 	}
+
 	return errors.Wrap(
 		ui.RunInteractive(ctx, client, r.opts.InventoryItems, r.uiOptions(regionLabel, regions)),
 		"run interactive",
@@ -67,19 +71,24 @@ func (r *runner) run(ctx context.Context) error {
 
 func (r *runner) prepare(ctx context.Context) error {
 	opts := r.opts.Options
+
 	items, err := opts.PrepareItems(ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
+
 	r.opts.InventoryItems = items
+
 	return nil
 }
 
 func (r runner) regionSelection(ctx context.Context, client ssm.Client) (regionLabel string, regions []string, err error) {
 	regionLabel = r.opts.Region
+
 	regions = append([]string(nil), r.opts.Regions...)
 	if r.opts.AllRegions {
 		regionLabel = "all regions"
+
 		regions, err = client.ListRegions(ctx)
 		if err != nil {
 			return "", nil, errors.Wrap(err, "list AWS regions")
@@ -87,13 +96,14 @@ func (r runner) regionSelection(ctx context.Context, client ssm.Client) (regionL
 	} else if len(regions) > 1 {
 		regionLabel = strings.Join(regions, ", ")
 	}
+
 	return regionLabel, regions, nil
 }
 
-func (r runner) uiOptions(regionLabel string, regions []string) ui.Options {
+func (r runner) uiOptions(regionLabel string, regions []string) *ui.Options {
 	opts := r.opts
 
-	return ui.Options{
+	return &ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,
 		Profile:                   opts.Profile,

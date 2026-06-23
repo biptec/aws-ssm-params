@@ -16,13 +16,16 @@ func ParseBasePath(value string) (BasePath, error) {
 	if value == "" {
 		return "", nil
 	}
+
 	if !strings.HasPrefix(value, "/") {
 		return "", errors.New("base path must start with /")
 	}
+
 	value = strings.TrimRight(value, "/")
 	if value == "" {
 		value = "/"
 	}
+
 	return BasePath(value), nil
 }
 
@@ -33,15 +36,19 @@ func (base BasePath) Resolve(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("parameter name is required")
 	}
+
 	if strings.HasPrefix(name, "/") {
 		return name, nil
 	}
+
 	if base == "" {
 		return "", fmt.Errorf("relative parameter name %q requires a base path", name)
 	}
+
 	if base == "/" {
 		return "/" + strings.TrimLeft(name, "/"), nil
 	}
+
 	return string(base) + "/" + strings.TrimLeft(name, "/"), nil
 }
 
@@ -52,23 +59,30 @@ func (base BasePath) Relativize(name string) (string, error) {
 	if name == "" {
 		return "", errors.New("parameter name is required")
 	}
+
 	if base == "" {
 		return name, nil
 	}
+
 	if !strings.HasPrefix(name, "/") {
 		return "", fmt.Errorf("parameter name %q is not an absolute SSM path", name)
 	}
+
 	if base == "/" {
 		relative := strings.TrimLeft(name, "/")
 		if relative == "" {
 			return "", fmt.Errorf("parameter name %q has no path relative to base path %q", name, base)
 		}
+
 		return relative, nil
 	}
+
 	prefix := string(base) + "/"
+
 	relative, ok := strings.CutPrefix(name, prefix)
 	if !ok || relative == "" {
 		return "", fmt.Errorf("parameter name %q is outside base path %q", name, base)
 	}
+
 	return relative, nil
 }

@@ -28,11 +28,14 @@ func newAWSConfigCache(profile, region string) *awsConfigCache {
 func (cache *awsConfigCache) load(ctx context.Context) (aws.Config, error) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
+
 	if cache.loaded {
 		return cache.cfg, cache.err
 	}
+
 	cache.cfg, cache.err = loadSDKConfig(ctx, cache.profile, cache.region)
 	cache.loaded = true
+
 	return cache.cfg, cache.err
 }
 
@@ -43,6 +46,7 @@ func ResolveConfiguredRegion(ctx context.Context, profile string) string {
 	if err != nil {
 		return ""
 	}
+
 	return strings.TrimSpace(cfg.Region)
 }
 
@@ -51,15 +55,19 @@ func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, err
 	if profile != "" {
 		opts = append(opts, config.WithSharedConfigProfile(profile))
 	}
+
 	if region != "" {
 		opts = append(opts, config.WithRegion(region))
 	}
+
 	if logging.TraceEnabled(ctx) {
 		opts = append(opts, config.WithHTTPClient(traceHTTPClient()))
 	}
+
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return aws.Config{}, errors.Wrap(err, "load AWS SDK config")
 	}
+
 	return cfg, nil
 }

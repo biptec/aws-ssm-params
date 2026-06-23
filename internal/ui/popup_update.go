@@ -14,6 +14,7 @@ type popupUpdateComponent struct {
 func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	items := m.popupSortItems()
+
 	key := msg.String()
 	if key != "d" {
 		if col, ok := m.popupSortColumnByLetterHotkey(key); ok {
@@ -21,20 +22,25 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 			return m, nil
 		}
 	}
+
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.sortCursor = cursorFromNavigation(m.sortCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenMain, popupSort)
@@ -51,6 +57,7 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 			m.toggleSortDirection(items[m.sortCursor].column)
 		}
 	}
+
 	return m, nil
 }
 
@@ -58,6 +65,7 @@ func cursorFromNavigation(cursor, length int, action navigationAction) int {
 	if length <= 0 {
 		return 0
 	}
+
 	switch action {
 	case navNone:
 		return cursor
@@ -81,6 +89,7 @@ func cursorFromNavigation(cursor, length int, action navigationAction) int {
 // updateConfirm verifies a typed confirmation phrase before running destructive delete operations.
 func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	switch msg.String() {
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenConfirm)
@@ -93,40 +102,50 @@ func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, 
 			m.errMessage = "confirmation phrase does not match"
 			return m, nil
 		}
+
 		items := append(inventory.Items(nil), m.confirmItems...)
 		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
 		m.loadingTitle = ""
-		m.loadingLines = nil
-		return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+
+		return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
+
 	var cmd tea.Cmd
+
 	m.input, cmd = m.input.Update(msg)
+
 	return m, cmd
 }
 
 // updateRegionSelect lets users choose the concrete AWS region for saving a wildcard/all-regions parameter.
 func (component popupUpdateComponent) updateRegionSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	regions := m.regionSelectOptions()
 	if len(regions) == 0 {
 		m.screen = screenTextArea
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenRegionSelect)
@@ -138,6 +157,7 @@ func (component popupUpdateComponent) updateRegionSelect(msg tea.KeyMsg) (tea.Mo
 		m.screen = screenTextArea
 		m = m.focusEditField(editFieldRegion)
 	}
+
 	return m, nil
 }
 
@@ -145,26 +165,32 @@ func (component popupUpdateComponent) updateRegionSelect(msg tea.KeyMsg) (tea.Mo
 // Existing parameters start with their current type; missing parameters start as SecureString unless the user changes it.
 func (component popupUpdateComponent) updateTypeSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	items := parameterTypeItems()
 	if len(items) == 0 {
 		m.screen = m.typeReturnScreen
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTypeSelect, popupTypeSelect)
@@ -175,35 +201,42 @@ func (component popupUpdateComponent) updateTypeSelect(msg tea.KeyMsg) (tea.Mode
 		}
 	case "enter", "ctrl+j":
 		m.editType = items[m.typeCursor].value
+
 		m.screen = m.typeReturnScreen
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
 	}
+
 	return m, nil
 }
 
 // updateHelp closes the legacy shortcuts screen and returns to the screen it documents.
 func (component popupUpdateComponent) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
 		m.screen = m.shortcutsFor
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	switch msg.String() {
 	case "q", "esc", "ctrl+g", "?":
 		m.popPopup()
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	key := msg.String()
 	switch key {
 	case "ctrl+_", "ctrl+/":
@@ -217,45 +250,57 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 			m.errMessage = "confirmation phrase does not match"
 			return m, nil
 		}
+
 		items := append(inventory.Items(nil), m.confirmItems...)
 		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
 		m.loadingTitle = ""
-		m.loadingLines = nil
 		m.activePopup = popupNone
 		m.popupStack = nil
-		return m, deleteCmdWithBackend(m.ctx, backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+
+		return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	}
+
 	if m.confirmExpected == "" {
 		return m, nil
 	}
+
 	var cmd tea.Cmd
+
 	m.input, cmd = m.input.Update(msg)
+
 	return m, cmd
 }
 
 func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	regions := m.regionSelectOptions()
 	if len(regions) == 0 {
 		m.popPopup()
 		m = m.focusEditField(editFieldRegion)
+
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.regionCursor = cursorFromNavigation(m.regionCursor, len(regions), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenRegionSelect, popupRegionSelect)
@@ -267,85 +312,106 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		m.popPopup()
 		m = m.focusEditField(editFieldRegion)
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	items := parameterTypeItems()
 	if len(items) == 0 {
 		m.popPopup()
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.typeCursor = cursorFromNavigation(m.typeCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editType = items[idx].value
 		m.popPopup()
+
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
+
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTypeSelect, popupTypeSelect)
 	case "q", "esc", "ctrl+g":
 		m.popPopup()
+
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
 	case "enter", "ctrl+j":
 		m.editType = items[m.typeCursor].value
 		m.popPopup()
+
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	items := parameterTierItems()
 	if len(items) == 0 {
 		m.popPopup()
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.tierCursor = cursorFromNavigation(m.tierCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.tierCursor = cursorFromNavigation(m.tierCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editTier = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldTier)
+
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTextArea, popupTierSelect)
@@ -357,37 +423,46 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		m.popPopup()
 		m = m.focusEditField(editFieldTier)
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	items := parameterDataTypeItems()
 	if len(items) == 0 {
 		m.popPopup()
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.dataTypeCursor = cursorFromNavigation(m.dataTypeCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.dataTypeCursor = cursorFromNavigation(m.dataTypeCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editDataType = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldDataType)
+
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTextArea, popupDataTypeSelect)
@@ -399,37 +474,46 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		m.popPopup()
 		m = m.focusEditField(editFieldDataType)
 	}
+
 	return m, nil
 }
 
 func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	items := overwriteItems()
 	if len(items) == 0 {
 		m.popPopup()
 		return m, nil
 	}
+
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.overwriteCursor = cursorFromNavigation(m.overwriteCursor, len(items), action)
 		}
+
 		return m, nil
 	}
+
 	if action, ok := m.navigationAction(key); ok {
 		m.overwriteCursor = cursorFromNavigation(m.overwriteCursor, len(items), action)
 		return m, nil
 	}
+
 	if m.keymapStyle() == keymapVi && key == "g" {
 		m.pendingKeySequence = "g"
 		return m, nil
 	}
+
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editOverwrite = items[idx].value
 		m.popPopup()
 		m = m.focusEditField(editFieldOverwrite)
+
 		return m, nil
 	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTextArea, popupOverwriteSelect)
@@ -441,5 +525,6 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 		m.popPopup()
 		m = m.focusEditField(editFieldOverwrite)
 	}
+
 	return m, nil
 }

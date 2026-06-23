@@ -16,7 +16,7 @@ type SortRule struct {
 	descending bool
 }
 
-func (rule SortRule) value(status ui.Status) string {
+func (rule SortRule) value(status *ui.Status) string {
 	switch rule.field {
 	case textio.FieldName:
 		return status.Item.Path
@@ -59,6 +59,7 @@ func (rules SortRules) requiresValues() bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -69,20 +70,26 @@ func parseSortRules(values []string) SortRules {
 		if value == "" {
 			continue
 		}
+
 		parts := strings.Split(value, ":")
+
 		field, ok := normalizeSortField(parts[0])
 		if !ok {
 			continue
 		}
+
 		descending := false
+
 		if len(parts) > 1 {
 			switch strings.ToLower(strings.TrimSpace(parts[1])) {
 			case "desc", "descending":
 				descending = true
 			}
 		}
+
 		rules = rules.with(field, descending)
 	}
+
 	return rules
 }
 
@@ -117,6 +124,7 @@ func (rules SortRules) with(field string, descending bool) SortRules {
 			out = append(out, rule)
 		}
 	}
+
 	return append(out, SortRule{field: field, descending: descending})
 }
 
@@ -124,22 +132,28 @@ func (rules SortRules) sort(statuses ui.Statuses) {
 	if len(rules) == 0 {
 		return
 	}
+
 	sort.SliceStable(statuses, func(i, j int) bool {
 		left := statuses[i]
+
 		right := statuses[j]
 		for _, rule := range rules {
-			cmp := natural.Compare(rule.value(left), rule.value(right))
+			cmp := natural.Compare(rule.value(&left), rule.value(&right))
 			if cmp == 0 {
 				continue
 			}
+
 			if rule.descending {
 				return cmp > 0
 			}
+
 			return cmp < 0
 		}
+
 		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
 			return cmp < 0
 		}
+
 		return natural.Compare(left.Item.Path, right.Item.Path) < 0
 	})
 }
@@ -164,6 +178,7 @@ func fieldsForOptions(fields textio.Fields) textio.Fields {
 	if len(fields) == 0 {
 		return append(textio.Fields(nil), allFields...)
 	}
+
 	return append(textio.Fields(nil), fields...)
 }
 
@@ -171,43 +186,55 @@ func recordFields(fields textio.Fields, scalarField, keyField string) textio.Fie
 	return fields.With(strings.TrimSpace(scalarField), strings.TrimSpace(keyField))
 }
 
-func recordFromStatus(status ui.Status, fields textio.Fields) textio.Record {
+func recordFromStatus(status *ui.Status, fields textio.Fields) textio.Record {
 	record := textio.Record{Path: status.Item.Path, Fields: fields}
 	if fields.Contains(textio.FieldRegion) {
 		record.Region = status.Item.Region
 	}
+
 	if fields.Contains(textio.FieldType) {
 		record.Type = status.Type
 	}
+
 	if fields.Contains(textio.FieldTier) {
 		record.Tier = status.Tier
 	}
+
 	if fields.Contains(textio.FieldDataType) {
 		record.DataType = status.DataType
 	}
+
 	if fields.Contains(textio.FieldPolicies) {
 		record.Policies = status.Policies
 	}
+
 	if fields.Contains(textio.FieldDescription) {
 		record.Description = status.Description
 	}
+
 	if fields.Contains(textio.FieldValue) && status.Exists {
 		record.Value = status.Value
 	}
+
 	if fields.Contains(textio.FieldDate) {
 		record.Date = status.Modified
 	}
+
 	if fields.Contains(textio.FieldVersion) {
 		record.Version = status.Version
 	}
+
 	if fields.Contains(textio.FieldLen) {
 		record.Len = status.Length
 	}
+
 	if fields.Contains(textio.FieldSHA256) {
 		record.SHA256 = status.SHA256Prefix
 	}
+
 	if fields.Contains(textio.FieldUser) {
 		record.User = status.User
 	}
+
 	return record
 }

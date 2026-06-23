@@ -16,17 +16,20 @@ func parameterFiltersToSDK(filters []ParameterFilter) []ssmtypes.ParameterString
 	if len(filters) == 0 {
 		return nil
 	}
+
 	out := make([]ssmtypes.ParameterStringFilter, 0, len(filters))
 	for _, filter := range filters {
 		if strings.TrimSpace(filter.Key) == "" || len(filter.Values) == 0 {
 			continue
 		}
+
 		out = append(out, ssmtypes.ParameterStringFilter{
 			Key:    aws.String(filter.Key),
 			Option: aws.String(filter.Option),
 			Values: append([]string(nil), filter.Values...),
 		})
 	}
+
 	return out
 }
 
@@ -34,6 +37,7 @@ func parametersForLog(withDecryption bool, params []ssmtypes.Parameter) []map[st
 	out := make([]map[string]any, 0, len(params))
 	for _, param := range params {
 		parameterType := ParameterType(param.Type)
+
 		out = append(out, map[string]any{
 			"name":    aws.ToString(param.Name),
 			"type":    string(param.Type),
@@ -44,6 +48,7 @@ func parametersForLog(withDecryption bool, params []ssmtypes.Parameter) []map[st
 			out[len(out)-1]["value"] = "[secure]"
 		}
 	}
+
 	return out
 }
 
@@ -51,6 +56,7 @@ func valueForLog(parameterType ParameterType, value string) string {
 	if parameterType == ParameterTypeSecureString {
 		return "[secure]"
 	}
+
 	return value
 }
 
@@ -60,7 +66,9 @@ func IsThrottlingError(err error) bool {
 	if !errors.As(err, &apiErr) {
 		return false
 	}
+
 	code := strings.ToLower(apiErr.ErrorCode())
+
 	return strings.Contains(code, "throttl") ||
 		strings.Contains(code, "toomanyrequests") ||
 		strings.Contains(code, "requestlimitexceeded") ||
@@ -68,14 +76,15 @@ func IsThrottlingError(err error) bool {
 		strings.Contains(code, "slowdown")
 }
 
-func parameterValue(withDecryption bool, param ssmtypes.Parameter) string {
+func parameterValue(withDecryption bool, param *ssmtypes.Parameter) string {
 	if parameterValueHidden(withDecryption, param) {
 		return ""
 	}
+
 	return aws.ToString(param.Value)
 }
 
-func parameterValueHidden(withDecryption bool, param ssmtypes.Parameter) bool {
+func parameterValueHidden(withDecryption bool, param *ssmtypes.Parameter) bool {
 	return !withDecryption && param.Type == ssmtypes.ParameterTypeSecureString
 }
 
@@ -83,6 +92,7 @@ func normalizeAWSError(err error) error {
 	if err == nil {
 		return nil
 	}
+
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {
 		switch apiErr.ErrorCode() {
@@ -90,6 +100,7 @@ func normalizeAWSError(err error) error {
 			return ErrNotFound
 		}
 	}
+
 	return err
 }
 
@@ -123,13 +134,17 @@ func chunkStrings(values []string, size int) [][]string {
 	if size <= 0 {
 		size = 10
 	}
+
 	var chunks [][]string
+
 	for start := 0; start < len(values); start += size {
 		end := start + size
 		if end > len(values) {
 			end = len(values)
 		}
+
 		chunks = append(chunks, values[start:end])
 	}
+
 	return chunks
 }

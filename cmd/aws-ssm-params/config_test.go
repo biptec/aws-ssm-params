@@ -28,7 +28,7 @@ func TestGlobalOptionsParseRepeatedRegionsAndFilters(t *testing.T) {
 	assert.Equal(t, "cli-profile", options.Profile)
 	assert.Equal(t, "vi", options.Keymap)
 	require.Len(t, options.FilterGroups, 1)
-	assert.True(t, options.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
+	assert.True(t, options.FilterGroups[0].Match(&filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
 }
 
 func TestGlobalOptionsUseCommaSeparatedEnvironmentLists(t *testing.T) {
@@ -88,11 +88,13 @@ func TestRejectCommaSeparatedFlagArgsIgnoresDoubleDashTail(t *testing.T) {
 
 func testParsedCommand(t *testing.T, flags []cli.Flag, args []string) *cli.Command {
 	t.Helper()
+
 	cmd := &cli.Command{
 		Name:   "test",
 		Flags:  flags,
 		Action: func(context.Context, *cli.Command) error { return nil },
 	}
 	require.NoError(t, cmd.Run(context.Background(), append([]string{"test"}, args...)))
+
 	return cmd
 }

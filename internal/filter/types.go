@@ -51,15 +51,17 @@ type Group struct {
 type Groups []Group
 
 // Match reports whether record matches at least one group. No groups means match all.
-func (groups Groups) Match(record Record) bool {
+func (groups Groups) Match(record *Record) bool {
 	if len(groups) == 0 {
 		return true
 	}
+
 	for _, group := range groups {
 		if group.Match(record) {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -70,32 +72,36 @@ func (groups Groups) HasField(field string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
 // Matcher matches one value with shell-like extglob semantics.
 type Matcher interface {
-	Match(value string) bool
+	Match(string) bool
 }
 
 // AWSFilters returns safe DescribeParameters filters for the group. Exact local matching is still required.
 func (g Group) AWSFilters() []AWSFilter {
 	filters := []AWSFilter{}
+
 	for _, condition := range g.Conditions {
 		if awsFilter, ok := condition.AWSFilter(); ok {
 			filters = append(filters, awsFilter)
 		}
 	}
+
 	return filters
 }
 
 // Match reports whether every condition in the group matches the record.
-func (g Group) Match(record Record) bool {
+func (g Group) Match(record *Record) bool {
 	for _, condition := range g.Conditions {
 		if !condition.Match(record) {
 			return false
 		}
 	}
+
 	return true
 }
 
@@ -106,6 +112,7 @@ func (g Group) HasField(field string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
@@ -113,25 +120,32 @@ func (g Group) HasField(field string) bool {
 // Additional non-name conditions are still evaluated locally after the exact parameter lookup.
 func (g Group) ExactName() (string, bool) {
 	name := ""
+
 	for _, condition := range g.Conditions {
 		if condition.Field != FieldName {
 			continue
 		}
+
 		if hasMeta(condition.Pattern) {
 			return "", false
 		}
+
 		candidate := strings.TrimSpace(condition.Pattern)
 		if candidate == "" {
 			return "", false
 		}
+
 		if name != "" && name != candidate {
 			return "", false
 		}
+
 		name = candidate
 	}
+
 	if name == "" {
 		return "", false
 	}
+
 	return name, true
 }
 
@@ -141,22 +155,26 @@ func (c Condition) AWSFilter() (AWSFilter, bool) {
 	if !ok {
 		return AWSFilter{}, false
 	}
+
 	if !hasMeta(c.Pattern) {
 		return AWSFilter{Key: key, Option: "Equals", Values: []string{canonicalAWSValue(c.Field, c.Pattern)}}, true
 	}
+
 	if c.Field == FieldName {
 		if prefix := literalPrefix(c.Pattern); prefix != "" {
 			return AWSFilter{Key: "Name", Option: "BeginsWith", Values: []string{prefix}}, true
 		}
+
 		if literal, ok := simpleContainsLiteral(c.Pattern); ok {
 			return AWSFilter{Key: "Name", Option: "Contains", Values: []string{literal}}, true
 		}
 	}
+
 	return AWSFilter{}, false
 }
 
 // Match reports whether one condition matches the record.
-func (c Condition) Match(record Record) bool {
+func (c Condition) Match(record *Record) bool {
 	switch c.Field {
 	case FieldName:
 		return c.matcher.Match(record.Name)

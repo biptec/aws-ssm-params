@@ -56,6 +56,7 @@ func tuiCLICommand() *cli.Command {
 				if err != nil {
 					return err
 				}
+
 				return tuicmd.Run(ctx, options)
 			})
 		},
@@ -67,6 +68,7 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 	if err != nil {
 		return &tuicmd.Options{}, err
 	}
+
 	showColumns, err := ui.ParseColumnOption(strings.Join(
 		stringSliceFlagValue(cmd, tuiFlagShowColumn, tuiEnvShowColumn),
 		",",
@@ -74,27 +76,29 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 	if err != nil {
 		return &tuicmd.Options{}, errors.Wrap(err, "parse show columns")
 	}
+
 	stdinItems, useInputTTY, err := loadTUIInventoryFromStdin()
 	if err != nil {
 		return &tuicmd.Options{}, err
 	}
+
 	global.InventoryItems = append(global.InventoryItems, stdinItems...)
 	global.WithDecryption = boolFlagValueAny(
 		cmd,
 		tuiFlagWithDecryption,
-		false,
 		tuiEnvWithDecryption,
 	)
+
 	return &tuicmd.Options{
 		Options:                   global.Options,
 		NoColor:                   global.NoColor,
 		Keymap:                    global.Keymap,
 		ShowColumns:               showColumns,
 		SortColumns:               compactStrings(stringSliceFlagValue(cmd, tuiFlagSortBy, tuiEnvSortBy)),
-		NoConfirmOverwriteFile:    boolFlagValueAny(cmd, tuiFlagNoConfirmOverwriteFile, false, tuiEnvNoConfirmOverwriteFile),
-		NoConfirmWriteSecureValue: boolFlagValueAny(cmd, tuiFlagNoConfirmWriteSecureValue, false, tuiEnvNoConfirmWriteSecureValue),
-		NoConfirmDeleteOne:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteOne, false, tuiEnvNoConfirmDeleteOne),
-		NoConfirmDeleteAll:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteAll, false, tuiEnvNoConfirmDeleteAll),
+		NoConfirmOverwriteFile:    boolFlagValueAny(cmd, tuiFlagNoConfirmOverwriteFile, tuiEnvNoConfirmOverwriteFile),
+		NoConfirmWriteSecureValue: boolFlagValueAny(cmd, tuiFlagNoConfirmWriteSecureValue, tuiEnvNoConfirmWriteSecureValue),
+		NoConfirmDeleteOne:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteOne, tuiEnvNoConfirmDeleteOne),
+		NoConfirmDeleteAll:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteAll, tuiEnvNoConfirmDeleteAll),
 		UseInputTTY:               useInputTTY,
 	}, nil
 }
@@ -104,12 +108,15 @@ func loadTUIInventoryFromStdin() (inventory.Items, bool, error) {
 	if err != nil {
 		return nil, false, errors.Wrap(err, "stat stdin")
 	}
+
 	if info.Mode()&os.ModeCharDevice != 0 {
 		return nil, false, nil
 	}
+
 	items, err := inventory.LoadPaths(os.Stdin, "stdin")
 	if err != nil {
 		return nil, true, errors.Wrap(err, "load TUI inventory from stdin")
 	}
+
 	return items, true, nil
 }

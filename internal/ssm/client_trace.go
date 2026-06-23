@@ -26,6 +26,7 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	if base == nil {
 		base = http.DefaultTransport
 	}
+
 	ctx := req.Context()
 	logger := logging.FromContext(ctx)
 	started := time.Now()
@@ -37,9 +38,11 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 	}
 
 	var dnsStarted, connectStarted, tlsStarted, wroteRequestAt time.Time
+
 	trace := &httptrace.ClientTrace{
 		DNSStart: func(info httptrace.DNSStartInfo) {
 			dnsStarted = time.Now()
+
 			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "dns_start"), slog.String("dns_host", info.Host))...)
 		},
 		DNSDone: func(info httptrace.DNSDoneInfo) {
@@ -47,6 +50,7 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 		},
 		ConnectStart: func(network, addr string) {
 			connectStarted = time.Now()
+
 			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "connect_start"), slog.String("network", network), slog.String("addr", addr))...)
 		},
 		ConnectDone: func(network, addr string, err error) {
@@ -54,9 +58,12 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 		},
 		TLSHandshakeStart: func() {
 			tlsStarted = time.Now()
+
 			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "tls_start"))...)
 		},
-		TLSHandshakeDone: func(_ tlsConnectionState, err error) {
+		TLSHandshakeDone: func(state tls.ConnectionState, err error) {
+			_ = state
+
 			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "tls_done"), slog.Int64("duration_ms", elapsedMillis(tlsStarted)), slog.Any("error", err))...)
 		},
 		GotConn: func(info httptrace.GotConnInfo) {
@@ -64,6 +71,7 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 		},
 		WroteRequest: func(info httptrace.WroteRequestInfo) {
 			wroteRequestAt = time.Now()
+
 			logger.LogAttrs(ctx, logging.LevelTrace, "aws http trace", append(attrs, slog.String("phase", "wrote_request"), slog.Int64("elapsed_ms", elapsedMillis(started)), slog.Any("error", info.Err))...)
 		},
 		GotFirstResponseByte: func() {
@@ -73,14 +81,18 @@ func (transport traceRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 
 	tracedRequest := req.WithContext(httptrace.WithClientTrace(ctx, trace))
 	resp, err := base.RoundTrip(tracedRequest)
+
 	statusCode := 0
 	if resp != nil {
 		statusCode = resp.StatusCode
 	}
+
 	logger.LogAttrs(ctx, logging.LevelTrace, "aws http request completed", append(attrs, slog.Int("status", statusCode), slog.Int64("duration_ms", elapsedMillis(started)), slog.Any("error", err))...)
+
 	if err != nil {
 		return resp, errors.Wrap(err, "aws http request")
 	}
+
 	return resp, nil
 }
 
@@ -88,7 +100,6 @@ func elapsedMillis(started time.Time) int64 {
 	if started.IsZero() {
 		return 0
 	}
+
 	return int64(time.Since(started) / time.Millisecond)
 }
-
-type tlsConnectionState = tls.ConnectionState

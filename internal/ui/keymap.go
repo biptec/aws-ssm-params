@@ -68,6 +68,7 @@ func (keys keymap) navigationAction(key string) (navigationAction, bool) {
 		case "G":
 			return navLast, true
 		}
+
 		return navNone, false
 	}
 
@@ -85,6 +86,7 @@ func (keys keymap) navigationAction(key string) (navigationAction, bool) {
 	case "alt+>":
 		return navLast, true
 	}
+
 	return navNone, false
 }
 
@@ -93,12 +95,14 @@ func (keys keymap) editorNavigationAction(key string) (navigationAction, bool) {
 	if !ok {
 		return navNone, false
 	}
+
 	if keys.keymapStyle() == keymapVi && keys.viInsertMode {
 		switch key {
 		case "j", "k", "G":
 			return navNone, false
 		}
 	}
+
 	return action, true
 }
 
@@ -106,9 +110,11 @@ func (keys keymap) resolvePendingNavigationSequence(pending, key string) (naviga
 	if pending == "" {
 		return navNone, false, false
 	}
+
 	if keys.keymapStyle() == keymapVi && pending == "g" && key == "g" {
 		return navFirst, true, true
 	}
+
 	return navNone, false, true
 }
 
