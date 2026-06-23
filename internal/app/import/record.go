@@ -8,12 +8,9 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
-
-type strictMetadataDescriber interface {
-	DescribeManyStrict(context.Context, []string) (map[string]ssm.Metadata, map[string]error)
-}
 
 // recordResolver owns every decision that turns one textual record into an
 // SSM write: target region, existing metadata, parameter type, and put options.
@@ -26,7 +23,7 @@ type recordResolver struct {
 	metadataErrors map[string]error
 }
 
-func newRecordResolver(ctx context.Context, client ssm.Client, records app.Records, opts *Options) *recordResolver {
+func newRecordResolver(ctx context.Context, client ssmclient.Client, records app.Records, opts *Options) *recordResolver {
 	resolver := &recordResolver{
 		fields:         opts.Fields,
 		defaultRegion:  opts.Region,
@@ -179,7 +176,7 @@ func (resolver *recordResolver) scopeDefaultOptions() {
 	}
 }
 
-func (resolver *recordResolver) loadMetadata(ctx context.Context, client ssm.Client, records app.Records) {
+func (resolver *recordResolver) loadMetadata(ctx context.Context, client ssmclient.Client, records app.Records) {
 	pathsByRegion := map[string][]string{}
 	seen := map[string]bool{}
 
@@ -222,21 +219,8 @@ func (resolver *recordResolver) loadMetadata(ctx context.Context, client ssm.Cli
 	}
 }
 
-func (resolver *recordResolver) loadRegionMetadata(ctx context.Context, client ssm.Client, paths []string) (metadataByPath map[string]ssm.Metadata, errorsByPath map[string]error) {
-	if describer, ok := client.(strictMetadataDescriber); ok {
-		return describer.DescribeManyStrict(ctx, paths)
-	}
-
-	metadata := client.DescribeMany(ctx, paths)
-	metadataErrors := map[string]error{}
-
-	for _, path := range paths {
-		if _, ok := metadata[path]; !ok {
-			metadataErrors[path] = ssm.ErrNotFound
-		}
-	}
-
-	return metadata, metadataErrors
+func (resolver *recordResolver) loadRegionMetadata(ctx context.Context, client ssmclient.Client, paths []string) (metadataByPath map[string]ssm.Metadata, errorsByPath map[string]error) {
+	return client.DescribeManyStrict(ctx, paths)
 }
 
 func (*recordResolver) key(region, path string) string {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/cockroachdb/errors"
 )
 
@@ -69,7 +69,7 @@ func (cfg *Options) EnsureRegions(ctx context.Context) error {
 	}
 
 	if cfg.Region == "" {
-		cfg.Region = ssm.ResolveConfiguredRegion(ctx, cfg.Profile)
+		cfg.Region = ssmclient.ResolveConfiguredRegion(ctx, cfg.Profile)
 	}
 
 	if cfg.Region == "" {

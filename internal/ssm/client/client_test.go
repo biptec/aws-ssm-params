@@ -1,7 +1,10 @@
-package ssm
+package client
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/biptec/aws-ssm-params/internal/ssm"
 )
 
 type fakeSDKSSM struct {
@@ -58,20 +63,17 @@ func (f *fakeSDKSSM) DeleteParameters(ctx context.Context, input *awsssm.DeleteP
 	return &awsssm.DeleteParametersOutput{}, f.deleteErr
 }
 
-type fakeRegionAPI struct {
-	regions []awsRegion
-	err     error
-}
-
-func (f fakeRegionAPI) DescribeRegions(context.Context, *AWSClient) ([]awsRegion, error) {
-	return f.regions, f.err
-}
-
 type fakeSDKSTS struct{ err error }
 
 func (f fakeSDKSTS) GetCallerIdentity(ctx context.Context, input *sts.GetCallerIdentityInput, optionFns ...func(*sts.Options)) (*sts.GetCallerIdentityOutput, error) {
 	_, _, _ = ctx, input, optionFns
 	return &sts.GetCallerIdentityOutput{}, f.err
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestFormatPoliciesUsesInlinePolicyText(t *testing.T) {
@@ -98,7 +100,7 @@ func TestFormatPoliciesFlattensInlinePolicyTextArray(t *testing.T) {
 }
 
 func TestNewAWSClientStoresProfileRegionAndDecryption(t *testing.T) {
-	client := NewAWSClient("prod", "eu-north-1")
+	client := newClient("prod", "eu-north-1")
 
 	assert.Equal(t, "prod", client.Profile)
 	assert.Equal(t, "eu-north-1", client.Region)
@@ -109,10 +111,10 @@ func TestForRegionSharesLoadedConfigAndOverridesRegion(t *testing.T) {
 	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
 		return aws.Credentials{AccessKeyID: "AKIA", SecretAccessKey: "SECRET", Source: "test-provider"}, nil
 	})
-	cache := &awsConfigCache{loaded: true, cfg: aws.Config{Region: "us-east-1", Credentials: provider}}
-	client := &AWSClient{Profile: "prod", Region: "us-east-1", WithDecryption: true, sharedCfg: cache}
+	cache := &sdkConfigCache{loaded: true, cfg: aws.Config{Region: "us-east-1", Credentials: provider}}
+	root := &client{Profile: "prod", Region: "us-east-1", WithDecryption: true, sharedCfg: cache}
 
-	regional, ok := client.ForRegion("eu-west-1").(*AWSClient)
+	regional, ok := root.ForRegion("eu-west-1").(*client)
 	require.True(t, ok)
 	assert.Same(t, cache, regional.sharedCfg)
 
@@ -136,15 +138,15 @@ func TestGetManyMapsValuesAndInvalidParameters(t *testing.T) {
 		}},
 		InvalidParameters: []string{"/app/missing"},
 	}}
-	client := &AWSClient{Region: "eu-north-1", WithDecryption: true, ssmClient: api}
+	client := &client{Region: "eu-north-1", WithDecryption: true, getParametersFunc: api.GetParameters}
 
 	values, errs := client.GetMany(context.Background(), []string{"/app/ok", "/app/missing"})
 
 	require.Len(t, api.getInputs, 1)
 	assert.Equal(t, []string{"/app/ok", "/app/missing"}, api.getInputs[0].Names)
 	assert.True(t, aws.ToBool(api.getInputs[0].WithDecryption))
-	assert.Equal(t, Parameter{Name: "/app/ok", Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: modified.Format(time.RFC1123)}, values["/app/ok"])
-	assert.ErrorIs(t, errs["/app/missing"], ErrNotFound)
+	assert.Equal(t, ssm.Parameter{Name: "/app/ok", Region: "eu-north-1", Type: "SecureString", Value: "secret", Version: 7, Modified: modified.Format(time.RFC1123)}, values["/app/ok"])
+	assert.ErrorIs(t, errs["/app/missing"], ssm.ErrNotFound)
 }
 
 func TestDescribeManyMapsMetadata(t *testing.T) {
@@ -158,7 +160,7 @@ func TestDescribeManyMapsMetadata(t *testing.T) {
 		LastModifiedUser: aws.String("arn:user/dev"),
 		LastModifiedDate: &modified,
 	}}}}
-	client := &AWSClient{Region: "eu-north-1", ssmClient: api}
+	client := &client{Region: "eu-north-1", describeParametersFunc: api.DescribeParameters}
 
 	metas := client.DescribeMany(context.Background(), []string{"/app/key"})
 
@@ -167,15 +169,13 @@ func TestDescribeManyMapsMetadata(t *testing.T) {
 	assert.Equal(t, "Name", aws.ToString(api.describeInputs[0].ParameterFilters[0].Key))
 	assert.Equal(t, "Equals", aws.ToString(api.describeInputs[0].ParameterFilters[0].Option))
 	assert.Equal(t, []string{"/app/key"}, api.describeInputs[0].ParameterFilters[0].Values)
-	assert.Equal(t, Metadata{Name: "/app/key", Region: "eu-north-1", Type: "String", Tier: "Advanced", DataType: "text", Description: "description", User: "arn:user/dev", Modified: modified.Format(time.RFC1123)}, metas["/app/key"])
+	assert.Equal(t, ssm.Metadata{Name: "/app/key", Region: "eu-north-1", Type: "String", Tier: "Advanced", DataType: "text", Description: "description", User: "arn:user/dev", Modified: modified.Format(time.RFC1123)}, metas["/app/key"])
 }
 
-func TestListRegionsFiltersDisabledRegionsAndSorts(t *testing.T) {
-	client := &AWSClient{regionClient: fakeRegionAPI{regions: []awsRegion{
-		{Name: "us-east-1", OptInStatus: "opt-in-not-required"},
-		{Name: "ap-south-2", OptInStatus: "not-opted-in"},
-		{Name: "eu-north-1", OptInStatus: "opted-in"},
-	}}}
+func TestListRegionsSortsDiscoveredRegions(t *testing.T) {
+	client := &client{describeRegionsFunc: func(context.Context, *client) ([]string, error) {
+		return []string{"us-east-1", "eu-north-1"}, nil
+	}}
 
 	regions, err := client.ListRegions(context.Background())
 
@@ -183,18 +183,51 @@ func TestListRegionsFiltersDisabledRegionsAndSorts(t *testing.T) {
 	assert.Equal(t, []string{"eu-north-1", "us-east-1"}, regions)
 }
 
+func TestDescribeAWSRegionsFiltersDisabledRegions(t *testing.T) {
+	provider := aws.CredentialsProviderFunc(func(context.Context) (aws.Credentials, error) {
+		return aws.Credentials{AccessKeyID: "AKIA", SecretAccessKey: "SECRET", SessionToken: "TOKEN", Source: "test-provider"}, nil
+	})
+	httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		assert.Equal(t, "ec2.eu-north-1.amazonaws.com", req.URL.Host)
+
+		body := `<DescribeRegionsResponse>
+			<regionInfo>
+				<item><regionName>us-east-1</regionName><optInStatus>opt-in-not-required</optInStatus></item>
+				<item><regionName>ap-south-2</regionName><optInStatus>not-opted-in</optInStatus></item>
+				<item><regionName>eu-north-1</regionName><optInStatus>opted-in</optInStatus></item>
+			</regionInfo>
+		</DescribeRegionsResponse>`
+
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	cache := &sdkConfigCache{
+		loaded: true,
+		cfg:    aws.Config{Region: "eu-north-1", Credentials: provider, HTTPClient: httpClient},
+	}
+	client := &client{Region: "eu-north-1", sharedCfg: cache}
+
+	regions, err := describeAWSRegions(context.Background(), client)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"us-east-1", "eu-north-1"}, regions)
+}
+
 func TestPutParameterWithOptionsMapsSDKInput(t *testing.T) {
 	api := &fakeSDKSSM{}
-	client := &AWSClient{ssmClient: api}
-	opts := PutParameterOptions{
+	client := &client{putParameterFunc: api.PutParameter}
+	opts := ssm.PutParameterOptions{
 		Description: "desc",
-		Tier:        ParameterTierAdvanced,
-		DataType:    ParameterDataTypeText,
+		Tier:        ssm.ParameterTierAdvanced,
+		DataType:    ssm.ParameterDataTypeText,
 		Policies:    `[{"Type":"NoChangeNotification"}]`,
 		Overwrite:   true,
 	}
 
-	err := client.PutParameterWithOptions(context.Background(), "/app/key", "value", ParameterTypeString, opts)
+	err := client.PutParameterWithOptions(context.Background(), "/app/key", "value", ssm.ParameterTypeString, opts)
 
 	require.NoError(t, err)
 	require.Len(t, api.putInputs, 1)
@@ -210,13 +243,29 @@ func TestPutParameterWithOptionsMapsSDKInput(t *testing.T) {
 }
 
 func TestCheckAccessWrapsCredentialErrors(t *testing.T) {
-	client := &AWSClient{stsClient: fakeSDKSTS{err: errors.New("expired token")}}
+	client := &client{getCallerIdentityFunc: fakeSDKSTS{err: errors.New("expired token")}.GetCallerIdentity}
 
 	err := client.CheckAccess(context.Background())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cannot access AWS")
 	assert.Contains(t, err.Error(), "expired token")
+}
+
+func TestClientDeleteGroupsByRegionAndDeduplicatesParameters(t *testing.T) {
+	api := &fakeSDKSSM{}
+	client := &client{deleteParametersFunc: api.DeleteParameters}
+
+	err := client.Delete(context.Background(), &DeleteRequest{Parameters: []DeleteParameter{
+		{Name: "/app/two", Region: "eu-north-1"},
+		{Name: "/app/one", Region: "eu-central-1"},
+		{Name: "/app/two", Region: "eu-north-1"},
+	}})
+
+	require.NoError(t, err)
+	require.Len(t, api.deleteInputs, 2)
+	assert.Equal(t, []string{"/app/one"}, api.deleteInputs[0].Names)
+	assert.Equal(t, []string{"/app/two"}, api.deleteInputs[1].Names)
 }
 
 func TestTraceHTTPClientUsesTraceRoundTripper(t *testing.T) {
@@ -228,63 +277,9 @@ func TestTraceHTTPClientUsesTraceRoundTripper(t *testing.T) {
 	assert.True(t, traced)
 }
 
-func TestFormatModifiedDateHandlesAWSDateShapes(t *testing.T) {
-	unix := float64(1717243200)
-	assert.Equal(t, time.Unix(int64(unix), 0).Format(time.RFC1123), formatModifiedDate(unix))
-	assert.Equal(t, "", formatModifiedDate(float64(0)))
-	assert.Equal(t, time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC).Format(time.RFC1123), formatModifiedDate("2024-06-01T12:00:00Z"))
-	assert.Equal(t, "custom-date", formatModifiedDate("custom-date"))
-	assert.Equal(t, "42", formatModifiedDate(42))
-}
-
 func TestChunkStringsUsesDefaultSizeAndKeepsOrder(t *testing.T) {
 	values := []string{"a", "b", "c", "d", "e"}
 
 	assert.Equal(t, [][]string{{"a", "b"}, {"c", "d"}, {"e"}}, chunkStrings(values, 2))
 	assert.Equal(t, [][]string{{"a", "b", "c", "d", "e"}}, chunkStrings(values, 0))
-}
-
-func TestParseParameterTypeNormalizesSupportedAliases(t *testing.T) {
-	cases := map[string]ParameterType{
-		"":              ParameterTypeSecureString,
-		"secure-string": ParameterTypeSecureString,
-		"SecureString":  ParameterTypeSecureString,
-		"string":        ParameterTypeString,
-		"string-list":   ParameterTypeStringList,
-		"StringList":    ParameterTypeStringList,
-	}
-	for input, expected := range cases {
-		actual, err := ParseParameterType(input)
-		assert.NoError(t, err)
-		assert.Equal(t, expected, actual)
-	}
-}
-
-func TestParseParameterTierNormalizesSupportedAliases(t *testing.T) {
-	cases := map[string]ParameterTier{
-		"":                    ParameterTierIntelligentTiering,
-		"intelligent-tiering": ParameterTierIntelligentTiering,
-		"IntelligentTiering":  ParameterTierIntelligentTiering,
-		"standard":            ParameterTierStandard,
-		"Advanced":            ParameterTierAdvanced,
-	}
-	for input, expected := range cases {
-		actual, err := ParseParameterTier(input)
-		assert.NoError(t, err)
-		assert.Equal(t, expected, actual)
-	}
-}
-
-func TestParseParameterTierRejectsUnsupportedValues(t *testing.T) {
-	actual, err := ParseParameterTier("basic")
-
-	assert.Error(t, err)
-	assert.Equal(t, ParameterTier(""), actual)
-}
-
-func TestParseParameterTypeRejectsUnsupportedValues(t *testing.T) {
-	actual, err := ParseParameterType("binary")
-
-	assert.Error(t, err)
-	assert.Equal(t, ParameterType(""), actual)
 }

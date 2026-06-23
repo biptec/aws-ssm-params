@@ -12,6 +12,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,7 +74,7 @@ func (f *fakeSSMClient) ListRegions(context.Context) ([]string, error) {
 	return append([]string(nil), f.regions...), nil
 }
 
-func (f *fakeSSMClient) ForRegion(region string) ssm.Client {
+func (f *fakeSSMClient) ForRegion(region string) ssmclient.Client {
 	regional := *f
 	regional.region = region
 
@@ -136,6 +137,19 @@ func (f *fakeSSMClient) DescribeMany(ctx context.Context, paths []string) map[st
 	}
 
 	return result
+}
+
+func (f *fakeSSMClient) DescribeManyStrict(ctx context.Context, paths []string) (metadataByPath map[string]ssm.Metadata, errorsByPath map[string]error) {
+	result := f.DescribeMany(ctx, paths)
+	errs := map[string]error{}
+
+	for _, path := range paths {
+		if _, ok := result[path]; !ok {
+			errs[path] = ssm.ErrNotFound
+		}
+	}
+
+	return result, errs
 }
 
 func (f *fakeSSMClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
@@ -225,8 +239,8 @@ func (f *fakeSSMClient) PutParameterWithOptions(ctx context.Context, path, value
 	return nil
 }
 
-func (f *fakeSSMClient) DeleteMany(ctx context.Context, paths []string) error {
-	_, _ = ctx, paths
+func (f *fakeSSMClient) Delete(ctx context.Context, req *ssmclient.DeleteRequest) error {
+	_, _ = ctx, req
 	return nil
 }
 

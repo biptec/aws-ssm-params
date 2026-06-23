@@ -1,3 +1,4 @@
+// Package ssm defines Parameter Store domain values shared by clients and applications.
 package ssm
 
 import (

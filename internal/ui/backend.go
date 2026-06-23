@@ -15,6 +15,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/randomx"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 )
 
 type uiBackend interface {
@@ -63,11 +64,11 @@ func (localFileStore) statFile(path string) (fs.FileInfo, error) {
 }
 
 type defaultBackend struct {
-	client ssm.Client
+	client ssmclient.Client
 	files  fileStore
 }
 
-func newDefaultBackend(client ssm.Client) defaultBackend {
+func newDefaultBackend(client ssmclient.Client) defaultBackend {
 	return defaultBackend{client: client, files: localFileStore{}}
 }
 
@@ -173,17 +174,19 @@ func (backend defaultBackend) saveParameter(ctx context.Context, item *inventory
 }
 
 func (backend defaultBackend) deleteParameters(ctx context.Context, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) deleteDoneMsg {
-	targets := make([]ssm.DeleteTarget, 0, len(items))
+	req := &ssmclient.DeleteRequest{
+		Parameters: make([]ssmclient.DeleteParameter, 0, len(items)),
+	}
 
 	for _, item := range items {
 		if item.Region == "*" {
 			continue
 		}
 
-		targets = append(targets, ssm.DeleteTarget{Name: item.Path, Region: item.Region})
+		req.Parameters = append(req.Parameters, ssmclient.DeleteParameter{Name: item.Path, Region: item.Region})
 	}
 
-	if err := ssm.NewDeleter(backend.client).Delete(ctx, targets); err != nil {
+	if err := backend.client.Delete(ctx, req); err != nil {
 		return deleteDoneMsg{items: items, err: err}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sort"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/prompt"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -35,7 +37,7 @@ func (client *fakeClient) ListRegions(context.Context) ([]string, error) {
 	return append([]string(nil), client.state.regions...), nil
 }
 
-func (client *fakeClient) ForRegion(region string) ssm.Client {
+func (client *fakeClient) ForRegion(region string) ssmclient.Client {
 	return &fakeClient{region: region, state: client.state}
 }
 
@@ -47,6 +49,10 @@ func (client *fakeClient) GetMany(context.Context, []string) (parameters map[str
 
 func (client *fakeClient) DescribeMany(context.Context, []string) map[string]ssm.Metadata {
 	return map[string]ssm.Metadata{}
+}
+
+func (client *fakeClient) DescribeManyStrict(context.Context, []string) (metadataByPath map[string]ssm.Metadata, errorsByPath map[string]error) {
+	return map[string]ssm.Metadata{}, map[string]error{}
 }
 
 func (client *fakeClient) ListParameterMetadata(context.Context) ([]ssm.Metadata, error) {
@@ -61,22 +67,52 @@ func (client *fakeClient) PutParameterWithOptions(context.Context, string, strin
 	return nil
 }
 
-func (client *fakeClient) DeleteMany(ctx context.Context, paths []string) error {
+func (client *fakeClient) Delete(ctx context.Context, req *ssmclient.DeleteRequest) error {
 	if err := ctx.Err(); err != nil {
 		return errors.Wrap(err, "delete fake parameters")
 	}
 
-	client.state.deleteCalls = append(
-		client.state.deleteCalls,
-		client.region+":"+strings.Join(paths, ","),
-	)
+	pathsByRegion := map[string][]string{}
+	seen := map[string]bool{}
+
+	for _, parameter := range req.Parameters {
+		name := strings.TrimSpace(parameter.Name)
+		region := strings.TrimSpace(parameter.Region)
+
+		if name == "" {
+			continue
+		}
+
+		key := region + "\x00" + name
+		if seen[key] {
+			continue
+		}
+
+		seen[key] = true
+
+		pathsByRegion[region] = append(pathsByRegion[region], name)
+	}
+
+	regions := make([]string, 0, len(pathsByRegion))
+	for region := range pathsByRegion {
+		regions = append(regions, region)
+	}
+
+	sort.Strings(regions)
+
+	for _, region := range regions {
+		client.state.deleteCalls = append(
+			client.state.deleteCalls,
+			region+":"+strings.Join(pathsByRegion[region], ","),
+		)
+	}
 
 	return client.state.deleteErr
 }
 
 func testDependencies(state *fakeClientState, terminal *prompt.Terminal) dependencies {
 	return dependencies{
-		newClient: func(config ssm.ClientConfig) ssm.Client {
+		newClient: func(config ssmclient.Config) ssmclient.Client {
 			return &fakeClient{region: config.Region, state: state}
 		},
 		openTerminal: func() (*prompt.Terminal, error) {

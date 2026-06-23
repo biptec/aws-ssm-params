@@ -7,19 +7,19 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/gosuri/uilive"
 )
 
 // LoadStatusesWithProgress loads statuses and prints progress to the terminal.
 // It is used by non-interactive commands that write to a file and therefore need visible progress feedback.
-func LoadStatusesWithProgress(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool) Statuses {
+func LoadStatusesWithProgress(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool) Statuses {
 	return LoadStatusesWithProgressForRegions(ctx, client, items, includeValues, nil)
 }
 
 // LoadStatusesWithProgressForRegions is the progress-printing variant with an explicit region list.
 // It wraps the shared batch loader with a uilive writer so repeated progress updates repaint cleanly.
-func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
+func LoadStatusesWithProgressForRegions(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
 	writer := uilive.New()
 
 	writer.Start()
@@ -29,7 +29,7 @@ func LoadStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, 
 }
 
 // LoadFilteredStatusesWithProgressForRegions discovers parameters with filter groups and prints progress.
-func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssm.Client, groups filter.Groups, includeValues bool, regions []string) Statuses {
+func LoadFilteredStatusesWithProgressForRegions(ctx context.Context, client ssmclient.Client, groups filter.Groups, includeValues bool, regions []string) Statuses {
 	writer := uilive.New()
 
 	writer.Start()

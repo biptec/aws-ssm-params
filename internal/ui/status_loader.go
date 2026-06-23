@@ -11,6 +11,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/logging"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 )
 
 // LoadProgress reports status-loading progress to either the interactive TUI or the non-interactive live writer.
@@ -23,13 +24,13 @@ type StatusBatch func(Statuses)
 
 type statusLoader struct {
 	context       func() context.Context
-	client        ssm.Client
+	client        ssmclient.Client
 	includeValues bool
 	progress      LoadProgress
 	batch         StatusBatch
 }
 
-func newStatusLoader(ctx context.Context, client ssm.Client, includeValues bool, progress LoadProgress, batch StatusBatch) statusLoader {
+func newStatusLoader(ctx context.Context, client ssmclient.Client, includeValues bool, progress LoadProgress, batch StatusBatch) statusLoader {
 	return statusLoader{
 		context:       func() context.Context { return ctx },
 		client:        client,
@@ -39,36 +40,36 @@ func newStatusLoader(ctx context.Context, client ssm.Client, includeValues bool,
 	}
 }
 
-func (loader statusLoader) withClient(client ssm.Client) statusLoader {
+func (loader statusLoader) withClient(client ssmclient.Client) statusLoader {
 	loader.client = client
 	return loader
 }
 
 // LoadStatuses loads statuses without progress output using item-level region information.
-func LoadStatuses(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool) Statuses {
+func LoadStatuses(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool) Statuses {
 	return LoadStatusesForRegions(ctx, client, items, includeValues, nil)
 }
 
 // LoadStatusesForRegions loads statuses without progress output but with an explicit region scan list.
-func LoadStatusesForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
+func LoadStatusesForRegions(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool, regions []string) Statuses {
 	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, regions, nil)
 }
 
 // LoadStatusesBatch is the shared status loader entry point for item-level region lookup.
-func LoadStatusesBatch(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, progress LoadProgress) Statuses {
+func LoadStatusesBatch(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool, progress LoadProgress) Statuses {
 	return LoadStatusesBatchForRegions(ctx, client, items, includeValues, nil, progress)
 }
 
 // LoadStatusesBatchForRegions chooses the correct status-loading strategy.
 // Concrete-region items are loaded directly by their item region; wildcard items are expanded across either an explicit
 // region list or every enabled AWS region discovered from the client.
-func LoadStatusesBatchForRegions(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress) Statuses {
+func LoadStatusesBatchForRegions(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress) Statuses {
 	return newStatusLoader(ctx, client, includeValues, progress, nil).load(items, regions)
 }
 
 // LoadStatusesBatchForRegionsStream is the interactive loader variant. It emits partial rows as soon as each
 // region/chunk is loaded, then returns the complete final status set.
-func LoadStatusesBatchForRegionsStream(ctx context.Context, client ssm.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress, batch StatusBatch) Statuses {
+func LoadStatusesBatchForRegionsStream(ctx context.Context, client ssmclient.Client, items inventory.Items, includeValues bool, regions []string, progress LoadProgress, batch StatusBatch) Statuses {
 	return newStatusLoader(ctx, client, includeValues, progress, batch).load(items, regions)
 }
 

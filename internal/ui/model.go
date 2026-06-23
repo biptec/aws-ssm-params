@@ -9,6 +9,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -74,7 +75,7 @@ type model struct {
 
 // modelState stores immutable dependencies, dynamic data, and per-screen state.
 type modelState struct {
-	client  ssm.Client
+	client  ssmclient.Client
 	backend uiBackend
 	opts    Options
 

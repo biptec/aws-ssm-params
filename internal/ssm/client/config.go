@@ -1,7 +1,8 @@
-package ssm
+package client
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -12,7 +13,18 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/logging"
 )
 
-type awsConfigCache struct {
+// Config configures an AWS-backed SSM client.
+type Config struct {
+	Profile        string
+	Region         string
+	WithDecryption bool
+	Logger         *slog.Logger
+}
+
+// sdkConfigCache owns the expensive AWS SDK config resolution for one
+// profile/seed-region pair. Regional client clones share this cache and apply
+// their own region after load, so credentials/profile resolution happens once.
+type sdkConfigCache struct {
 	mu      sync.Mutex
 	profile string
 	region  string
@@ -21,11 +33,14 @@ type awsConfigCache struct {
 	loaded  bool
 }
 
-func newAWSConfigCache(profile, region string) *awsConfigCache {
-	return &awsConfigCache{profile: profile, region: region}
+func newSDKConfigCache(profile, region string) *sdkConfigCache {
+	return &sdkConfigCache{profile: profile, region: region}
 }
 
-func (cache *awsConfigCache) load(ctx context.Context) (aws.Config, error) {
+// load returns the cached SDK config and preserves the first load error. AWS
+// config loading may touch profiles, SSO config, web identity, env vars, IMDS,
+// or traced HTTP clients, so every regional clone must reuse the same result.
+func (cache *sdkConfigCache) load(ctx context.Context) (aws.Config, error) {
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
@@ -50,6 +65,9 @@ func ResolveConfiguredRegion(ctx context.Context, profile string) string {
 	return strings.TrimSpace(cfg.Region)
 }
 
+// loadSDKConfig is the only place that talks to the AWS SDK config chain. That
+// keeps profile/region/trace behavior consistent for SSM, STS, and EC2 region
+// discovery calls.
 func loadSDKConfig(ctx context.Context, profile, region string) (aws.Config, error) {
 	opts := []func(*config.LoadOptions) error{}
 	if profile != "" {

@@ -1,4 +1,4 @@
-package ssm
+package client
 
 import (
 	"crypto/tls"

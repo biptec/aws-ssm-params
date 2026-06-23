@@ -7,6 +7,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 )
 
 type exactNameFilterGroup struct {
@@ -26,14 +27,14 @@ type filteredStatusLoader struct {
 	groups filter.Groups
 }
 
-func newFilteredStatusLoader(ctx context.Context, client ssm.Client, groups filter.Groups, includeValues bool, progress LoadProgress) *filteredStatusLoader {
+func newFilteredStatusLoader(ctx context.Context, client ssmclient.Client, groups filter.Groups, includeValues bool, progress LoadProgress) *filteredStatusLoader {
 	return &filteredStatusLoader{
 		statusLoader: newStatusLoader(ctx, client, includeValues, progress, nil),
 		groups:       groups,
 	}
 }
 
-func (loader *filteredStatusLoader) withClient(client ssm.Client) *filteredStatusLoader {
+func (loader *filteredStatusLoader) withClient(client ssmclient.Client) *filteredStatusLoader {
 	copied := *loader
 	loader = &copied
 	loader.statusLoader = loader.statusLoader.withClient(client)
@@ -43,7 +44,7 @@ func (loader *filteredStatusLoader) withClient(client ssm.Client) *filteredStatu
 
 // LoadFilteredStatusesBatchForRegions discovers parameter metadata with DescribeParameters prefilters,
 // enriches matching rows with GetParameters values, then applies exact local filter matching.
-func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssm.Client, groups filter.Groups, includeValues bool, regions []string, progress LoadProgress) Statuses {
+func LoadFilteredStatusesBatchForRegions(ctx context.Context, client ssmclient.Client, groups filter.Groups, includeValues bool, regions []string, progress LoadProgress) Statuses {
 	return newFilteredStatusLoader(ctx, client, groups, includeValues, progress).load(regions)
 }
 

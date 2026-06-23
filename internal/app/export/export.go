@@ -11,7 +11,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
@@ -42,7 +42,7 @@ func Run(ctx context.Context, opts *Options, output io.Writer) error {
 // runner owns the state and dependencies of one export invocation.
 type runner struct {
 	opts         *Options
-	client       ssm.Client
+	client       ssmclient.Client
 	writer       textio.Writer
 	items        inventory.Items
 	regions      []string
@@ -60,7 +60,7 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 		return nil, errors.WithStack(err)
 	}
 
-	client := ssm.NewClient(ssm.ClientConfig{
+	client := ssmclient.New(ssmclient.Config{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
 		WithDecryption: opts.WithDecryption,

@@ -11,6 +11,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -320,7 +321,7 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
 // Wildcard items must be converted to a concrete region before saving, otherwise the command returns an inline error.
-func saveValueCmd(ctx context.Context, client ssm.Client, item *inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func saveValueCmd(ctx context.Context, client ssmclient.Client, item *inventory.Item, oldPath, value string, parameterType ssm.ParameterType, opts ssm.PutParameterOptions, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return saveValueCmdWithBackend(ctx, newDefaultBackend(client), item, oldPath, value, parameterType, opts, pathsFile, allowNamesFileUpdate)
 }
 
@@ -332,7 +333,7 @@ func saveValueCmdWithBackend(ctx context.Context, backend uiBackend, item *inven
 
 // deleteCmd groups selected items by concrete region and deletes them from SSM.
 // Wildcard missing rows are skipped because they do not represent a real parameter in one AWS region.
-func deleteCmd(ctx context.Context, client ssm.Client, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+func deleteCmd(ctx context.Context, client ssmclient.Client, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return deleteCmdWithBackend(ctx, newDefaultBackend(client), items, pathsFile, allowNamesFileUpdate)
 }
 

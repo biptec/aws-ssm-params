@@ -12,6 +12,7 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -25,7 +26,7 @@ func (*fakeImportClient) CheckAccess(context.Context) error { return nil }
 
 func (*fakeImportClient) ListRegions(context.Context) ([]string, error) { return nil, nil }
 
-func (client *fakeImportClient) ForRegion(region string) ssm.Client {
+func (client *fakeImportClient) ForRegion(region string) ssmclient.Client {
 	copied := *client
 	copied.region = region
 
@@ -76,7 +77,7 @@ func (client *fakeImportClient) PutParameterWithOptions(context.Context, string,
 	return nil
 }
 
-func (*fakeImportClient) DeleteMany(context.Context, []string) error { return nil }
+func (*fakeImportClient) Delete(context.Context, *ssmclient.DeleteRequest) error { return nil }
 
 func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 	groups, err := filter.ParseGroups([]string{"name:/app/a", "name:/app/c"})
@@ -189,7 +190,7 @@ func TestImportDryRunDoesNotWriteParametersOrPrompt(t *testing.T) {
 		options,
 		strings.NewReader(`[{"name":"/app/token","value":"secret"}]`),
 		&output,
-		dependencies{newClient: func(ssm.ClientConfig) ssm.Client { return client }},
+		dependencies{newClient: func(ssmclient.Config) ssmclient.Client { return client }},
 	)
 
 	require.NoError(t, err)

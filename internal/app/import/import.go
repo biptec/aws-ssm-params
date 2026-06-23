@@ -11,6 +11,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -33,12 +34,12 @@ type Options struct {
 }
 
 type dependencies struct {
-	newClient func(ssm.ClientConfig) ssm.Client
+	newClient func(ssmclient.Config) ssmclient.Client
 }
 
 // Run reads records, resolves their SSM names, and writes values to Parameter Store.
 func Run(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer) error {
-	return runWithDependencies(ctx, opts, input, summaryOutput, dependencies{newClient: ssm.NewClient})
+	return runWithDependencies(ctx, opts, input, summaryOutput, dependencies{newClient: ssmclient.New})
 }
 
 func runWithDependencies(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer, deps dependencies) error {
@@ -53,7 +54,7 @@ func runWithDependencies(ctx context.Context, opts *Options, input io.Reader, su
 // runner owns the mutable state and dependencies of one import invocation.
 type runner struct {
 	opts            *Options
-	client          ssm.Client
+	client          ssmclient.Client
 	records         app.Records
 	recordResolver  *recordResolver
 	policy          Policy
@@ -119,7 +120,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		return nil, errors.New("import requires the value field")
 	}
 
-	client := deps.newClient(ssm.ClientConfig{
+	client := deps.newClient(ssmclient.Config{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
 		WithDecryption: opts.WithDecryption,

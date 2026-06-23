@@ -1,68 +1,18 @@
-package ssm
+package client
 
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 )
 
-func metadataFromSDK(region string, param *ssmtypes.ParameterMetadata) Metadata {
-	return Metadata{
-		Name:        aws.ToString(param.Name),
-		Region:      region,
-		Type:        string(param.Type),
-		Tier:        string(param.Tier),
-		DataType:    aws.ToString(param.DataType),
-		Policies:    formatPolicies(param.Policies),
-		Description: aws.ToString(param.Description),
-		User:        aws.ToString(param.LastModifiedUser),
-		Modified:    formatModifiedTime(param.LastModifiedDate),
-	}
-}
-
-func formatModifiedTime(value *time.Time) string {
-	if value == nil || value.IsZero() {
-		return ""
-	}
-
-	return value.Format(time.RFC1123)
-}
-
-// formatModifiedDate normalizes legacy JSON date shapes into a readable RFC1123 string.
-func formatModifiedDate(value any) string {
-	switch value := value.(type) {
-	case nil:
-		return ""
-	case float64:
-		if value <= 0 {
-			return ""
-		}
-
-		return time.Unix(int64(value), 0).Format(time.RFC1123)
-	case string:
-		if value == "" {
-			return ""
-		}
-
-		if number, err := strconv.ParseFloat(value, 64); err == nil {
-			return time.Unix(int64(number), 0).Format(time.RFC1123)
-		}
-
-		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-			return parsed.Format(time.RFC1123)
-		}
-
-		return value
-	default:
-		return fmt.Sprint(value)
-	}
-}
-
+// formatPolicies normalizes AWS policy metadata into a stable JSON array. AWS
+// SDK versions and API shapes can expose policies either as raw JSON strings or
+// as inline policy structs; callers should not care which representation AWS
+// returned.
 func formatPolicies(value any) string {
 	switch value := value.(type) {
 	case nil:

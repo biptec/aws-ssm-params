@@ -12,7 +12,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/prompt"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -29,14 +29,14 @@ type Options struct {
 }
 
 type dependencies struct {
-	newClient    func(ssm.ClientConfig) ssm.Client
+	newClient    func(ssmclient.Config) ssmclient.Client
 	openTerminal func() (*prompt.Terminal, error)
 }
 
 // runner owns the normalized deletion candidates and command dependencies.
 type runner struct {
 	opts         *Options
-	client       ssm.Client
+	client       ssmclient.Client
 	records      app.Records
 	output       io.Writer
 	openTerminal func() (*prompt.Terminal, error)
@@ -55,7 +55,7 @@ const (
 // region/name identities from Parameter Store.
 func Run(ctx context.Context, opts *Options, input io.Reader, output io.Writer) error {
 	return runWithDependencies(ctx, opts, input, output, dependencies{
-		newClient:    ssm.NewClient,
+		newClient:    ssmclient.New,
 		openTerminal: prompt.Open,
 	})
 }
@@ -116,7 +116,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, output io.Wr
 	records = records.Filter(opts.FilterGroups).UniqueByIdentity()
 	records.SortByIdentity()
 
-	client := deps.newClient(ssm.ClientConfig{
+	client := deps.newClient(ssmclient.Config{
 		Profile: opts.Profile,
 		Region:  opts.Region,
 		Logger:  opts.Logger,
@@ -131,7 +131,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, output io.Wr
 	}, nil
 }
 
-func resolveDefaultRegions(ctx context.Context, opts *Options, records app.Records, newClient func(ssm.ClientConfig) ssm.Client) ([]string, error) {
+func resolveDefaultRegions(ctx context.Context, opts *Options, records app.Records, newClient func(ssmclient.Config) ssmclient.Client) ([]string, error) {
 	if !records.HasMissingRegion() {
 		return nil, nil
 	}
@@ -144,7 +144,7 @@ func resolveDefaultRegions(ctx context.Context, opts *Options, records app.Recor
 		return append([]string(nil), opts.Regions...), nil
 	}
 
-	client := newClient(ssm.ClientConfig{
+	client := newClient(ssmclient.Config{
 		Profile: opts.Profile,
 		Region:  opts.Region,
 		Logger:  opts.Logger,
@@ -312,15 +312,17 @@ func readConfirmation(terminal *prompt.Terminal, record *textio.Record) (confirm
 }
 
 func (commandRunner *runner) deleteRecords(ctx context.Context, records app.Records) error {
-	targets := make([]ssm.DeleteTarget, 0, len(records))
+	req := &ssmclient.DeleteRequest{
+		Parameters: make([]ssmclient.DeleteParameter, 0, len(records)),
+	}
 	for idx := range records {
-		targets = append(targets, ssm.DeleteTarget{
+		req.Parameters = append(req.Parameters, ssmclient.DeleteParameter{
 			Name:   records[idx].Path,
 			Region: records[idx].Region,
 		})
 	}
 
-	if err := ssm.NewDeleter(commandRunner.client).Delete(ctx, targets); err != nil {
+	if err := commandRunner.client.Delete(ctx, req); err != nil {
 		return errors.Wrap(err, "delete parameters")
 	}
 

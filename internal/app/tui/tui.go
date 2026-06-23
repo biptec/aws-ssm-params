@@ -9,7 +9,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/filter"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
@@ -48,7 +48,7 @@ func (r *runner) run(ctx context.Context) error {
 
 	opts := r.opts.Options
 
-	client := ssm.NewClient(ssm.ClientConfig{
+	client := ssmclient.New(ssmclient.Config{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
 		WithDecryption: opts.WithDecryption,
@@ -82,7 +82,7 @@ func (r *runner) prepare(ctx context.Context) error {
 	return nil
 }
 
-func (r runner) regionSelection(ctx context.Context, client ssm.Client) (regionLabel string, regions []string, err error) {
+func (r runner) regionSelection(ctx context.Context, client ssmclient.Client) (regionLabel string, regions []string, err error) {
 	regionLabel = r.opts.Region
 
 	regions = append([]string(nil), r.opts.Regions...)

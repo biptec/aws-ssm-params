@@ -8,7 +8,7 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
-	"github.com/biptec/aws-ssm-params/internal/ssm"
+	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,7 +39,7 @@ type runtimeState struct {
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
 // The function returns only after the user quits the TUI or Bubble Tea reports an error.
-func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Items, opts *Options) error {
+func RunInteractive(ctx context.Context, client ssmclient.Client, items inventory.Items, opts *Options) error {
 	m := newModel(ctx, client, items, opts)
 
 	programOptions := []tea.ProgramOption{tea.WithAltScreen()}
@@ -55,7 +55,7 @@ func RunInteractive(ctx context.Context, client ssm.Client, items inventory.Item
 
 // newModel initializes the TUI model with default inputs, textarea settings, visible columns, and loading state.
 // Statuses are not loaded here; Init starts that asynchronous work so the UI can show progress immediately.
-func newModel(ctx context.Context, client ssm.Client, items inventory.Items, opts *Options) model {
+func newModel(ctx context.Context, client ssmclient.Client, items inventory.Items, opts *Options) model {
 	sortRules := parseInitialSortOptions(opts.Sort)
 	sortBy, sortDescending := sortRules.primary()
 	input := textinput.New()
