@@ -97,11 +97,45 @@ func TestFilterRecordsByGroupsScopesImportRecords(t *testing.T) {
 func TestDefaultOptionsRespectFieldScope(t *testing.T) {
 	defaults := ssmPutOptionsForTest(t, "description")
 
-	options := defaultOptionsForFields(defaults, textio.Fields{textio.FieldName, textio.FieldValue})
+	resolver := recordResolver{
+		fields:         textio.Fields{textio.FieldName, textio.FieldValue},
+		defaultOptions: defaults,
+	}
+	resolver.scopeDefaultOptions()
 
-	assert.Empty(t, options.Tier)
-	assert.Empty(t, options.DataType)
-	assert.Empty(t, options.Description)
+	assert.Empty(t, resolver.defaultOptions.Tier)
+	assert.Empty(t, resolver.defaultOptions.DataType)
+	assert.Empty(t, resolver.defaultOptions.Description)
+}
+
+func TestRecordResolverParameterTypeUsesRecordCloudAndDefaultPriority(t *testing.T) {
+	resolver := recordResolver{
+		fields:      textio.Fields{textio.FieldType},
+		defaultType: ssm.ParameterTypeSecureString,
+	}
+	existing := ssm.Metadata{Type: ssm.ParameterTypeString.String()}
+
+	parameterType, err := resolver.parameterType(
+		&existing,
+		true,
+		&textio.Record{
+			Fields: textio.Fields{textio.FieldType},
+			Type:   ssm.ParameterTypeStringList.String(),
+		},
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, ssm.ParameterTypeStringList, parameterType)
+
+	parameterType, err = resolver.parameterType(&existing, true, &textio.Record{})
+
+	require.NoError(t, err)
+	assert.Equal(t, ssm.ParameterTypeString, parameterType)
+
+	parameterType, err = resolver.parameterType(&ssm.Metadata{}, false, &textio.Record{})
+
+	require.NoError(t, err)
+	assert.Equal(t, ssm.ParameterTypeSecureString, parameterType)
 }
 
 func TestApplyBasePathToRecordsPrefixesRelativeNames(t *testing.T) {
@@ -169,7 +203,7 @@ func TestImportOptionsForDotenvRecordDoesNotClearPoliciesImplicitly(t *testing.T
 	cloud := ssm.Metadata{Tier: ssm.ParameterTierStandard.String(), DataType: ssm.DefaultParameterDataType.String(), Policies: ""}
 	defaults := ssmPutOptionsForTest(t, "")
 
-	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, true)
+	opts, err := (&recordResolver{defaultOptions: defaults}).putOptions(&record, &cloud, true)
 
 	require.NoError(t, err)
 	assert.Empty(t, opts.Policies)
@@ -189,7 +223,7 @@ func TestImportOptionsForExplicitEmptyPoliciesClearsPolicies(t *testing.T) {
 	}
 	defaults := ssmPutOptionsForTest(t, "")
 
-	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, true)
+	opts, err := (&recordResolver{defaultOptions: defaults}).putOptions(&record, &cloud, true)
 
 	require.NoError(t, err)
 	assert.Equal(t, "[{}]", opts.Policies)
@@ -213,7 +247,7 @@ func TestImportOptionsForRecordUsesRecordMetadataWhenAllowed(t *testing.T) {
 	defaults := ssmPutOptionsForTest(t, "default desc")
 
 	cloud := ssm.Metadata{}
-	opts, err := (&OptionsResolver{defaults: defaults}).forRecord(&record, &cloud, false)
+	opts, err := (&recordResolver{defaultOptions: defaults}).putOptions(&record, &cloud, false)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Advanced", opts.Tier.String())

@@ -55,9 +55,7 @@ type runner struct {
 	opts            *Options
 	client          ssm.Client
 	records         app.Records
-	metadata        map[string]ssm.Metadata
-	metadataErrors  map[string]error
-	optionsResolver OptionsResolver
+	recordResolver  *recordResolver
 	policy          Policy
 	continueOnError bool
 	summaryEnabled  bool
@@ -65,7 +63,6 @@ type runner struct {
 	dryRun          bool
 	summary         Summary
 	recordErrors    []string
-	defaultType     ssm.ParameterType
 }
 
 // Summary contains the final per-operation import counters.
@@ -128,26 +125,18 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		WithDecryption: opts.WithDecryption,
 		Logger:         opts.Logger,
 	})
-	metadata, metadataErrors := (&MetadataResolver{
-		client: client, records: records, opts: opts, fields: opts.Fields,
-	}).resolve(ctx)
+	recordResolver := newRecordResolver(ctx, client, records, opts)
 
 	return &runner{
-		opts:           opts,
-		client:         client,
-		records:        records,
-		metadata:       metadata,
-		metadataErrors: metadataErrors,
-		optionsResolver: OptionsResolver{
-			defaults: defaultOptionsForFields(opts.DefaultOptions, opts.Fields),
-			fields:   opts.Fields,
-		},
+		opts:            opts,
+		client:          client,
+		records:         records,
+		recordResolver:  recordResolver,
 		policy:          opts.Policy,
 		continueOnError: opts.ContinueOnError,
 		summaryEnabled:  opts.Summary,
 		summaryOutput:   summaryOutput,
 		dryRun:          opts.DryRun,
-		defaultType:     opts.DefaultType,
 	}, nil
 }
 
@@ -174,16 +163,9 @@ func (r *runner) run(ctx context.Context) error {
 }
 
 func (r *runner) processRecord(ctx context.Context, record *textio.Record) error {
-	region := recordRegion(record, r.opts, r.optionsResolver.fields)
-	key := recordKey(region, record.Path)
-
-	existing, exists := r.metadata[key]
-	if err, ok := r.metadataErrors[key]; ok {
-		if !errors.Is(err, ssm.ErrNotFound) {
-			return r.handleRecordError(writeOperationUpdate, region, record.Path, err)
-		}
-
-		exists = false
+	region, existing, exists, err := r.recordResolver.resolveExisting(record)
+	if err != nil {
+		return r.handleRecordError(writeOperationUpdate, region, record.Path, err)
 	}
 
 	operation, policyAction := r.policy.operation(exists)
@@ -203,12 +185,12 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 		return nil
 	}
 
-	parameterType, err := resolveType(r.defaultType, &existing, exists, record, r.optionsResolver.fields)
+	parameterType, err := r.recordResolver.parameterType(&existing, exists, record)
 	if err != nil {
 		return r.handleRecordError(operation, region, record.Path, err)
 	}
 
-	opts, err := r.optionsResolver.forRecord(record, &existing, exists)
+	opts, err := r.recordResolver.putOptions(record, &existing, exists)
 	if err != nil {
 		return r.handleRecordError(operation, region, record.Path, err)
 	}

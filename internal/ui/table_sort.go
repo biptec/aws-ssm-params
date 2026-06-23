@@ -1,11 +1,8 @@
 package ui
 
 import (
-	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/biptec/aws-ssm-params/internal/natural"
 )
 
 type tableSorter struct {
@@ -345,29 +342,19 @@ func (component *tableSorter) applySortWithRules(rules sortRules) {
 
 	m.setSortRules(rules)
 	rules = m.sortRulesOrDefault()
-	sort.SliceStable(m.statuses, func(i, j int) bool {
-		left := &m.statuses[i]
 
-		right := &m.statuses[j]
-		for _, rule := range rules {
-			cmp := natural.Compare(m.tableCellValue(rule.column, 0, left), m.tableCellValue(rule.column, 0, right))
-			if cmp == 0 {
-				continue
-			}
+	orders := make([]statusOrder, 0, len(rules))
+	for _, rule := range rules {
+		currentRule := rule
+		orders = append(orders, statusOrder{
+			value: func(status *Status) string {
+				return m.tableCellValue(currentRule.column, 0, status)
+			},
+			descending: currentRule.descending,
+		})
+	}
 
-			if rule.descending {
-				return cmp > 0
-			}
-
-			return cmp < 0
-		}
-
-		if cmp := natural.Compare(left.Item.Region, right.Item.Region); cmp != 0 {
-			return cmp < 0
-		}
-
-		return natural.Compare(left.Item.Path, right.Item.Path) < 0
-	})
+	m.statuses.sort(orders)
 
 	if selectedKey != "" {
 		for idx, visIdx := range m.visible() {

@@ -25,34 +25,19 @@ func TestExportFieldMappingsApplyAliasesWithoutFiltering(t *testing.T) {
 }
 
 func TestExportRecordFieldsIncludesScalarAndKeyFields(t *testing.T) {
-	fields := recordFields(textio.Fields{textio.FieldValue}, textio.FieldValue, textio.FieldRegion)
-
-	assert.Equal(t, textio.Fields{textio.FieldValue, textio.FieldRegion}, fields)
-}
-
-func TestSortStatusesForExportUsesMultipleColumns(t *testing.T) {
-	statuses := ui.Statuses{
-		{Item: inventory.Item{Path: "/app/a", Region: "eu-north-1"}, Type: "String", Version: 10},
-		{Item: inventory.Item{Path: "/app/c", Region: "eu-north-1"}, Type: "SecureString", Version: 2},
-		{Item: inventory.Item{Path: "/app/b", Region: "eu-north-1"}, Type: "String", Version: 2},
+	options := Options{
+		Fields:      textio.Fields{textio.FieldValue},
+		ScalarField: textio.FieldValue,
+		KeyField:    textio.FieldRegion,
 	}
 
-	parseSortRules([]string{"type:asc", "version:desc", "name:asc"}).sort(statuses)
-
-	assert.Equal(t, []string{"/app/c", "/app/a", "/app/b"}, []string{statuses[0].Item.Path, statuses[1].Item.Path, statuses[2].Item.Path})
-}
-
-func TestIncludeValuesForSortColumnsIncludesDerivedValueFields(t *testing.T) {
-	assert.True(t, parseSortRules([]string{"len:desc"}).requiresValues())
-	assert.True(t, parseSortRules([]string{"sha256:asc"}).requiresValues())
-	assert.True(t, parseSortRules([]string{"value:asc"}).requiresValues())
-	assert.False(t, parseSortRules([]string{"name:asc", "type:desc"}).requiresValues())
+	assert.Equal(t, textio.Fields{textio.FieldValue, textio.FieldRegion}, options.recordFields())
 }
 
 func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 	t.Parallel()
 
-	fields := fieldsForOptions(nil)
+	fields := (&Options{}).recordFields()
 
 	assert.Equal(t, textio.Fields{
 		textio.FieldName,
@@ -72,8 +57,7 @@ func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 }
 
 func TestExportDefaultFieldsWithKeyFieldStillRequestValues(t *testing.T) {
-	fields := fieldsForOptions(nil)
-	recordFields := recordFields(fields, "", textio.FieldName)
+	recordFields := (&Options{KeyField: textio.FieldName}).recordFields()
 
 	assert.Contains(t, recordFields, textio.FieldName)
 	assert.Contains(t, recordFields, textio.FieldValue)
@@ -91,7 +75,8 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 		Description: "API key",
 	}
 
-	record := recordFromStatus(&status, textio.Fields{textio.FieldName, textio.FieldValue})
+	r := runner{recordFields: textio.Fields{textio.FieldName, textio.FieldValue}}
+	record := r.record(&status)
 
 	assert.Equal(t, textio.Fields{textio.FieldName, textio.FieldValue}, record.Fields)
 	assert.Equal(t, "secret", record.Value)

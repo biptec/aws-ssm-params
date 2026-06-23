@@ -3,6 +3,8 @@ package ui
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +13,9 @@ import (
 
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
+	"github.com/biptec/aws-ssm-params/internal/natural"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
 // Status is the UI/export view of one inventory item after querying AWS SSM.
@@ -37,6 +41,177 @@ type Status struct {
 
 // Statuses is an ordered collection of parameter statuses.
 type Statuses []Status
+
+type statusSortRule struct {
+	field      string
+	descending bool
+}
+
+// StatusSort is the ordered set of field rules used by Statuses.Sort.
+type StatusSort []statusSortRule
+
+type statusOrder struct {
+	value      func(*Status) string
+	descending bool
+}
+
+// ParseStatusSort parses field:direction values into status sort rules.
+func ParseStatusSort(values []string) StatusSort {
+	rules := make(StatusSort, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+
+		parts := strings.Split(value, ":")
+
+		field, ok := normalizeStatusSortField(parts[0])
+		if !ok {
+			continue
+		}
+
+		descending := false
+
+		if len(parts) > 1 {
+			switch strings.ToLower(strings.TrimSpace(parts[1])) {
+			case "desc", "descending":
+				descending = true
+			}
+		}
+
+		rules = rules.with(field, descending)
+	}
+
+	return rules
+}
+
+// RequiresValues reports whether sorting depends on parameter values or their
+// derived length/hash fields.
+func (rules StatusSort) RequiresValues() bool {
+	for _, rule := range rules {
+		switch rule.field {
+		case textio.FieldValue, textio.FieldLen, textio.FieldSHA256:
+			return true
+		}
+	}
+
+	return false
+}
+
+// Sort orders statuses by the supplied rules and uses region/name as stable
+// identity tie-breakers.
+func (statuses Statuses) Sort(rules StatusSort) {
+	orders := make([]statusOrder, 0, len(rules))
+	for _, rule := range rules {
+		currentRule := rule
+		orders = append(orders, statusOrder{
+			value:      currentRule.value,
+			descending: currentRule.descending,
+		})
+	}
+
+	statuses.sort(orders)
+}
+
+func (statuses Statuses) sort(orders []statusOrder) {
+	if len(orders) == 0 {
+		return
+	}
+
+	sort.SliceStable(statuses, func(i, j int) bool {
+		left := &statuses[i]
+		right := &statuses[j]
+
+		for _, order := range orders {
+			comparison := natural.Compare(order.value(left), order.value(right))
+			if comparison == 0 {
+				continue
+			}
+
+			if order.descending {
+				return comparison > 0
+			}
+
+			return comparison < 0
+		}
+
+		if comparison := natural.Compare(left.Item.Region, right.Item.Region); comparison != 0 {
+			return comparison < 0
+		}
+
+		return natural.Compare(left.Item.Path, right.Item.Path) < 0
+	})
+}
+
+func (rules StatusSort) with(field string, descending bool) StatusSort {
+	out := make(StatusSort, 0, len(rules)+1)
+	for _, rule := range rules {
+		if rule.field != field {
+			out = append(out, rule)
+		}
+	}
+
+	return append(out, statusSortRule{field: field, descending: descending})
+}
+
+func (rule statusSortRule) value(status *Status) string {
+	switch rule.field {
+	case textio.FieldName:
+		return status.Item.Path
+	case textio.FieldRegion:
+		return status.Item.Region
+	case textio.FieldType:
+		return status.Type
+	case textio.FieldTier:
+		return status.Tier
+	case textio.FieldDataType:
+		return status.DataType
+	case textio.FieldPolicies:
+		return status.Policies
+	case textio.FieldDescription:
+		return status.Description
+	case textio.FieldValue:
+		return status.Value
+	case textio.FieldDate:
+		return status.Modified
+	case textio.FieldVersion:
+		return fmt.Sprint(status.Version)
+	case textio.FieldLen:
+		return fmt.Sprint(status.Length)
+	case textio.FieldSHA256:
+		return status.SHA256Prefix
+	case textio.FieldUser:
+		return status.User
+	default:
+		return ""
+	}
+}
+
+func normalizeStatusSortField(field string) (string, bool) {
+	field = strings.ToLower(strings.TrimSpace(field))
+
+	switch field {
+	case textio.FieldName, "path":
+		return textio.FieldName, true
+	case textio.FieldRegion,
+		textio.FieldType,
+		textio.FieldTier,
+		textio.FieldPolicies,
+		textio.FieldDescription,
+		textio.FieldValue,
+		textio.FieldDate,
+		textio.FieldVersion,
+		textio.FieldLen,
+		textio.FieldSHA256,
+		textio.FieldUser:
+		return field, true
+	case textio.FieldDataType, "datatype", "data_type":
+		return textio.FieldDataType, true
+	default:
+		return "", false
+	}
+}
 
 // Filter returns statuses matching at least one group. Empty groups preserve the original collection.
 func (statuses Statuses) Filter(groups filter.Groups) Statuses {

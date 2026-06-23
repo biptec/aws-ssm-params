@@ -4,6 +4,7 @@ package export
 import (
 	"context"
 	"io"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 
@@ -39,7 +40,6 @@ func Run(ctx context.Context, opts *Options, output io.Writer) error {
 }
 
 // runner owns the state and dependencies of one export invocation.
-// Pure formatting and sorting helpers remain package functions; orchestration lives here.
 type runner struct {
 	opts         *Options
 	client       ssm.Client
@@ -49,7 +49,7 @@ type runner struct {
 	keyField     string
 	scalarField  string
 	recordFields textio.Fields
-	sortRules    SortRules
+	statusSort   ui.StatusSort
 	basePath     app.BasePath
 	fieldMaps    textio.FieldMappings
 }
@@ -75,8 +75,6 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 		}
 	}
 
-	fields := fieldsForOptions(opts.Fields)
-
 	return &runner{
 		opts:         opts,
 		client:       client,
@@ -85,8 +83,8 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 		regions:      regions,
 		keyField:     opts.KeyField,
 		scalarField:  opts.ScalarField,
-		recordFields: recordFields(fields, opts.ScalarField, opts.KeyField),
-		sortRules:    parseSortRules(opts.SortColumns),
+		recordFields: opts.recordFields(),
+		statusSort:   ui.ParseStatusSort(opts.SortColumns),
 		basePath:     opts.BasePath,
 		fieldMaps:    opts.FieldMappings,
 	}, nil
@@ -94,7 +92,7 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 
 func (r *runner) run(ctx context.Context) error {
 	statuses := r.loadStatuses(ctx)
-	r.sortRules.sort(statuses)
+	statuses.Sort(r.statusSort)
 
 	records, err := r.records(statuses)
 	if err != nil {
@@ -117,7 +115,7 @@ func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {
 	includeValues := r.opts.WithDecryption ||
 		r.recordFields.RequiresValues() ||
 		r.opts.FilterGroups.HasField(filter.FieldValue) ||
-		r.sortRules.requiresValues()
+		r.statusSort.RequiresValues()
 
 	var statuses ui.Statuses
 	if len(r.opts.FilterGroups) > 0 && len(r.items) == 0 {
@@ -153,7 +151,7 @@ func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
 			continue
 		}
 
-		record := recordFromStatus(&statuses[i], r.recordFields)
+		record := r.record(&statuses[i])
 
 		path, err := r.basePath.Relativize(record.Path)
 		if err != nil {
@@ -165,4 +163,85 @@ func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
 	}
 
 	return records, nil
+}
+
+func (r *runner) record(status *ui.Status) textio.Record {
+	record := textio.Record{Path: status.Item.Path, Fields: r.recordFields}
+	if r.recordFields.Contains(textio.FieldRegion) {
+		record.Region = status.Item.Region
+	}
+
+	if r.recordFields.Contains(textio.FieldType) {
+		record.Type = status.Type
+	}
+
+	if r.recordFields.Contains(textio.FieldTier) {
+		record.Tier = status.Tier
+	}
+
+	if r.recordFields.Contains(textio.FieldDataType) {
+		record.DataType = status.DataType
+	}
+
+	if r.recordFields.Contains(textio.FieldPolicies) {
+		record.Policies = status.Policies
+	}
+
+	if r.recordFields.Contains(textio.FieldDescription) {
+		record.Description = status.Description
+	}
+
+	if r.recordFields.Contains(textio.FieldValue) && status.Exists {
+		record.Value = status.Value
+	}
+
+	if r.recordFields.Contains(textio.FieldDate) {
+		record.Date = status.Modified
+	}
+
+	if r.recordFields.Contains(textio.FieldVersion) {
+		record.Version = status.Version
+	}
+
+	if r.recordFields.Contains(textio.FieldLen) {
+		record.Len = status.Length
+	}
+
+	if r.recordFields.Contains(textio.FieldSHA256) {
+		record.SHA256 = status.SHA256Prefix
+	}
+
+	if r.recordFields.Contains(textio.FieldUser) {
+		record.User = status.User
+	}
+
+	return record
+}
+
+func (opts *Options) recordFields() textio.Fields {
+	fields := append(textio.Fields(nil), opts.Fields...)
+	if len(fields) == 0 {
+		fields = append(fields, exportFields...)
+	}
+
+	return fields.With(
+		strings.TrimSpace(opts.ScalarField),
+		strings.TrimSpace(opts.KeyField),
+	)
+}
+
+var exportFields = textio.Fields{
+	textio.FieldName,
+	textio.FieldRegion,
+	textio.FieldType,
+	textio.FieldTier,
+	textio.FieldDataType,
+	textio.FieldPolicies,
+	textio.FieldDescription,
+	textio.FieldValue,
+	textio.FieldDate,
+	textio.FieldVersion,
+	textio.FieldLen,
+	textio.FieldSHA256,
+	textio.FieldUser,
 }

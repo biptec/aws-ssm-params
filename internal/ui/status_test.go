@@ -26,6 +26,29 @@ func TestWriteLoadProgress(t *testing.T) {
 	assert.Equal(t, "Loading parameters 2/3 from eu-north-1 region...\n/app/one\n/app/two\n", output.String())
 }
 
+func TestStatusesSortUsesMultipleFields(t *testing.T) {
+	statuses := Statuses{
+		{Item: inventory.Item{Path: "/app/a", Region: "eu-north-1"}, Type: "String", Version: 10},
+		{Item: inventory.Item{Path: "/app/c", Region: "eu-north-1"}, Type: "SecureString", Version: 2},
+		{Item: inventory.Item{Path: "/app/b", Region: "eu-north-1"}, Type: "String", Version: 2},
+	}
+
+	statuses.Sort(ParseStatusSort([]string{"type:asc", "version:desc", "name:asc"}))
+
+	assert.Equal(
+		t,
+		[]string{"/app/c", "/app/a", "/app/b"},
+		[]string{statuses[0].Item.Path, statuses[1].Item.Path, statuses[2].Item.Path},
+	)
+}
+
+func TestStatusSortReportsRequiredValues(t *testing.T) {
+	assert.True(t, ParseStatusSort([]string{"len:desc"}).RequiresValues())
+	assert.True(t, ParseStatusSort([]string{"sha256:asc"}).RequiresValues())
+	assert.True(t, ParseStatusSort([]string{"value:asc"}).RequiresValues())
+	assert.False(t, ParseStatusSort([]string{"name:asc", "type:desc"}).RequiresValues())
+}
+
 type fakeSSMClient struct {
 	region              string
 	regions             []string
