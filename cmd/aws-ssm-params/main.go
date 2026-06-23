@@ -76,7 +76,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					&cli.StringSliceFlag{Name: "map-field", Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
 					&cli.StringFlag{Name: "format", Value: "dotenv", Usage: "input format: dotenv, json, or yaml"},
 					&cli.StringFlag{Name: "key-field", Usage: "AWS field to use as object/map key for JSON or YAML records"},
-					&cli.StringFlag{Name: "root-path", Usage: "SSM path prefix for relative imported names"},
+					&cli.StringFlag{Name: "base-path", Usage: "base SSM path used to resolve relative imported names"},
 					&cli.StringFlag{Name: "on-create", Usage: "when an imported parameter does not exist: skip, error, or ask"},
 					&cli.StringFlag{Name: "on-update", Usage: "when an imported parameter already exists: skip, error, or ask"},
 					&cli.BoolFlag{Name: "continue-on-error", Usage: "continue importing remaining records after per-record errors"},
@@ -107,6 +107,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 					&cli.BoolFlag{Name: "with-decryption", Sources: cli.EnvVars("AWS_SSM_PARAMS_WITH_DECRYPTION"), Usage: "decrypt SecureString values"},
 					&cli.StringFlag{Name: "format", Value: "dotenv", Usage: "output format: dotenv, json, or yaml"},
 					&cli.StringFlag{Name: "key-field", Usage: "AWS field to use as object/map key for JSON or YAML records"},
+					&cli.StringFlag{Name: "base-path", Usage: "base SSM path removed from exported parameter names"},
 					&cli.BoolFlag{Name: "scalar", Usage: "write exactly one selected --output-field as scalar values instead of records"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {

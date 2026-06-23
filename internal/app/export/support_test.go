@@ -136,6 +136,58 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 	assert.Empty(t, record.Description)
 }
 
+func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
+	basePath, err := app.ParseBasePath("/app/prod")
+	require.NoError(t, err)
+	command := Command{
+		basePath:     basePath,
+		recordFields: textio.Fields{textio.FieldName, textio.FieldValue},
+	}
+	statuses := ui.Statuses{{
+		Item:   inventory.Item{Path: "/app/prod/api/token"},
+		Exists: true,
+		Value:  "secret",
+	}}
+
+	records, err := command.records(statuses)
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "api/token", records[0].Path)
+}
+
+func TestRecordsPreserveAbsoluteNamesWithoutBasePath(t *testing.T) {
+	command := Command{recordFields: textio.Fields{textio.FieldName}}
+	statuses := ui.Statuses{{
+		Item:   inventory.Item{Path: "/app/prod/api/token"},
+		Exists: true,
+	}}
+
+	records, err := command.records(statuses)
+
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "/app/prod/api/token", records[0].Path)
+}
+
+func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
+	basePath, err := app.ParseBasePath("/app/prod")
+	require.NoError(t, err)
+	command := Command{
+		basePath:     basePath,
+		recordFields: textio.Fields{textio.FieldName},
+	}
+	statuses := ui.Statuses{{
+		Item:   inventory.Item{Path: "/app/prod2/token"},
+		Exists: true,
+	}}
+
+	_, err = command.records(statuses)
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "outside --base-path")
+}
+
 func testCLIContext(t *testing.T, args []string) *app.CLIContext {
 	t.Helper()
 	cmd := &cli.Command{
@@ -152,6 +204,7 @@ func testCLIContext(t *testing.T, args []string) *app.CLIContext {
 			&cli.StringSliceFlag{Name: "map-field", Sources: cli.EnvVars("AWS_SSM_PARAMS_MAP_FIELD")},
 			&cli.StringSliceFlag{Name: "sort-by", Sources: cli.EnvVars("AWS_SSM_PARAMS_SORT_BY")},
 			&cli.BoolFlag{Name: "with-decryption", Sources: cli.EnvVars("AWS_SSM_PARAMS_WITH_DECRYPTION")},
+			&cli.StringFlag{Name: "base-path"},
 			&cli.BoolFlag{Name: "scalar"},
 		},
 		Action: func(context.Context, *cli.Command) error { return nil },

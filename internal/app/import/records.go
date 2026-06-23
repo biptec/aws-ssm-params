@@ -2,7 +2,6 @@ package importer
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -20,36 +19,17 @@ type strictMetadataDescriber interface {
 // Records is the command-specific collection of imported text records.
 type Records []textio.Record
 
-func (records Records) withRootPath(rootPath string) (Records, error) {
-	rootPath = strings.TrimSpace(rootPath)
-	if rootPath != "" {
-		if !strings.HasPrefix(rootPath, "/") {
-			return nil, errors.New("--root-path must start with /")
-		}
-		rootPath = strings.TrimRight(rootPath, "/")
-		if rootPath == "" {
-			rootPath = "/"
-		}
+func (records Records) withBasePath(value string) (Records, error) {
+	basePath, err := app.ParseBasePath(value)
+	if err != nil {
+		return nil, errors.WithStack(err)
 	}
 	resolved := make(Records, 0, len(records))
 	for idx := range records {
 		record := records[idx]
-		path := strings.TrimSpace(record.Path)
-		if path == "" {
-			return nil, errors.New("import record is missing name; use --root-path with relative names or provide absolute SSM names")
-		}
-		if strings.HasPrefix(path, "/") {
-			record.Path = path
-			resolved = append(resolved, record)
-			continue
-		}
-		if rootPath == "" {
-			return nil, fmt.Errorf("import record name %q is not an absolute SSM path; use --root-path or # ssm comments", path)
-		}
-		if rootPath == "/" {
-			record.Path = "/" + strings.TrimLeft(path, "/")
-		} else {
-			record.Path = rootPath + "/" + strings.TrimLeft(path, "/")
+		record.Path, err = basePath.Resolve(record.Path)
+		if err != nil {
+			return nil, errors.Wrap(err, "resolve import parameter name")
 		}
 		resolved = append(resolved, record)
 	}

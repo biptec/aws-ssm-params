@@ -18,11 +18,28 @@ type DotEnv struct {
 }
 
 // Export writes records as dotenv assignments with SSM metadata comments before each value.
-// The path comment preserves the exact SSM name independently of the mechanically generated dotenv key; the optional
-// type comment lets a later import recreate String/StringList/SecureString parameters without a separate flag.
+// The path comment preserves the record name independently of the mechanically generated dotenv key. The name may be
+// absolute or relative to a base path already applied by the export command. The optional type comment lets a later
+// import recreate String/StringList/SecureString parameters without a separate flag.
 func (format *DotEnv) Export(records Records, _ FieldMappings, _ string) error {
 	if format.writer == nil {
 		return errors.New("dotenv writer is not configured")
+	}
+	keys := make(map[string]string, len(records))
+	for i := range records {
+		key := format.key(records[i].Path)
+		if key == "" {
+			return fmt.Errorf("cannot create dotenv key from parameter name %q", records[i].Path)
+		}
+		if previousPath, exists := keys[key]; exists {
+			return fmt.Errorf(
+				"dotenv key %q is produced by both %q and %q",
+				key,
+				previousPath,
+				records[i].Path,
+			)
+		}
+		keys[key] = records[i].Path
 	}
 	for i := range records {
 		record := &records[i]
@@ -60,7 +77,7 @@ func (format *DotEnv) ExportScalar(records Records, field, _ string) error {
 }
 
 // Import parses dotenv input and resolves each variable back to an SSM name.
-// A preceding '# ssm: /path' comment wins; otherwise the variable name is preserved as a relative SSM name.
+// A preceding '# ssm: name' comment wins; otherwise the variable name is preserved as a relative SSM name.
 // A preceding '# type: String|StringList|SecureString' comment is preserved on the returned record.
 func (format *DotEnv) Import(_ FieldMappings, _ string) (Records, error) {
 	if format.reader == nil {

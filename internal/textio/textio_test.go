@@ -33,6 +33,30 @@ func TestExportDotenvPreservesParameterTypeMetadata(t *testing.T) {
 	assert.Contains(t, out.String(), "# ssm: /app/prod/api/log-level\n# type: String\nAPP_PROD_API_LOG_LEVEL=\"debug\"")
 }
 
+func TestExportDotenvUsesRelativeRecordPath(t *testing.T) {
+	var out bytes.Buffer
+	records := Records{{Path: "api/token", Fields: Fields{FieldName, FieldValue}, Value: "secret"}}
+
+	err := (&DotEnv{writer: &out}).Export(records, nil, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, "# ssm: api/token\nAPI_TOKEN=\"secret\"\n", out.String())
+}
+
+func TestExportDotenvRejectsKeyCollisionsBeforeWriting(t *testing.T) {
+	var out bytes.Buffer
+	records := Records{
+		{Path: "api/token", Value: "first"},
+		{Path: "api-token", Value: "second"},
+	}
+
+	err := (&DotEnv{writer: &out}).Export(records, nil, "")
+
+	require.Error(t, err)
+	assert.ErrorContains(t, err, `dotenv key "API_TOKEN"`)
+	assert.Empty(t, out.String())
+}
+
 func TestImportDotenvUsesExplicitSSMCommentBeforeKeyFallback(t *testing.T) {
 	input := strings.NewReader("# ssm: /explicit/path\nANY_ALIAS='secret value'\n")
 

@@ -11,7 +11,7 @@
 <text x="28" y="168" xml:space="preserve">   --map-field string [ --map-field string ]  field mapping as aws_field:file_field; repeat for multiple mappings</text>
 <text x="28" y="188" xml:space="preserve">   --format string                            input format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
 <text x="28" y="208" xml:space="preserve">   --key-field string                         AWS field to use as object/map key for JSON or YAML records</text>
-<text x="28" y="228" xml:space="preserve">   --root-path string                         SSM path prefix for relative imported names</text>
+<text x="28" y="228" xml:space="preserve">   --base-path string                         base SSM path used to resolve relative imported names</text>
 <text x="28" y="248" xml:space="preserve">   --on-create string                         when an imported parameter does not exist: skip, error, or ask</text>
 <text x="28" y="268" xml:space="preserve">   --on-update string                         when an imported parameter already exists: skip, error, or ask</text>
 <text x="28" y="288" xml:space="preserve">   --continue-on-error                        continue importing remaining records after per-record errors</text>

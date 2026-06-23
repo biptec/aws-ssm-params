@@ -39,10 +39,15 @@ type Command struct {
 	scalarField  string
 	recordFields textio.Fields
 	sortRules    SortRules
+	basePath     app.BasePath
 }
 
 func newCommand(ctx *app.CLIContext, output io.Writer) (*Command, error) {
 	cfg, err := app.ConfigFromCLI(ctx)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	basePath, err := app.ParseBasePath(ctx.String("base-path"))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -80,13 +85,17 @@ func newCommand(ctx *app.CLIContext, output io.Writer) (*Command, error) {
 		scalarField:  scalarField,
 		recordFields: recordFields(fields, scalarField, keyField),
 		sortRules:    parseSortRules(cfg.SortColumns),
+		basePath:     basePath,
 	}, nil
 }
 
 func (command *Command) run() error {
 	statuses := command.loadStatuses()
 	command.sortRules.sort(statuses)
-	records := command.records(statuses)
+	records, err := command.records(statuses)
+	if err != nil {
+		return errors.WithStack(err)
+	}
 	if command.scalarField != "" {
 		return errors.Wrap(
 			command.writer.ExportScalar(records, command.scalarField, command.keyField),
@@ -128,12 +137,19 @@ func (command *Command) loadStatuses() ui.Statuses {
 	return statuses
 }
 
-func (command *Command) records(statuses ui.Statuses) textio.Records {
+func (command *Command) records(statuses ui.Statuses) (textio.Records, error) {
 	records := make(textio.Records, 0, len(statuses))
 	for i := range statuses {
-		if statuses[i].Exists {
-			records = append(records, recordFromStatus(statuses[i], command.recordFields))
+		if !statuses[i].Exists {
+			continue
 		}
+		record := recordFromStatus(statuses[i], command.recordFields)
+		path, err := command.basePath.Relativize(record.Path)
+		if err != nil {
+			return nil, errors.Wrap(err, "make export parameter name relative")
+		}
+		record.Path = path
+		records = append(records, record)
 	}
-	return records
+	return records, nil
 }

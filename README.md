@@ -168,14 +168,14 @@ aws-ssm-params \
   --format json > prod-params.json
 ```
 
-Import a `.env` file under an SSM root path:
+Import a `.env` file relative to an SSM base path:
 
 ```bash
 aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --root-path /app/prod \
+  --base-path /app/prod \
   --summary < .env
 ```
 
@@ -597,6 +597,7 @@ Use `export` when you want to:
 | `--with-decryption` | `AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. | You need plaintext secret values. |
 | `--format dotenv\|json\|yaml` | - | Output format. Default is `dotenv`. | Choose the target file format. |
 | `--key-field field` | - | Write JSON/YAML as an object/map keyed by this AWS field. | You prefer object/map output instead of arrays. |
+| `--base-path path` | - | Remove an SSM base path from exported parameter names. | Producing portable relative names for later import. |
 | `--scalar` | - | Write exactly one selected output field as scalar values. | You need a list of names or one value for a script. |
 
 If no `--output-field` is provided, export includes all supported fields.
@@ -725,7 +726,7 @@ Use `import` when you want to:
 | `--map-field aws_field:file_field` | Map input file field names to AWS field names. Repeat for multiple mappings. | Your JSON/YAML uses custom keys. |
 | `--format dotenv\|json\|yaml` | Input format. Default is `dotenv`. | Choose parser for stdin. |
 | `--key-field field` | Treat JSON/YAML object keys as this AWS field. | Your input is keyed by name, region, or another field. |
-| `--root-path path` | Prefix relative imported names with an SSM root path. | Importing `.env` keys or relative names. |
+| `--base-path path` | Resolve relative imported names against an SSM base path. | Importing `.env` keys or relative names. |
 | `--on-create skip\|error\|ask` | Behavior when the parameter does not exist. | Prevent accidental new parameters or confirm them. |
 | `--on-update skip\|error\|ask` | Behavior when the parameter already exists. | Prevent accidental overwrites or confirm them. |
 | `--continue-on-error` | Continue after per-record failures. | Bulk imports where one bad record should not stop everything. |
@@ -780,7 +781,7 @@ aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --root-path /app/prod \
+  --base-path /app/prod \
   --summary < .env
 ```
 
@@ -815,7 +816,7 @@ aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --root-path /app/prod \
+  --base-path /app/prod \
   --on-create ask \
   --on-update ask \
   --summary < .env
@@ -906,15 +907,36 @@ Exported dotenv includes SSM comments when possible:
 APP_PROD_API_TOKEN="secret"
 ```
 
+Export relative names that can be imported under the same base path:
+
+```bash
+aws-ssm-params \
+  --region eu-north-1 \
+  --filter 'name:/app/prod/**' \
+  export \
+  --format dotenv \
+  --base-path /app/prod > .env
+```
+
+```dotenv
+# ssm: api/token
+# type: SecureString
+API_TOKEN="secret"
+```
+
+Importing that file with `--base-path /app/prod` restores `/app/prod/api/token`.
+
 During import:
 
-- `# ssm: /absolute/path` sets the exact SSM name for the next variable;
+- `# ssm: name` sets an absolute or relative SSM name for the next variable;
 - `# type: SecureString` can provide parameter type metadata;
 - without `# ssm:`, the dotenv key always becomes a relative name;
-- relative names require `--root-path`.
+- relative names require `--base-path`.
 
-During export, the SSM path is converted mechanically to an uppercase dotenv key: surrounding slashes are removed and
-non-alphanumeric runs become underscores. No secret-kind-specific aliases are applied.
+During export, `--base-path` removes the selected absolute prefix before writing names. Every exported parameter must
+be inside that base path. The resulting name is converted mechanically to an uppercase dotenv key:
+non-alphanumeric runs become underscores. Colliding dotenv keys cause an error before output is written. No
+secret-kind-specific aliases are applied.
 
 Use dotenv for local development files, simple secret sets, and compatibility with `.env` tooling.
 

@@ -154,6 +154,7 @@ func TestExportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 	assert.Contains(t, out.String(), "--key-field")
 	assert.Contains(t, out.String(), "--sort-by")
 	assert.Contains(t, out.String(), "--scalar")
+	assert.Contains(t, out.String(), "--base-path")
 	assert.NotContains(t, out.String(), "--include-missing")
 }
 
@@ -169,7 +170,7 @@ func TestImportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 	assert.NotContains(t, out.String(), "--names-file")
 	assert.NotContains(t, out.String(), "--json-key-field")
 	assert.Contains(t, out.String(), "--key-field")
-	assert.Contains(t, out.String(), "--root-path")
+	assert.Contains(t, out.String(), "--base-path")
 	assert.Contains(t, out.String(), "--on-create")
 	assert.Contains(t, out.String(), "--on-update")
 	assert.Contains(t, out.String(), "--continue-on-error")

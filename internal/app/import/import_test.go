@@ -38,33 +38,33 @@ func TestImportDefaultOptionsDropsDescriptionOutsideFieldsScope(t *testing.T) {
 	assert.Empty(t, opts.Description)
 }
 
-func TestApplyRootPathToRecordsPrefixesRelativeNames(t *testing.T) {
+func TestApplyBasePathToRecordsPrefixesRelativeNames(t *testing.T) {
 	records := Records{{Path: "DATABASE_URL", Value: "postgres://localhost/app"}}
 
-	resolved, err := records.withRootPath("/app/prod/api/")
+	resolved, err := records.withBasePath("/app/prod/api/")
 
 	require.NoError(t, err)
 	assert.Equal(t, "/app/prod/api/DATABASE_URL", resolved[0].Path)
 }
 
-func TestApplyRootPathToRecordsPreservesAbsoluteNames(t *testing.T) {
+func TestApplyBasePathToRecordsPreservesAbsoluteNames(t *testing.T) {
 	records := Records{{Path: "/explicit/path"}}
 
-	resolved, err := records.withRootPath("/app/prod")
+	resolved, err := records.withBasePath("/app/prod")
 
 	require.NoError(t, err)
 	assert.Equal(t, "/explicit/path", resolved[0].Path)
 }
 
-func TestApplyRootPathToRecordsRejectsRelativeNamesWithoutRoot(t *testing.T) {
-	_, err := (Records{{Path: "DATABASE_URL"}}).withRootPath("")
+func TestApplyBasePathToRecordsRejectsRelativeNamesWithoutBase(t *testing.T) {
+	_, err := (Records{{Path: "DATABASE_URL"}}).withBasePath("")
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "--root-path")
+	assert.ErrorContains(t, err, "--base-path")
 }
 
-func TestApplyRootPathToRecordsRejectsRelativeRootPath(t *testing.T) {
-	_, err := (Records{{Path: "DATABASE_URL"}}).withRootPath("app/prod")
+func TestApplyBasePathToRecordsRejectsRelativeBasePath(t *testing.T) {
+	_, err := (Records{{Path: "DATABASE_URL"}}).withBasePath("app/prod")
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "must start with /")
@@ -157,7 +157,7 @@ func testCLIContext(t *testing.T, args []string) *app.CLIContext {
 		Name: "import-test",
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{Name: "map-field"},
-			&cli.StringFlag{Name: "root-path"},
+			&cli.StringFlag{Name: "base-path"},
 			&cli.StringFlag{Name: "on-create"},
 			&cli.StringFlag{Name: "on-update"},
 			&cli.BoolFlag{Name: "continue-on-error"},

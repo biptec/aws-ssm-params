@@ -131,12 +131,12 @@ go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
         </article>
         <article class="command-card">
           <h3>Import a dotenv file</h3>
-          <p>Use <code>--root-path</code> when dotenv keys are relative names.</p>
+          <p>Use <code>--base-path</code> when dotenv keys are relative names.</p>
           <pre><code>aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --root-path /app/prod \
+  --base-path /app/prod \
   --summary &lt; .env</code></pre>
         </article>
       </div>
@@ -432,6 +432,7 @@ aws-ssm-params \
             <tr><td><code>--with-decryption</code></td><td><code>AWS_SSM_PARAMS_WITH_DECRYPTION</code></td><td>Decrypt SecureString values.</td></tr>
             <tr><td><code>--format</code></td><td>—</td><td><code>dotenv</code>, <code>json</code>, or <code>yaml</code>. Default is <code>dotenv</code>.</td></tr>
             <tr><td><code>--key-field</code></td><td>—</td><td>Write JSON/YAML as an object/map keyed by a field.</td></tr>
+            <tr><td><code>--base-path</code></td><td>—</td><td>Remove a base path from exported parameter names.</td></tr>
             <tr><td><code>--scalar</code></td><td>—</td><td>Write exactly one selected output field as scalar values.</td></tr>
           </tbody>
         </table>
@@ -495,7 +496,7 @@ aws-ssm-params \
             <tr><td><code>--format</code></td><td>Input format: <code>dotenv</code>, <code>json</code>, or <code>yaml</code>.</td><td>Choose parser for stdin.</td></tr>
             <tr><td><code>--map-field</code></td><td>Map input file keys to AWS fields.</td><td>Your JSON/YAML schema uses custom names.</td></tr>
             <tr><td><code>--key-field</code></td><td>Use JSON/YAML object keys as an AWS field.</td><td>Input is keyed by name or another field.</td></tr>
-            <tr><td><code>--root-path</code></td><td>Prefix relative names.</td><td>Importing ordinary dotenv keys.</td></tr>
+            <tr><td><code>--base-path</code></td><td>Resolve imported names or relativize exported names against a base path.</td><td>Portable dotenv, JSON, or YAML files.</td></tr>
             <tr><td><code>--on-create</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control missing parameter behavior.</td></tr>
             <tr><td><code>--on-update</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control existing parameter behavior.</td></tr>
             <tr><td><code>--continue-on-error</code></td><td>Continue after per-record failures.</td><td>Bulk imports where one bad row should not stop the run.</td></tr>
@@ -507,12 +508,12 @@ aws-ssm-params \
       </div>
       <div class="command-grid">
         <article class="command-card">
-          <h3>Dotenv under a root path</h3>
+          <h3>Dotenv relative to a base path</h3>
           <pre><code>aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --root-path /app/prod \
+  --base-path /app/prod \
   --summary &lt; .env</code></pre>
         </article>
         <article class="command-card">

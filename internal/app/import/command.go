@@ -80,7 +80,7 @@ func newCommand(ctx *app.CLIContext, input io.Reader, summaryOutput io.Writer) (
 	if err != nil {
 		return nil, errors.Wrap(err, "read import")
 	}
-	records, err := Records(parsedRecords).withRootPath(ctx.String("root-path"))
+	records, err := Records(parsedRecords).withBasePath(ctx.String("base-path"))
 	if err != nil {
 		return nil, err
 	}
