@@ -131,7 +131,20 @@ func (format *DotEnv) Import(fieldMappings FieldMappings, keyField string) (Reco
 
 		key, rawValue, ok := strings.Cut(line, "=")
 		if !ok {
-			return nil, fmt.Errorf("invalid dotenv line %d", lineNumber+1)
+			path := pendingPath
+			pendingPath = ""
+			pendingType = ""
+
+			if path == "" {
+				path = line
+			}
+
+			records = append(records, Record{
+				Path:   path,
+				Fields: Fields{FieldName},
+			})
+
+			continue
 		}
 
 		alias := strings.TrimSpace(key)

@@ -43,6 +43,7 @@ func newCLIApp(rawArgs []string) *cli.Command {
 			tuiCLICommand(),
 			importCLICommand(),
 			exportCLICommand(),
+			deleteCLICommand(),
 		},
 	}
 }

@@ -4,67 +4,20 @@ import (
 	"context"
 	"strings"
 
-	"github.com/cockroachdb/errors"
-
 	"github.com/biptec/aws-ssm-params/internal/app"
-	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
+	"github.com/cockroachdb/errors"
 )
 
 type strictMetadataDescriber interface {
 	DescribeManyStrict(context.Context, []string) (map[string]ssm.Metadata, map[string]error)
 }
 
-// Records is the command-specific collection of imported text records.
-type Records []textio.Record
-
-func (records Records) withBasePath(basePath app.BasePath) (Records, error) {
-	resolved := make(Records, 0, len(records))
-	for idx := range records {
-		record := records[idx]
-
-		path, err := basePath.Resolve(record.Path)
-		if err != nil {
-			return nil, errors.Wrap(err, "resolve import parameter name")
-		}
-
-		record.Path = path
-		resolved = append(resolved, record)
-	}
-
-	return resolved, nil
-}
-
-func (records Records) filter(groups filter.Groups) Records {
-	if len(groups) == 0 {
-		return records
-	}
-
-	out := make(Records, 0, len(records))
-	for i := range records {
-		filterRecord := filter.Record{
-			Name:        records[i].Path,
-			Region:      records[i].Region,
-			Type:        records[i].Type,
-			Tier:        records[i].Tier,
-			DataType:    records[i].DataType,
-			Description: records[i].Description,
-			Policies:    records[i].Policies,
-			Value:       records[i].Value,
-		}
-		if groups.Match(&filterRecord) {
-			out = append(out, records[i])
-		}
-	}
-
-	return out
-}
-
 // MetadataResolver loads existing SSM metadata grouped by record region.
 type MetadataResolver struct {
 	client  ssm.Client
-	records Records
+	records app.Records
 	opts    *Options
 	fields  textio.Fields
 }

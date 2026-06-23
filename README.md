@@ -25,6 +25,7 @@ Terminal UI and automation-friendly CLI for AWS Systems Manager Parameter Store.
 - [Command: `tui`](#command-tui)
 - [Command: `export`](#command-export)
 - [Command: `import`](#command-import)
+- [Command: `delete`](#command-delete)
 - [Input and output formats](#input-and-output-formats)
 - [Sorting](#sorting)
 - [Logging and diagnostics](#logging-and-diagnostics)
@@ -43,6 +44,7 @@ Terminal UI and automation-friendly CLI for AWS Systems Manager Parameter Store.
 - Use SSM-aware glob and extglob patterns such as `/prod/**` and `/prod/@(api|worker)/*`.
 - Export to dotenv, JSON, or YAML.
 - Import from dotenv, JSON, or YAML.
+- Delete parameters described by dotenv, JSON, or YAML input.
 - Rename fields during import/export with `--map-field`.
 - Export scalar values for scripts.
 - Keep stdout clean for automation; logs go to stderr.
@@ -179,6 +181,16 @@ aws-ssm-params \
   --summary < .env
 ```
 
+Preview deletion from an exported JSON file:
+
+```bash
+aws-ssm-params \
+  --region eu-north-1 \
+  delete \
+  --format json \
+  --dry-run < prod-params.json
+```
+
 Print one decrypted value for a script:
 
 ```bash
@@ -204,11 +216,13 @@ Available commands:
 | `tui` | Open the interactive terminal UI. |
 | `export` | Export parameter records or scalar values to stdout. |
 | `import` | Import parameter records from stdin. |
+| `delete` | Delete parameters described by records from stdin. |
 
 There are no separate `get` or `put` commands. Use:
 
 - `export --output-field value --scalar` to read one value;
 - `import` to create or update values;
+- `delete` to remove names supplied through stdin;
 - `tui` for manual editing.
 
 Global options can be written before or after the command name:
@@ -250,7 +264,7 @@ Global options apply to all commands.
 | `--keymap emacs\|vi` | `AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. | You prefer vi-style TUI navigation and editing. |
 | `--log-level value` | `AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. | You need diagnostics without polluting stdout. |
 | `--filters-file path` | `AWS_SSM_PARAMS_FILTER_FILE` | Load filter groups from a file. | You have many reusable filter groups. |
-| `--filter value` | `AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. | You want to limit loaded, exported, imported, or displayed parameters. |
+| `--filter value` | `AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. | You want to limit loaded, exported, imported, deleted, or displayed parameters. |
 
 ## Fields
 
@@ -727,10 +741,11 @@ Use `import` when you want to:
 | `--format dotenv\|json\|yaml` | Input format. Default is `dotenv`. | Choose parser for stdin. |
 | `--key-field field` | Treat JSON/YAML object keys as this AWS field. | Your input is keyed by name, region, or another field. |
 | `--base-path path` | Resolve relative imported names against an SSM base path. | Importing `.env` keys or relative names. |
-| `--on-create skip\|error\|ask` | Behavior when the parameter does not exist. | Prevent accidental new parameters or confirm them. |
-| `--on-update skip\|error\|ask` | Behavior when the parameter already exists. | Prevent accidental overwrites or confirm them. |
+| `--on-create none\|skip\|error\|ask` | Behavior when the parameter does not exist. Default is `none`. | Prevent accidental new parameters or confirm them. |
+| `--on-update none\|skip\|error\|ask` | Behavior when the parameter already exists. Default is `ask`. | Prevent accidental overwrites or confirm them. |
 | `--continue-on-error` | Continue after per-record failures. | Bulk imports where one bad record should not stop everything. |
 | `--summary` | Print created/updated/skipped/failed counts to stderr. | You want an import report. |
+| `--dry-run` | Validate records and show create/update operations without writing them. | Review an import before changing Parameter Store. |
 | `--default-type value` | Default type: `string`, `string-list`, `secure-string`. | Input does not include `type`. |
 | `--default-tier value` | Default tier: `standard`, `advanced`, `intelligent-tiering`. | Input does not include `tier`. |
 | `--default-data-type value` | Default data type: `text`, `aws:ec2:image`, `aws:ssm:integration`. | Input does not include `data-type`. |
@@ -741,12 +756,14 @@ Use `import` when you want to:
 
 `import` reads from stdin. It supports one target region at a time. `--all-regions` is not supported for import, and multiple `--region` values are not supported for import.
 
-The default import behavior is upsert:
+The default import behavior is:
 
 - create missing parameters;
-- update existing parameters.
+- ask before updating existing parameters.
 
 Use `--on-create` and `--on-update` to change that behavior.
+
+`none` means proceed without an additional policy decision. During `--dry-run`, `ask` is reported without opening an interactive prompt because no write occurs.
 
 ### Import metadata resolution
 
@@ -855,6 +872,17 @@ aws-ssm-params \
   --summary < params.json
 ```
 
+Preview the same import without writing:
+
+```bash
+aws-ssm-params \
+  --region eu-north-1 \
+  import \
+  --format json \
+  --dry-run \
+  --summary < params.json
+```
+
 Import records with custom JSON field names:
 
 ```bash
@@ -892,6 +920,86 @@ aws-ssm-params \
 ```
 
 For import, filters are applied after parsing the input file and before AWS writes.
+
+## Command: `delete`
+
+Delete parameters identified by stdin records.
+
+```bash
+aws-ssm-params [global options] delete [command options] < input-file
+```
+
+`delete` never discovers deletion candidates from AWS. Stdin is required. Global `--filter` and `--filters-file` options only reduce the records supplied through stdin.
+
+### Delete options
+
+| Flag | Description | Use when |
+| --- | --- | --- |
+| `--format dotenv\|json\|yaml` | Input format. Default is `dotenv`. | Choose the parser for stdin. |
+| `--key-field name\|region` | Treat JSON/YAML object keys as the parameter name or region. | The file was exported with a key field. |
+| `--map-field name:file_field` | Map a custom input field to `name`. | The file uses a custom name key. |
+| `--map-field region:file_field` | Map a custom input field to `region`. | The file uses a custom region key. |
+| `--base-path path` | Resolve relative input names against an absolute SSM path. | Deleting names exported relative to a base path. |
+| `--no-confirm` | Delete every filtered input record without prompting. | Non-interactive automation after reviewing the input. |
+| `--dry-run` | Print deletion candidates without deleting or prompting. | Review the exact regional identities first. |
+
+Only `name` and `region` may be used with `--map-field`. Other fields in full exported records are preserved for filtering and interactive details but do not determine deletion identity.
+
+An explicit record region takes priority. A record without `region` is expanded into every selected `--region`; with `--all-regions`, it is expanded into every enabled AWS region. Duplicate `region`/`name` identities are removed.
+
+Without `--no-confirm`, the command prints the total once and prompts for each parameter:
+
+```text
+Найдено 2 параметров.
+Удалить параметр /app/prod/api/token из eu-north-1? (y)es, (s)kip, (c)ancel, (d)etails:
+```
+
+`details` prints the available record metadata and hides the parameter value. `cancel`, an empty answer, or EOF stops further processing; parameters already deleted are not restored.
+
+### Name-only delete input
+
+Dotenv-style line list:
+
+```dotenv
+/app/prod/api/token
+/app/prod/api/password
+```
+
+JSON:
+
+```json
+[
+  "/app/prod/api/token",
+  "/app/prod/api/password"
+]
+```
+
+YAML:
+
+```yaml
+- /app/prod/api/token
+- /app/prod/api/password
+```
+
+Full records previously produced by `export` are also accepted:
+
+```bash
+aws-ssm-params \
+  --region eu-north-1 \
+  delete \
+  --format json \
+  --dry-run < prod-params.json
+```
+
+After review:
+
+```bash
+aws-ssm-params \
+  --region eu-north-1 \
+  delete \
+  --format json \
+  --no-confirm < prod-params.json
+```
 
 ## Input and output formats
 
@@ -933,6 +1041,8 @@ During import:
 - without `# ssm:`, the dotenv key always becomes a relative name;
 - relative names require `--base-path`.
 
+For deletion, dotenv additionally accepts one parameter name per non-comment line without an assignment.
+
 During export, `--base-path` removes the selected absolute prefix before writing names. Every exported parameter must
 be inside that base path. The resulting name is converted mechanically to an uppercase dotenv key:
 non-alphanumeric runs become underscores. Colliding dotenv keys cause an error before output is written. No
@@ -965,7 +1075,7 @@ With `--key-field name`, JSON export writes an object keyed by the selected fiel
 }
 ```
 
-JSON import accepts both arrays and keyed objects. A simple keyed object can map names directly to values:
+JSON import accepts both arrays and keyed objects. Delete input may also be an array containing only parameter-name strings. A simple keyed object can map names directly to values:
 
 ```json
 {
@@ -991,6 +1101,8 @@ Use JSON for scripts, migrations, reviewable diffs, and structured backups.
 ### YAML records
 
 YAML supports the same record model as JSON.
+
+Delete input may also be a sequence containing only parameter-name strings.
 
 Array style:
 
@@ -1221,6 +1333,7 @@ aws-ssm-params --help
 aws-ssm-params tui --help
 aws-ssm-params export --help
 aws-ssm-params import --help
+aws-ssm-params delete --help
 ```
 
 ## Development

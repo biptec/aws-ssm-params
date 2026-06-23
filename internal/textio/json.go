@@ -65,12 +65,31 @@ func (format *JSON) Import(mappings FieldMappings, keyField string) (Records, er
 
 	trimmed := strings.TrimSpace(string(raw))
 	if strings.HasPrefix(trimmed, "[") {
-		var objects []map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &objects); err != nil {
+		var items []json.RawMessage
+		if err := json.Unmarshal(raw, &items); err != nil {
 			return nil, errors.Wrap(err, "decode JSON array import")
 		}
 
-		return format.recordsFromObjects(objects, mappings, ""), nil
+		records := make(Records, 0, len(items))
+		for idx := range items {
+			var name string
+			if err := json.Unmarshal(items[idx], &name); err == nil {
+				records = append(records, Record{Path: name, Fields: Fields{FieldName}})
+				continue
+			}
+
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(items[idx], &object); err != nil {
+				return nil, errors.Wrapf(err, "decode JSON array item %d", idx+1)
+			}
+
+			record := format.recordFromObject(object, mappings)
+			if keyField == "" || record.fieldValue(keyField) != "" {
+				records = append(records, record)
+			}
+		}
+
+		return records, nil
 	}
 
 	var keyed map[string]map[string]json.RawMessage
@@ -98,21 +117,6 @@ func (format *JSON) Import(mappings FieldMappings, keyField string) (Records, er
 	}
 
 	return records, nil
-}
-
-// recordsFromObjects converts decoded JSON objects while preserving only fields present in each object.
-func (format *JSON) recordsFromObjects(objects []map[string]json.RawMessage, mappings FieldMappings, keyField string) Records {
-	records := make(Records, 0, len(objects))
-	for _, object := range objects {
-		record := format.recordFromObject(object, mappings)
-		if keyField != "" && record.fieldValue(keyField) == "" {
-			continue
-		}
-
-		records = append(records, record)
-	}
-
-	return records
 }
 
 // recordFromObject applies file-to-AWS field mappings to one JSON object.

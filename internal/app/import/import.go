@@ -29,11 +29,20 @@ type Options struct {
 	Policy          Policy
 	ContinueOnError bool
 	Summary         bool
+	DryRun          bool
+}
+
+type dependencies struct {
+	newClient func(ssm.ClientConfig) ssm.Client
 }
 
 // Run reads records, resolves their SSM names, and writes values to Parameter Store.
 func Run(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer) error {
-	r, err := newRunner(ctx, opts, input, summaryOutput)
+	return runWithDependencies(ctx, opts, input, summaryOutput, dependencies{newClient: ssm.NewClient})
+}
+
+func runWithDependencies(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer, deps dependencies) error {
+	r, err := newRunner(ctx, opts, input, summaryOutput, deps)
 	if err != nil {
 		return err
 	}
@@ -45,7 +54,7 @@ func Run(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.W
 type runner struct {
 	opts            *Options
 	client          ssm.Client
-	records         Records
+	records         app.Records
 	metadata        map[string]ssm.Metadata
 	metadataErrors  map[string]error
 	optionsResolver OptionsResolver
@@ -53,6 +62,7 @@ type runner struct {
 	continueOnError bool
 	summaryEnabled  bool
 	summaryOutput   io.Writer
+	dryRun          bool
 	summary         Summary
 	recordErrors    []string
 	defaultType     ssm.ParameterType
@@ -66,7 +76,11 @@ type Summary struct {
 	Failed  int
 }
 
-func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer) (*runner, error) {
+func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer, deps dependencies) (*runner, error) {
+	if summaryOutput == nil {
+		summaryOutput = io.Discard
+	}
+
 	if defaultRegion := strings.TrimSpace(opts.DefaultRegion); defaultRegion != "" && opts.Region == "" {
 		opts.Region = defaultRegion
 		opts.Regions = []string{defaultRegion}
@@ -98,17 +112,17 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		return nil, errors.Wrap(err, "read import")
 	}
 
-	records, err := Records(parsedRecords).withBasePath(opts.BasePath)
+	records, err := app.Records(parsedRecords).ResolveNames(opts.BasePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "resolve import parameter names")
 	}
 
-	records = records.filter(opts.FilterGroups)
+	records = records.Filter(opts.FilterGroups)
 	if !opts.Fields.Allows(textio.FieldValue) {
 		return nil, errors.New("import requires the value field")
 	}
 
-	client := ssm.NewClient(ssm.ClientConfig{
+	client := deps.newClient(ssm.ClientConfig{
 		Profile:        opts.Profile,
 		Region:         opts.Region,
 		WithDecryption: opts.WithDecryption,
@@ -132,6 +146,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		continueOnError: opts.ContinueOnError,
 		summaryEnabled:  opts.Summary,
 		summaryOutput:   summaryOutput,
+		dryRun:          opts.DryRun,
 		defaultType:     opts.DefaultType,
 	}, nil
 }
@@ -176,7 +191,7 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 		return r.handleRecordError(operation, region, record.Path, errors.New("import record value is required"))
 	}
 
-	shouldWrite, err := policyAction.resolve(operation, region, record.Path)
+	shouldWrite, err := r.resolvePolicy(policyAction, operation, region, record.Path)
 	if err != nil {
 		return r.handleRecordError(operation, region, record.Path, err)
 	}
@@ -200,6 +215,20 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 
 	opts.Overwrite = exists
 
+	if r.dryRun {
+		if err := r.writeDryRun(operation, region, record.Path); err != nil {
+			return r.handleRecordError(operation, region, record.Path, err)
+		}
+
+		if exists {
+			r.summary.Updated++
+		} else {
+			r.summary.Created++
+		}
+
+		return nil
+	}
+
 	err = r.client.ForRegion(region).PutParameterWithOptions(
 		ctx,
 		record.Path,
@@ -220,6 +249,25 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 	return nil
 }
 
+func (r *runner) resolvePolicy(action PolicyAction, operation writeOperation, region, name string) (bool, error) {
+	if r.dryRun {
+		return action.resolveDryRun(operation, name)
+	}
+
+	return action.resolve(operation, region, name)
+}
+
+func (r *runner) writeDryRun(operation writeOperation, region, name string) error {
+	if region != "" {
+		_, err := fmt.Fprintf(r.summaryOutput, "DRY-RUN: would %s parameter %s in %s\n", operation, name, region)
+		return errors.Wrap(err, "write import dry-run output")
+	}
+
+	_, err := fmt.Fprintf(r.summaryOutput, "DRY-RUN: would %s parameter %s\n", operation, name)
+
+	return errors.Wrap(err, "write import dry-run output")
+}
+
 func (r *runner) handleRecordError(operation writeOperation, region, name string, err error) error {
 	wrapped := errors.Wrap(err, name)
 	logRecordError(r.opts.Logger, operation, region, name, wrapped)
@@ -235,9 +283,15 @@ func (r *runner) handleRecordError(operation writeOperation, region, name string
 }
 
 func (r *runner) writeSummary() {
+	title := "Import summary"
+	if r.dryRun {
+		title = "Import dry-run summary"
+	}
+
 	_, _ = fmt.Fprintf(
 		r.summaryOutput,
-		"Import summary:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n",
+		"%s:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n",
+		title,
 		r.summary.Created,
 		r.summary.Updated,
 		r.summary.Skipped,

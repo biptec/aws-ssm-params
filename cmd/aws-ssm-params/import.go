@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -28,6 +27,7 @@ const (
 	importFlagOnUpdate            = "on-update"
 	importFlagContinueOnError     = "continue-on-error"
 	importFlagSummary             = "summary"
+	importFlagDryRun              = "dry-run"
 	importFlagDefaultType         = "default-type"
 	importFlagDefaultTier         = "default-tier"
 	importFlagDefaultDataType     = "default-data-type"
@@ -35,6 +35,11 @@ const (
 	importFlagDefaultDescription  = "default-description"
 	importFlagDefaultPolicies     = "default-policies"
 	importFlagDefaultPoliciesFile = "default-policies-file"
+
+	importPolicyNoneValue  = "none"
+	importPolicySkipValue  = "skip"
+	importPolicyErrorValue = "error"
+	importPolicyAskValue   = "ask"
 )
 
 func importCLICommand() *cli.Command {
@@ -50,10 +55,11 @@ func importCLICommand() *cli.Command {
 			&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Usage: "input format: dotenv, json, or yaml"},
 			&cli.StringFlag{Name: importFlagKeyField, Usage: "AWS field to use as object/map key for JSON or YAML records"},
 			&cli.StringFlag{Name: importFlagBasePath, Usage: "base SSM path used to resolve relative imported names"},
-			&cli.StringFlag{Name: importFlagOnCreate, Usage: "when an imported parameter does not exist: skip, error, or ask"},
-			&cli.StringFlag{Name: importFlagOnUpdate, Usage: "when an imported parameter already exists: skip, error, or ask"},
+			&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
+			&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Usage: "when an imported parameter already exists: none, skip, error, or ask"},
 			&cli.BoolFlag{Name: importFlagContinueOnError, Usage: "continue importing remaining records after per-record errors"},
 			&cli.BoolFlag{Name: importFlagSummary, Usage: "print an import summary after processing records"},
+			&cli.BoolFlag{Name: importFlagDryRun, Usage: "validate and show writes without changing Parameter Store"},
 			&cli.StringFlag{Name: importFlagDefaultType, Usage: "default parameter type: string, string-list, or secure-string"},
 			&cli.StringFlag{Name: importFlagDefaultTier, Usage: "default parameter tier: standard, advanced, or intelligent-tiering"},
 			&cli.StringFlag{Name: importFlagDefaultDataType, Usage: "default parameter data type: text, aws:ec2:image, or aws:ssm:integration"},
@@ -69,7 +75,7 @@ func importCLICommand() *cli.Command {
 					return err
 				}
 
-				input, err := importInput()
+				input, err := requiredStdin(importCommandName)
 				if err != nil {
 					return err
 				}
@@ -141,6 +147,7 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		Policy:          policy,
 		ContinueOnError: cmd.Bool(importFlagContinueOnError),
 		Summary:         cmd.Bool(importFlagSummary),
+		DryRun:          cmd.Bool(importFlagDryRun),
 	}, nil
 }
 
@@ -189,24 +196,19 @@ func importPolicyFromCLI(cmd *cli.Command) (importcmd.Policy, error) {
 
 func parseImportPolicyAction(value, flagName string) (importcmd.PolicyAction, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "":
-		return importcmd.PolicyDefault, nil
-	case "skip":
+	case "", importPolicyNoneValue:
+		return importcmd.PolicyNone, nil
+	case importPolicySkipValue:
 		return importcmd.PolicySkip, nil
-	case "error":
+	case importPolicyErrorValue:
 		return importcmd.PolicyError, nil
-	case "ask":
+	case importPolicyAskValue:
 		return importcmd.PolicyAsk, nil
 	default:
-		return "", fmt.Errorf("unsupported --%s value %q; use skip, error, or ask", flagName, value)
+		return "", fmt.Errorf(
+			"unsupported --%s value %q; use none, skip, error, or ask",
+			flagName,
+			value,
+		)
 	}
-}
-
-func importInput() (io.Reader, error) {
-	info, err := os.Stdin.Stat()
-	if err == nil && info.Mode()&os.ModeCharDevice != 0 {
-		return nil, errors.New("import requires data from stdin")
-	}
-
-	return os.Stdin, nil
 }

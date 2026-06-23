@@ -81,12 +81,7 @@ func (format *YAML) Import(mappings FieldMappings, keyField string) (Records, er
 	case yaml.DocumentNode, yaml.ScalarNode, yaml.AliasNode:
 		return nil, errors.New("YAML import must be an array or object")
 	case yaml.SequenceNode:
-		var objects []map[string]any
-		if err := yaml.Unmarshal(data, &objects); err != nil {
-			return nil, errors.Wrap(err, "decode YAML array import")
-		}
-
-		return format.recordsFromObjects(objects, mappings, keyField), nil
+		return format.recordsFromSequence(root.Content[0], mappings, keyField)
 	case yaml.MappingNode:
 		var keyed map[string]map[string]any
 		if err := yaml.Unmarshal(data, &keyed); err != nil {
@@ -118,17 +113,34 @@ func (format *YAML) Import(mappings FieldMappings, keyField string) (Records, er
 	}
 }
 
-// recordsFromObjects converts sequence elements while enforcing key-field presence when requested.
-func (format *YAML) recordsFromObjects(objects []map[string]any, mappings FieldMappings, keyField string) Records {
-	records := make(Records, 0, len(objects))
-	for _, object := range objects {
-		record := format.recordFromObject(object, mappings)
-		if keyField == "" || record.fieldValue(keyField) != "" {
-			records = append(records, record)
+func (format *YAML) recordsFromSequence(sequence *yaml.Node, mappings FieldMappings, keyField string) (Records, error) {
+	records := make(Records, 0, len(sequence.Content))
+
+	for idx, item := range sequence.Content {
+		switch item.Kind {
+		case yaml.ScalarNode:
+			var name string
+			if err := item.Decode(&name); err != nil {
+				return nil, errors.Wrapf(err, "decode YAML sequence item %d", idx+1)
+			}
+
+			records = append(records, Record{Path: name, Fields: Fields{FieldName}})
+		case yaml.MappingNode:
+			var object map[string]any
+			if err := item.Decode(&object); err != nil {
+				return nil, errors.Wrapf(err, "decode YAML sequence item %d", idx+1)
+			}
+
+			record := format.recordFromObject(object, mappings)
+			if keyField == "" || record.fieldValue(keyField) != "" {
+				records = append(records, record)
+			}
+		case yaml.DocumentNode, yaml.SequenceNode, yaml.AliasNode:
+			return nil, errors.Errorf("YAML sequence item %d must be a parameter name or object", idx+1)
 		}
 	}
 
-	return records
+	return records, nil
 }
 
 // recordFromObject applies file-to-AWS field mappings to one YAML object.

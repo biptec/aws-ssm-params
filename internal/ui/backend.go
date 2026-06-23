@@ -173,20 +173,18 @@ func (backend defaultBackend) saveParameter(ctx context.Context, item *inventory
 }
 
 func (backend defaultBackend) deleteParameters(ctx context.Context, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) deleteDoneMsg {
-	byRegion := map[string][]string{}
+	targets := make([]ssm.DeleteTarget, 0, len(items))
 
 	for _, item := range items {
 		if item.Region == "*" {
 			continue
 		}
 
-		byRegion[item.Region] = append(byRegion[item.Region], item.Path)
+		targets = append(targets, ssm.DeleteTarget{Name: item.Path, Region: item.Region})
 	}
 
-	for region, paths := range byRegion {
-		if err := backend.client.ForRegion(region).DeleteMany(ctx, paths); err != nil {
-			return deleteDoneMsg{items: items, err: err}
-		}
+	if err := ssm.NewDeleter(backend.client).Delete(ctx, targets); err != nil {
+		return deleteDoneMsg{items: items, err: err}
 	}
 
 	removeRows := pathsFile == ""

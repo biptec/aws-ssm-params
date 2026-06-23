@@ -29,13 +29,12 @@ type Options struct {
 // PrepareItems resolves regions and explicit names for commands that load SSM parameters.
 func (cfg *Options) PrepareItems(ctx context.Context) (inventory.Items, error) {
 	items := cfg.InventoryItems.UniqueByPath()
-	if cfg.AllRegions {
-		cfg.ensureAllRegionsSeedRegion()
-		return items.WithDefaultRegion("*"), nil
+	if err := cfg.PrepareRegions(ctx); err != nil {
+		return nil, err
 	}
 
-	if err := cfg.EnsureRegions(ctx); err != nil {
-		return nil, err
+	if cfg.AllRegions {
+		return items.WithDefaultRegion("*"), nil
 	}
 
 	if len(items) == 0 {
@@ -47,6 +46,18 @@ func (cfg *Options) PrepareItems(ctx context.Context) (inventory.Items, error) {
 	}
 
 	return items.WithDefaultRegion(cfg.Region), nil
+}
+
+// PrepareRegions makes the runtime configuration usable for AWS calls. In
+// all-regions mode it supplies the seed region needed to discover enabled
+// regions; otherwise it resolves the configured default region.
+func (cfg *Options) PrepareRegions(ctx context.Context) error {
+	if cfg.AllRegions {
+		cfg.ensureAllRegionsSeedRegion()
+		return nil
+	}
+
+	return cfg.EnsureRegions(ctx)
 }
 
 // EnsureRegions guarantees that non-all-regions operations have one usable AWS region.

@@ -38,6 +38,7 @@ func TestCLIHelpShowsTUICommand(t *testing.T) {
 	assert.Contains(t, out.String(), tuiCommandName)
 	assert.Contains(t, out.String(), importCommandName)
 	assert.Contains(t, out.String(), exportCommandName)
+	assert.Contains(t, out.String(), deleteCommandName)
 	assert.NotContains(t, out.String(), removedCommandInteractive)
 	assert.NotContains(t, out.String(), "\n   get ")
 	assert.NotContains(t, out.String(), "\n   put ")
@@ -68,6 +69,7 @@ func TestCLIHelpUsesSingleToolEnvironmentVariablePerFlag(t *testing.T) {
 		{appName, tuiCommandName, "--help"},
 		{appName, exportCommandName, "--help"},
 		{appName, importCommandName, "--help"},
+		{appName, deleteCommandName, "--help"},
 	}
 	legacyEnvNames := []string{
 		legacyEnvRegions,
@@ -207,8 +209,28 @@ func TestImportHelpDoesNotExposeInteractiveInventoryFlags(t *testing.T) {
 	assert.Contains(t, out.String(), "--"+importFlagOnUpdate)
 	assert.Contains(t, out.String(), "--"+importFlagContinueOnError)
 	assert.Contains(t, out.String(), "--"+importFlagSummary)
+	assert.Contains(t, out.String(), "--"+importFlagDryRun)
 	assert.NotContains(t, out.String(), "--no-create")
 	assert.NotContains(t, out.String(), "--no-update")
 	assert.NotContains(t, out.String(), "--default-value")
 	assert.NotContains(t, out.String(), "--default-value-file")
+}
+
+func TestDeleteHelpShowsInputAndSafetyFlags(t *testing.T) {
+	cliApp := newCLIApp([]string{deleteCommandName, "--help"})
+
+	var out bytes.Buffer
+
+	cliApp.Writer = &out
+
+	err := cliApp.Run(context.Background(), []string{appName, deleteCommandName, "--help"})
+
+	require.NoError(t, err)
+	assert.Contains(t, out.String(), "--"+deleteFlagFormat)
+	assert.Contains(t, out.String(), "--"+deleteFlagKeyField)
+	assert.Contains(t, out.String(), "--"+deleteFlagMapField)
+	assert.Contains(t, out.String(), "--"+deleteFlagBasePath)
+	assert.Contains(t, out.String(), "--"+deleteFlagNoConfirm)
+	assert.Contains(t, out.String(), "--"+deleteFlagDryRun)
+	assert.NotContains(t, out.String(), "--ask-confirm")
 }

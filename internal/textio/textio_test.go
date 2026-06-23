@@ -93,6 +93,18 @@ func TestImportDotenvUsesKeysAsRelativeNames(t *testing.T) {
 	assert.Equal(t, "postgres://localhost/app", records[0].Value)
 }
 
+func TestImportDotenvReadsNameOnlyLines(t *testing.T) {
+	input := strings.NewReader("/app/one\n/app/two\n")
+
+	records, err := (&DotEnv{reader: input}).Import(nil, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, Records{
+		{Path: "/app/one", Fields: Fields{FieldName}},
+		{Path: "/app/two", Fields: Fields{FieldName}},
+	}, records)
+}
+
 func TestDotenvKeyUsesOnlyGenericPathNormalization(t *testing.T) {
 	assert.Equal(t, "APP_PROD_API_PASSWORD", (&DotEnv{}).key("/app/prod/api/password"))
 	assert.Equal(t, "APP_INFRA_PROD_GHCR_TOKEN", (&DotEnv{}).key("/app-infra/prod/ghcr/token"))
@@ -271,6 +283,26 @@ func TestImportYAMLReadsArrayRecords(t *testing.T) {
 	assert.Equal(t, "SecureString", records[0].Type)
 	assert.Equal(t, "secret", records[0].Value)
 	assert.Equal(t, int64(7), records[0].Version)
+}
+
+func TestImportJSONReadsNameOnlyArray(t *testing.T) {
+	records, err := (&JSON{reader: strings.NewReader(`["/app/one","/app/two"]`)}).Import(nil, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, Records{
+		{Path: "/app/one", Fields: Fields{FieldName}},
+		{Path: "/app/two", Fields: Fields{FieldName}},
+	}, records)
+}
+
+func TestImportYAMLReadsNameOnlySequence(t *testing.T) {
+	records, err := (&YAML{reader: strings.NewReader("- /app/one\n- /app/two\n")}).Import(nil, "")
+
+	require.NoError(t, err)
+	assert.Equal(t, Records{
+		{Path: "/app/one", Fields: Fields{FieldName}},
+		{Path: "/app/two", Fields: Fields{FieldName}},
+	}, records)
 }
 
 func TestImportYAMLReadsKeyedRecords(t *testing.T) {

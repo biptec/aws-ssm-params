@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -111,4 +112,13 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 		NoColor: boolFlagValueAny(cmd, flagNoColor, envNoColor),
 		Keymap:  keymap,
 	}, nil
+}
+
+func requiredStdin(commandName string) (io.Reader, error) {
+	info, err := os.Stdin.Stat()
+	if err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		return nil, fmt.Errorf("%s requires data from stdin", commandName)
+	}
+
+	return os.Stdin, nil
 }

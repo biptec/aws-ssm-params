@@ -19,6 +19,7 @@ func TestImportOptionsParseDefaultsAndPolicies(t *testing.T) {
 		"--" + importFlagDefaultDescription, "description",
 		"--" + importFlagOnCreate, "skip",
 		"--" + importFlagOnUpdate, "ask",
+		"--" + importFlagDryRun,
 	})
 
 	options, err := importOptionsFromCLI(context.Background(), cmd)
@@ -29,6 +30,7 @@ func TestImportOptionsParseDefaultsAndPolicies(t *testing.T) {
 	assert.Equal(t, "description", options.DefaultOptions.Description)
 	assert.Equal(t, importcmd.PolicySkip, options.Policy.OnCreate)
 	assert.Equal(t, importcmd.PolicyAsk, options.Policy.OnUpdate)
+	assert.True(t, options.DryRun)
 }
 
 func TestImportRejectsUnsupportedPolicy(t *testing.T) {
@@ -42,4 +44,32 @@ func TestImportRejectsUnsupportedPolicy(t *testing.T) {
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "unsupported --"+importFlagOnCreate)
+}
+
+func TestImportPolicyDefaultsCreateWithoutPromptAndAsksOnUpdate(t *testing.T) {
+	flags := append(globalFlags(), importCLICommand().Flags...)
+	cmd := testParsedCommand(t, flags, []string{
+		"--" + flagRegion, "eu-north-1",
+	})
+
+	options, err := importOptionsFromCLI(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.Equal(t, importcmd.PolicyNone, options.Policy.OnCreate)
+	assert.Equal(t, importcmd.PolicyAsk, options.Policy.OnUpdate)
+}
+
+func TestImportPolicyAcceptsExplicitNone(t *testing.T) {
+	flags := append(globalFlags(), importCLICommand().Flags...)
+	cmd := testParsedCommand(t, flags, []string{
+		"--" + flagRegion, "eu-north-1",
+		"--" + importFlagOnCreate, importPolicyNoneValue,
+		"--" + importFlagOnUpdate, importPolicyNoneValue,
+	})
+
+	options, err := importOptionsFromCLI(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.Equal(t, importcmd.PolicyNone, options.Policy.OnCreate)
+	assert.Equal(t, importcmd.PolicyNone, options.Policy.OnUpdate)
 }

@@ -1,22 +1,21 @@
 package importer
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/biptec/aws-ssm-params/internal/prompt"
 )
 
 // PolicyAction controls whether a create or update operation proceeds.
 type PolicyAction string
 
 const (
-	// PolicyDefault writes without an additional policy decision.
-	PolicyDefault PolicyAction = ""
+	// PolicyNone writes without an additional policy decision.
+	PolicyNone PolicyAction = ""
 	// PolicySkip skips the operation.
 	PolicySkip PolicyAction = "skip"
 	// PolicyError rejects the operation.
@@ -47,26 +46,28 @@ const (
 )
 
 func askWriteConfirmation(action writeOperation, region, name string) (bool, error) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	terminal, err := prompt.Open()
 	if err != nil {
-		return false, errors.New("ask requires an interactive terminal")
+		return false, errors.Wrap(err, "open write confirmation terminal")
 	}
-	defer func() { _ = tty.Close() }()
+	defer func() { _ = terminal.Close() }()
 
 	questionAction := "Create"
 	if action == writeOperationUpdate {
 		questionAction = "Update"
 	}
 
+	var question string
+
 	if region != "" {
-		_, _ = fmt.Fprintf(tty, "%s parameter %s in %s? [y/N] ", questionAction, name, region)
+		question = fmt.Sprintf("%s parameter %s in %s? [y/N] ", questionAction, name, region)
 	} else {
-		_, _ = fmt.Fprintf(tty, "%s parameter %s? [y/N] ", questionAction, name)
+		question = fmt.Sprintf("%s parameter %s? [y/N] ", questionAction, name)
 	}
 
-	answer, err := bufio.NewReader(tty).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return false, errors.Wrap(err, "read write confirmation")
+	answer, err := terminal.ReadLine(question)
+	if err != nil {
+		return false, errors.Wrap(err, "confirm parameter write")
 	}
 
 	answer = strings.ToLower(strings.TrimSpace(answer))
@@ -76,7 +77,7 @@ func askWriteConfirmation(action writeOperation, region, name string) (bool, err
 
 func (action PolicyAction) resolve(operation writeOperation, region, name string) (bool, error) {
 	switch action {
-	case PolicyDefault:
+	case PolicyNone:
 		return true, nil
 	case PolicySkip:
 		return false, nil
@@ -84,6 +85,19 @@ func (action PolicyAction) resolve(operation writeOperation, region, name string
 		return false, fmt.Errorf("parameter %s would %s; write policy stops the operation", name, operation)
 	case PolicyAsk:
 		return askWriteConfirmation(operation, region, name)
+	default:
+		return false, fmt.Errorf("unsupported write policy action %q", action)
+	}
+}
+
+func (action PolicyAction) resolveDryRun(operation writeOperation, name string) (bool, error) {
+	switch action {
+	case PolicyNone, PolicyAsk:
+		return true, nil
+	case PolicySkip:
+		return false, nil
+	case PolicyError:
+		return false, fmt.Errorf("parameter %s would %s; write policy stops the operation", name, operation)
 	default:
 		return false, fmt.Errorf("unsupported write policy action %q", action)
 	}
