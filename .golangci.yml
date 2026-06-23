@@ -31,6 +31,7 @@ linters:
     - staticcheck
     - unconvert
     - unused
+    - unparam
     - wastedassign
     - whitespace
     - wrapcheck
@@ -41,6 +42,18 @@ linters:
     - nlreturn
     - whitespace
   settings:
+    unused:
+      exported-fields-are-used: false
+      parameters-are-used: false
+      local-variables-are-used: false
+      field-writes-are-uses: false
+
+    unparam:
+      check-exported: true
+
+    ineffassign:
+      check-escaping-errors: true
+
     wsl_v5:
       default: default
       branch-max-lines: 2
@@ -98,6 +111,10 @@ linters:
         - all
 
     gocritic:
+      settings:
+        commentedOutCode:
+          minLength: 15
+
       enabled-tags:
         - diagnostic
         - performance
