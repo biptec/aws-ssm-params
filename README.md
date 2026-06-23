@@ -170,14 +170,14 @@ aws-ssm-params \
   --format json > prod-params.json
 ```
 
-Import a `.env` file relative to an SSM base path:
+Import a `.env` file with file names mapped into an SSM path:
 
 ```bash
 aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --base-path /app/prod \
+  --map-path /app/prod/: \
   --summary < .env
 ```
 
@@ -263,7 +263,6 @@ Global options apply to all commands.
 | `--no-color` | `AWS_SSM_PARAMS_NO_COLOR` | Disable color output. | You are running in CI, logs, or a terminal with poor color support. |
 | `--keymap emacs\|vi` | `AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. | You prefer vi-style TUI navigation and editing. |
 | `--log-level value` | `AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. | You need diagnostics without polluting stdout. |
-| `--filters-file path` | `AWS_SSM_PARAMS_FILTER_FILE` | Load filter groups from a file. | You have many reusable filter groups. |
 | `--filter value` | `AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. | You want to limit loaded, exported, imported, deleted, or displayed parameters. |
 
 ## Fields
@@ -289,6 +288,17 @@ Common fields:
 | `user` | Last modified user/ARN when available. |
 
 Use these names consistently in `--filter`, `--output-field`, `--map-field`, and `--sort-by`.
+
+## Path mapping
+
+`--map-path aws_path:file_path` maps parameter name prefixes between AWS and files. The AWS prefix is always on the
+left, the file prefix is always on the right.
+
+- `export` applies AWS → file mapping.
+- `import` and `delete` apply file → AWS mapping.
+- Repeat the flag for multiple mappings; the longest matching prefix wins.
+- Matching is plain string prefix matching, not path-boundary matching.
+- Unmatched names stay unchanged.
 
 ## Filtering
 
@@ -339,25 +349,6 @@ This means:
 (name matches /app/prod/** AND type is SecureString)
 OR
 (name matches /shared/prod/** AND type is SecureString)
-```
-
-### Filter files
-
-Use `--filters-file` for reusable filter groups. Each non-empty, non-comment line is one OR group.
-
-```text
-# production secrets
-name:/app/prod/**;type:SecureString
-name:/shared/prod/**;type:SecureString
-
-# selected public config
-name:/app/prod/public/**;type:String
-```
-
-Run with:
-
-```bash
-aws-ssm-params --region eu-north-1 --filters-file filters.txt export
 ```
 
 ### Supported filter fields
@@ -607,11 +598,11 @@ Use `export` when you want to:
 | --- | --- | --- | --- |
 | `--output-field field` | `AWS_SSM_PARAMS_OUTPUT_FIELD` | Include one AWS field in output. Repeat for multiple fields. | You want only selected fields. |
 | `--map-field aws_field:file_field` | `AWS_SSM_PARAMS_MAP_FIELD` | Rename a field in JSON/YAML/dotenv output. Repeat for multiple mappings. | You need compatibility with another file schema. |
+| `--map-path aws_path:file_path` | `AWS_SSM_PARAMS_MAP_PATH` | Map exported AWS path prefixes to file path prefixes. Repeat for multiple mappings. | You need different names in files than in SSM. |
 | `--sort-by field:asc\|desc` | `AWS_SSM_PARAMS_SORT_BY` | Sort exported records. Repeat for multi-field sort. | You want stable diffs or predictable output. |
 | `--with-decryption` | `AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. | You need plaintext secret values. |
 | `--format dotenv\|json\|yaml` | - | Output format. Default is `dotenv`. | Choose the target file format. |
 | `--key-field field` | - | Write JSON/YAML as an object/map keyed by this AWS field. | You prefer object/map output instead of arrays. |
-| `--base-path path` | - | Remove an SSM base path from exported parameter names. | Producing portable relative names for later import. |
 | `--scalar` | - | Write exactly one selected output field as scalar values. | You need a list of names or one value for a script. |
 
 If no `--output-field` is provided, export includes all supported fields.
@@ -738,9 +729,9 @@ Use `import` when you want to:
 | Flag | Description | Use when |
 | --- | --- | --- |
 | `--map-field aws_field:file_field` | Map input file field names to AWS field names. Repeat for multiple mappings. | Your JSON/YAML uses custom keys. |
+| `--map-path aws_path:file_path` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. | The file names differ from SSM names. |
 | `--format dotenv\|json\|yaml` | Input format. Default is `dotenv`. | Choose parser for stdin. |
 | `--key-field field` | Treat JSON/YAML object keys as this AWS field. | Your input is keyed by name, region, or another field. |
-| `--base-path path` | Resolve relative imported names against an SSM base path. | Importing `.env` keys or relative names. |
 | `--on-create none\|skip\|error\|ask` | Behavior when the parameter does not exist. Default is `none`. | Prevent accidental new parameters or confirm them. |
 | `--on-update none\|skip\|error\|ask` | Behavior when the parameter already exists. Default is `ask`. | Prevent accidental overwrites or confirm them. |
 | `--continue-on-error` | Continue after per-record failures. | Bulk imports where one bad record should not stop everything. |
@@ -798,7 +789,7 @@ aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --base-path /app/prod \
+  --map-path /app/prod/: \
   --summary < .env
 ```
 
@@ -833,7 +824,7 @@ aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --base-path /app/prod \
+  --map-path /app/prod/: \
   --on-create ask \
   --on-update ask \
   --summary < .env
@@ -929,7 +920,7 @@ Delete parameters identified by stdin records.
 aws-ssm-params [global options] delete [command options] < input-file
 ```
 
-`delete` never discovers deletion candidates from AWS. Stdin is required. Global `--filter` and `--filters-file` options only reduce the records supplied through stdin.
+`delete` never discovers deletion candidates from AWS. Stdin is required. Global `--filter` options only reduce the records supplied through stdin.
 
 ### Delete options
 
@@ -939,7 +930,7 @@ aws-ssm-params [global options] delete [command options] < input-file
 | `--key-field name\|region` | Treat JSON/YAML object keys as the parameter name or region. | The file was exported with a key field. |
 | `--map-field name:file_field` | Map a custom input field to `name`. | The file uses a custom name key. |
 | `--map-field region:file_field` | Map a custom input field to `region`. | The file uses a custom region key. |
-| `--base-path path` | Resolve relative input names against an absolute SSM path. | Deleting names exported relative to a base path. |
+| `--map-path aws_path:file_path` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. | The file names differ from SSM names. |
 | `--no-confirm` | Delete every filtered input record without prompting. | Non-interactive automation after reviewing the input. |
 | `--dry-run` | Print deletion candidates without deleting or prompting. | Review the exact regional identities first. |
 
@@ -1015,7 +1006,7 @@ Exported dotenv includes SSM comments when possible:
 APP_PROD_API_TOKEN="secret"
 ```
 
-Export relative names that can be imported under the same base path:
+Export names mapped into a file namespace:
 
 ```bash
 aws-ssm-params \
@@ -1023,7 +1014,7 @@ aws-ssm-params \
   --filter 'name:/app/prod/**' \
   export \
   --format dotenv \
-  --base-path /app/prod > .env
+  --map-path /app/prod/: > .env
 ```
 
 ```dotenv
@@ -1032,21 +1023,20 @@ aws-ssm-params \
 API_TOKEN="secret"
 ```
 
-Importing that file with `--base-path /app/prod` restores `/app/prod/api/token`.
+Importing that file with `--map-path /app/prod/:` restores `/app/prod/api/token`.
 
 During import:
 
-- `# ssm: name` sets an absolute or relative SSM name for the next variable;
+- `# ssm: name` sets the file-side name for the next variable;
 - `# type: SecureString` can provide parameter type metadata;
-- without `# ssm:`, the dotenv key always becomes a relative name;
-- relative names require `--base-path`.
+- without `# ssm:`, the dotenv key becomes the file-side name;
+- `--map-path aws_path:file_path` maps file-side names back into AWS names.
 
 For deletion, dotenv additionally accepts one parameter name per non-comment line without an assignment.
 
-During export, `--base-path` removes the selected absolute prefix before writing names. Every exported parameter must
-be inside that base path. The resulting name is converted mechanically to an uppercase dotenv key:
-non-alphanumeric runs become underscores. Colliding dotenv keys cause an error before output is written. No
-secret-kind-specific aliases are applied.
+During export, `--map-path` applies AWS-to-file prefix replacement before writing names. The resulting name is converted
+mechanically to an uppercase dotenv key: non-alphanumeric runs become underscores. Colliding dotenv keys cause an error
+before output is written. No secret-kind-specific aliases are applied.
 
 Use dotenv for local development files, simple secret sets, and compatibility with `.env` tooling.
 

@@ -9,7 +9,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/urfave/cli/v3"
 
-	"github.com/biptec/aws-ssm-params/internal/app"
 	importcmd "github.com/biptec/aws-ssm-params/internal/app/import"
 	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
@@ -20,9 +19,9 @@ const (
 	importCommandName = "import"
 
 	importFlagMapField            = "map-field"
+	importFlagMapPath             = "map-path"
 	importFlagFormat              = "format"
 	importFlagKeyField            = "key-field"
-	importFlagBasePath            = "base-path"
 	importFlagOnCreate            = "on-create"
 	importFlagOnUpdate            = "on-update"
 	importFlagContinueOnError     = "continue-on-error"
@@ -40,6 +39,8 @@ const (
 	importPolicySkipValue  = "skip"
 	importPolicyErrorValue = "error"
 	importPolicyAskValue   = "ask"
+
+	importEnvMapPath = envVarPrefix + "MAP_PATH"
 )
 
 func importCLICommand() *cli.Command {
@@ -48,13 +49,13 @@ func importCLICommand() *cli.Command {
 		Usage:     "Import parameter values from stdin",
 		UsageText: appName + " [global options] " + importCommandName + " [command options]",
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), importFlagMapField)
+			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), importFlagMapField, importFlagMapPath)
 		},
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{Name: importFlagMapField, Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+			&cli.StringSliceFlag{Name: importFlagMapPath, Sources: cli.EnvVars(importEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
 			&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Usage: "input format: dotenv, json, or yaml"},
 			&cli.StringFlag{Name: importFlagKeyField, Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.StringFlag{Name: importFlagBasePath, Usage: "base SSM path used to resolve relative imported names"},
 			&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
 			&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Usage: "when an imported parameter already exists: none, skip, error, or ask"},
 			&cli.BoolFlag{Name: importFlagContinueOnError, Usage: "continue importing remaining records after per-record errors"},
@@ -115,9 +116,12 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		return &importcmd.Options{}, err
 	}
 
-	basePath, err := app.ParseBasePath(cmd.String(importFlagBasePath))
+	pathMappings, err := parsePathMappings(
+		stringSliceFlagValue(cmd, importFlagMapPath, importEnvMapPath),
+		importFlagMapPath,
+	)
 	if err != nil {
-		return &importcmd.Options{}, fmt.Errorf("--%s: %w", importFlagBasePath, err)
+		return &importcmd.Options{}, err
 	}
 
 	defaultType, err := ssm.ParseParameterType(cmd.String(importFlagDefaultType))
@@ -140,7 +144,7 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		Format:          textio.FormatType(cmd.String(importFlagFormat)),
 		FieldMappings:   fieldMappings,
 		KeyField:        strings.TrimSpace(cmd.String(importFlagKeyField)),
-		BasePath:        basePath,
+		PathMappings:    pathMappings,
 		DefaultRegion:   strings.TrimSpace(cmd.String(importFlagDefaultRegion)),
 		DefaultType:     defaultType,
 		DefaultOptions:  defaultOptions,

@@ -166,9 +166,11 @@ func TestDeleteFiltersOnlyInputRecords(t *testing.T) {
 			Regions:      []string{"eu-north-1", "eu-central-1"},
 			FilterGroups: groups,
 		},
-		Format:   textio.FormatYAML,
-		BasePath: "/base",
-		DryRun:   true,
+		Format: textio.FormatYAML,
+		PathMappings: app.PathMappings{
+			{AWSPath: "/base/", FilePath: ""},
+		},
+		DryRun: true,
 	}
 
 	var output bytes.Buffer

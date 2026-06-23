@@ -8,7 +8,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/urfave/cli/v3"
 
-	"github.com/biptec/aws-ssm-params/internal/fileio"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 )
 
@@ -93,29 +92,13 @@ func boolFlagValueAny(cmd *cli.Command, name string, envNames ...string) bool {
 	return false
 }
 
-func parseFilterGroups(values []string, filtersFile string) (filter.Groups, error) {
+func parseFilterGroups(values []string) (filter.Groups, error) {
 	groups, err := filter.ParseGroups(compactStrings(values))
 	if err != nil {
 		return nil, errors.Wrap(err, "parse filters")
 	}
 
-	if filtersFile == "" {
-		return groups, nil
-	}
-
-	file, err := fileio.Open(filtersFile)
-	if err != nil {
-		return nil, errors.Wrapf(err, "open filters file %s", filtersFile)
-	}
-
-	defer func() { _ = file.Close() }()
-
-	fileGroups, err := filter.ParseFile(file)
-	if err != nil {
-		return nil, errors.Wrapf(err, "parse filters file %s", filtersFile)
-	}
-
-	return append(groups, fileGroups...), nil
+	return groups, nil
 }
 
 func rejectCommaSeparatedFlagArgs(args []string, flagNames ...string) error {

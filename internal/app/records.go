@@ -15,23 +15,23 @@ import (
 // normalization shared by commands that consume exported parameter data.
 type Records []textio.Record
 
-// ResolveNames returns a copy whose relative parameter names are resolved
-// against basePath. Absolute names are preserved.
-func (records Records) ResolveNames(basePath BasePath) (Records, error) {
-	resolved := make(Records, 0, len(records))
+// MapNamesToAWS returns a copy whose names are mapped from file paths to AWS
+// paths. Records that do not match any mapping are preserved as-is.
+func (records Records) MapNamesToAWS(mappings PathMappings) (Records, error) {
+	mapped := make(Records, 0, len(records))
 	for idx := range records {
 		record := records[idx]
 
-		path, err := basePath.Resolve(record.Path)
-		if err != nil {
-			return nil, errors.Wrap(err, "resolve parameter name")
+		record.Path = strings.TrimSpace(record.Path)
+		if record.Path == "" {
+			return nil, errors.New("parameter name is required")
 		}
 
-		record.Path = path
-		resolved = append(resolved, record)
+		record.Path = mappings.ToAWS(record.Path)
+		mapped = append(mapped, record)
 	}
 
-	return resolved, nil
+	return mapped, nil
 }
 
 // ExpandRegions returns one record per concrete region. A region explicitly

@@ -8,7 +8,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/biptec/aws-ssm-params/internal/app"
 	exportcmd "github.com/biptec/aws-ssm-params/internal/app/export"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
@@ -18,15 +17,16 @@ const (
 
 	exportFlagOutputField    = "output-field"
 	exportFlagMapField       = "map-field"
+	exportFlagMapPath        = "map-path"
 	exportFlagSortBy         = "sort-by"
 	exportFlagWithDecryption = "with-decryption"
 	exportFlagFormat         = "format"
 	exportFlagKeyField       = "key-field"
-	exportFlagBasePath       = "base-path"
 	exportFlagScalar         = "scalar"
 
 	exportEnvOutputField    = envVarPrefix + "OUTPUT_FIELD"
 	exportEnvMapField       = envVarPrefix + "MAP_FIELD"
+	exportEnvMapPath        = envVarPrefix + "MAP_PATH"
 	exportEnvSortBy         = envVarPrefix + "SORT_BY"
 	exportEnvWithDecryption = envVarPrefix + "WITH_DECRYPTION"
 )
@@ -41,17 +41,18 @@ func exportCLICommand() *cli.Command {
 				cmd.Args().Slice(),
 				exportFlagOutputField,
 				exportFlagMapField,
+				exportFlagMapPath,
 				exportFlagSortBy,
 			)
 		},
 		Flags: []cli.Flag{
 			&cli.StringSliceFlag{Name: exportFlagOutputField, Sources: cli.EnvVars(exportEnvOutputField), Usage: "AWS field to include in export output; repeat for multiple fields"},
 			&cli.StringSliceFlag{Name: exportFlagMapField, Sources: cli.EnvVars(exportEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+			&cli.StringSliceFlag{Name: exportFlagMapPath, Sources: cli.EnvVars(exportEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
 			&cli.StringSliceFlag{Name: exportFlagSortBy, Sources: cli.EnvVars(exportEnvSortBy), Usage: "export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
 			&cli.BoolFlag{Name: exportFlagWithDecryption, Sources: cli.EnvVars(exportEnvWithDecryption), Usage: "decrypt SecureString values"},
 			&cli.StringFlag{Name: exportFlagFormat, Value: string(textio.FormatDotenv), Usage: "output format: dotenv, json, or yaml"},
 			&cli.StringFlag{Name: exportFlagKeyField, Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.StringFlag{Name: exportFlagBasePath, Usage: "base SSM path removed from exported parameter names"},
 			&cli.BoolFlag{Name: exportFlagScalar, Usage: "write exactly one selected --output-field as scalar values instead of records"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -89,14 +90,17 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 		return &exportcmd.Options{}, err
 	}
 
-	keyField := strings.TrimSpace(cmd.String(exportFlagKeyField))
-	if err := validateKeyFieldOutputFields(keyField, fields); err != nil {
+	pathMappings, err := parsePathMappings(
+		stringSliceFlagValue(cmd, exportFlagMapPath, exportEnvMapPath),
+		exportFlagMapPath,
+	)
+	if err != nil {
 		return &exportcmd.Options{}, err
 	}
 
-	basePath, err := app.ParseBasePath(cmd.String(exportFlagBasePath))
-	if err != nil {
-		return &exportcmd.Options{}, fmt.Errorf("--%s: %w", exportFlagBasePath, err)
+	keyField := strings.TrimSpace(cmd.String(exportFlagKeyField))
+	if err := validateKeyFieldOutputFields(keyField, fields); err != nil {
+		return &exportcmd.Options{}, err
 	}
 
 	scalarField, err := exportScalarField(cmd, fields)
@@ -117,7 +121,7 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 		Fields:        fields,
 		SortColumns:   compactStrings(stringSliceFlagValue(cmd, exportFlagSortBy, exportEnvSortBy)),
 		KeyField:      keyField,
-		BasePath:      basePath,
+		PathMappings:  pathMappings,
 		ScalarField:   scalarField,
 	}, nil
 }

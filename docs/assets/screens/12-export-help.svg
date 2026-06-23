@@ -10,11 +10,11 @@
 <text x="28" y="148" xml:space="preserve">OPTIONS:</text>
 <text x="28" y="168" xml:space="preserve">   --output-field string [ --output-field string ]  AWS field to include in export output; repeat for multiple fields [$AWS_SSM_PARAMS_OUTPUT_FIELD]</text>
 <text x="28" y="188" xml:space="preserve">   --map-field string [ --map-field string ]        field mapping as aws_field:file_field; repeat for multiple mappings [$AWS_SSM_PARAMS_MAP_FIELD]</text>
-<text x="28" y="208" xml:space="preserve">   --sort-by string [ --sort-by string ]            export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values [$AWS_SSM_PARAMS_SORT_BY]</text>
-<text x="28" y="228" xml:space="preserve">   --with-decryption                                decrypt SecureString values [$AWS_SSM_PARAMS_WITH_DECRYPTION]</text>
-<text x="28" y="248" xml:space="preserve">   --format string                                  output format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
-<text x="28" y="268" xml:space="preserve">   --key-field string                               AWS field to use as object/map key for JSON or YAML records</text>
-<text x="28" y="288" xml:space="preserve">   --base-path string                               base SSM path removed from exported parameter names</text>
+<text x="28" y="208" xml:space="preserve">   --map-path string [ --map-path string ]          path mapping as aws_path:file_path; repeat for multiple mappings [$AWS_SSM_PARAMS_MAP_PATH]</text>
+<text x="28" y="228" xml:space="preserve">   --sort-by string [ --sort-by string ]            export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values [$AWS_SSM_PARAMS_SORT_BY]</text>
+<text x="28" y="248" xml:space="preserve">   --with-decryption                                decrypt SecureString values [$AWS_SSM_PARAMS_WITH_DECRYPTION]</text>
+<text x="28" y="268" xml:space="preserve">   --format string                                  output format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
+<text x="28" y="288" xml:space="preserve">   --key-field string                               AWS field to use as object/map key for JSON or YAML records</text>
 <text x="28" y="308" xml:space="preserve">   --scalar                                         write exactly one selected --output-field as scalar values instead of records</text>
 <text x="28" y="328" xml:space="preserve">   --help, -h                                       show help</text>
 <text x="28" y="348" xml:space="preserve"></text>
@@ -25,6 +25,5 @@
 <text x="28" y="448" xml:space="preserve">   --no-color                           disable colored output [$AWS_SSM_PARAMS_NO_COLOR]</text>
 <text x="28" y="468" xml:space="preserve">   --keymap string                      keyboard navigation style: emacs or vi (default: &quot;emacs&quot;) [$AWS_SSM_PARAMS_KEYMAP]</text>
 <text x="28" y="488" xml:space="preserve">   --log-level string                   log level: trace, debug, info, warn, error, or off (default: &quot;off&quot;) [$AWS_SSM_PARAMS_LOG_LEVEL]</text>
-<text x="28" y="508" xml:space="preserve">   --filters-file string                file with filter groups; one OR group per line [$AWS_SSM_PARAMS_FILTER_FILE]</text>
-<text x="28" y="528" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTER]</text>
+<text x="28" y="508" xml:space="preserve">   --filter string [ --filter string ]  filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values [$AWS_SSM_PARAMS_FILTER]</text>
 </svg>

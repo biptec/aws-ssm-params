@@ -8,7 +8,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/biptec/aws-ssm-params/internal/app"
 	deletecmd "github.com/biptec/aws-ssm-params/internal/app/delete"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
@@ -19,9 +18,11 @@ const (
 	deleteFlagFormat    = "format"
 	deleteFlagKeyField  = "key-field"
 	deleteFlagMapField  = "map-field"
-	deleteFlagBasePath  = "base-path"
+	deleteFlagMapPath   = "map-path"
 	deleteFlagNoConfirm = "no-confirm"
 	deleteFlagDryRun    = "dry-run"
+
+	deleteEnvMapPath = envVarPrefix + "MAP_PATH"
 )
 
 func deleteCLICommand() *cli.Command {
@@ -30,13 +31,13 @@ func deleteCLICommand() *cli.Command {
 		Usage:     "Delete parameters described by records from stdin",
 		UsageText: appName + " [global options] " + deleteCommandName + " [command options]",
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), deleteFlagMapField)
+			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), deleteFlagMapField, deleteFlagMapPath)
 		},
 		Flags: []cli.Flag{
 			&cli.StringFlag{Name: deleteFlagFormat, Value: string(textio.FormatDotenv), Usage: "input format: dotenv, json, or yaml"},
 			&cli.StringFlag{Name: deleteFlagKeyField, Usage: "field represented by JSON or YAML object keys: name or region"},
 			&cli.StringSliceFlag{Name: deleteFlagMapField, Usage: "input field mapping as name:file_field or region:file_field; repeat for both mappings"},
-			&cli.StringFlag{Name: deleteFlagBasePath, Usage: "base SSM path used to resolve relative input names"},
+			&cli.StringSliceFlag{Name: deleteFlagMapPath, Sources: cli.EnvVars(deleteEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
 			&cli.BoolFlag{Name: deleteFlagNoConfirm, Usage: "delete every filtered input record without interactive confirmation"},
 			&cli.BoolFlag{Name: deleteFlagDryRun, Usage: "show parameters that would be deleted without deleting them"},
 		},
@@ -78,9 +79,12 @@ func deleteOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*deletecmd.Opt
 		return &deletecmd.Options{}, err
 	}
 
-	basePath, err := app.ParseBasePath(cmd.String(deleteFlagBasePath))
+	pathMappings, err := parsePathMappings(
+		stringSliceFlagValue(cmd, deleteFlagMapPath, deleteEnvMapPath),
+		deleteFlagMapPath,
+	)
 	if err != nil {
-		return &deletecmd.Options{}, fmt.Errorf("--%s: %w", deleteFlagBasePath, err)
+		return &deletecmd.Options{}, err
 	}
 
 	return &deletecmd.Options{
@@ -88,7 +92,7 @@ func deleteOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*deletecmd.Opt
 		Format:        textio.FormatType(strings.ToLower(strings.TrimSpace(cmd.String(deleteFlagFormat)))),
 		FieldMappings: fieldMappings,
 		KeyField:      keyField,
-		BasePath:      basePath,
+		PathMappings:  pathMappings,
 		NoConfirm:     cmd.Bool(deleteFlagNoConfirm),
 		DryRun:        cmd.Bool(deleteFlagDryRun),
 	}, nil

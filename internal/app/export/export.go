@@ -25,7 +25,7 @@ type Options struct {
 	Fields        textio.Fields
 	SortColumns   []string
 	KeyField      string
-	BasePath      app.BasePath
+	PathMappings  app.PathMappings
 	ScalarField   string
 }
 
@@ -50,7 +50,7 @@ type runner struct {
 	scalarField  string
 	recordFields textio.Fields
 	statusSort   ui.StatusSort
-	basePath     app.BasePath
+	pathMappings app.PathMappings
 	fieldMaps    textio.FieldMappings
 }
 
@@ -85,7 +85,7 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 		scalarField:  opts.ScalarField,
 		recordFields: opts.recordFields(),
 		statusSort:   ui.ParseStatusSort(opts.SortColumns),
-		basePath:     opts.BasePath,
+		pathMappings: opts.PathMappings,
 		fieldMaps:    opts.FieldMappings,
 	}, nil
 }
@@ -94,10 +94,7 @@ func (r *runner) run(ctx context.Context) error {
 	statuses := r.loadStatuses(ctx)
 	statuses.Sort(r.statusSort)
 
-	records, err := r.records(statuses)
-	if err != nil {
-		return errors.WithStack(err)
-	}
+	records := r.records(statuses)
 
 	if r.scalarField != "" {
 		return errors.Wrap(
@@ -144,7 +141,7 @@ func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {
 	return statuses
 }
 
-func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
+func (r *runner) records(statuses ui.Statuses) textio.Records {
 	records := make(textio.Records, 0, len(statuses))
 	for i := range statuses {
 		if !statuses[i].Exists {
@@ -152,17 +149,11 @@ func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
 		}
 
 		record := r.record(&statuses[i])
-
-		path, err := r.basePath.Relativize(record.Path)
-		if err != nil {
-			return nil, errors.Wrap(err, "make export parameter name relative")
-		}
-
-		record.Path = path
+		record.Path = r.pathMappings.ToFile(record.Path)
 		records = append(records, record)
 	}
 
-	return records, nil
+	return records
 }
 
 func (r *runner) record(status *ui.Status) textio.Record {

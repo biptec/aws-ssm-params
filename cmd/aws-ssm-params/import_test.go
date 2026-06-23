@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	importcmd "github.com/biptec/aws-ssm-params/internal/app/import"
 )
 
@@ -19,6 +20,7 @@ func TestImportOptionsParseDefaultsAndPolicies(t *testing.T) {
 		"--" + importFlagDefaultDescription, "description",
 		"--" + importFlagOnCreate, "skip",
 		"--" + importFlagOnUpdate, "ask",
+		"--" + importFlagMapPath, "/app/dev:/dev",
 		"--" + importFlagDryRun,
 	})
 
@@ -30,6 +32,7 @@ func TestImportOptionsParseDefaultsAndPolicies(t *testing.T) {
 	assert.Equal(t, "description", options.DefaultOptions.Description)
 	assert.Equal(t, importcmd.PolicySkip, options.Policy.OnCreate)
 	assert.Equal(t, importcmd.PolicyAsk, options.Policy.OnUpdate)
+	assert.Equal(t, app.PathMappings{{AWSPath: "/app/dev", FilePath: "/dev"}}, options.PathMappings)
 	assert.True(t, options.DryRun)
 }
 

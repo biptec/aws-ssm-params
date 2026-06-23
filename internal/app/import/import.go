@@ -23,7 +23,7 @@ type Options struct {
 	FieldMappings   textio.FieldMappings
 	Fields          textio.Fields
 	KeyField        string
-	BasePath        app.BasePath
+	PathMappings    app.PathMappings
 	DefaultRegion   string
 	DefaultType     ssm.ParameterType
 	DefaultOptions  ssm.PutParameterOptions
@@ -110,7 +110,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		return nil, errors.Wrap(err, "read import")
 	}
 
-	records, err := app.Records(parsedRecords).ResolveNames(opts.BasePath)
+	records, err := app.Records(parsedRecords).MapNamesToAWS(opts.PathMappings)
 	if err != nil {
 		return nil, errors.Wrap(err, "resolve import parameter names")
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -90,6 +91,19 @@ func parseFieldMappings(values []string, flagName string) (textio.FieldMappings,
 			seen[canonical] = true
 			mappings = append(mappings, textio.FieldMapping{AWSName: canonical, FileName: fileField})
 		}
+	}
+
+	return mappings, nil
+}
+
+func parsePathMappings(values []string, flagName string) (app.PathMappings, error) {
+	if len(compactStrings(values)) == 0 {
+		return nil, nil
+	}
+
+	mappings, err := app.ParsePathMappings(values)
+	if err != nil {
+		return nil, fmt.Errorf("--%s: %w", flagName, err)
 	}
 
 	return mappings, nil

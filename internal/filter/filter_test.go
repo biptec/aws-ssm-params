@@ -99,32 +99,6 @@ func TestParseGroupsUsesOrOfAndGroups(t *testing.T) {
 	}
 }
 
-func TestParseFileSupportsCommentsAndORLines(t *testing.T) {
-	t.Parallel()
-
-	groups, err := ParseFile(strings.NewReader(`
-# production parameters
-name:/prod/*;region:eu*;tier:advanced
-
-/app-infra/production/himins/sparkyfitness # bare name shortcut
-`))
-	if err != nil {
-		t.Fatalf("parse file: %v", err)
-	}
-
-	if len(groups) != 2 {
-		t.Fatalf("expected 2 groups, got %d", len(groups))
-	}
-
-	if !groups.Match(&Record{Name: "/prod/db", Region: "eu-north-1", Tier: "Advanced"}) {
-		t.Fatal("expected first filters-file line to match")
-	}
-
-	if !groups.Match(&Record{Name: "/app-infra/production/himins/sparkyfitness"}) {
-		t.Fatal("expected bare name filters-file line to match")
-	}
-}
-
 func TestAWSFiltersAreSafePrefilters(t *testing.T) {
 	t.Parallel()
 

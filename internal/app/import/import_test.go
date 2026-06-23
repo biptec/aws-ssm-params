@@ -139,33 +139,31 @@ func TestRecordResolverParameterTypeUsesRecordCloudAndDefaultPriority(t *testing
 	assert.Equal(t, ssm.ParameterTypeSecureString, parameterType)
 }
 
-func TestApplyBasePathToRecordsPrefixesRelativeNames(t *testing.T) {
+func TestMapPathToImportRecordsMapsFileNamesToAWS(t *testing.T) {
 	records := app.Records{{Path: "DATABASE_URL", Value: "postgres://localhost/app"}}
-	basePath, err := app.ParseBasePath("/app/prod/api/")
-	require.NoError(t, err)
+	mappings := app.PathMappings{{AWSPath: "/app/prod/api/", FilePath: ""}}
 
-	resolved, err := records.ResolveNames(basePath)
+	resolved, err := records.MapNamesToAWS(mappings)
 
 	require.NoError(t, err)
 	assert.Equal(t, "/app/prod/api/DATABASE_URL", resolved[0].Path)
 }
 
-func TestApplyBasePathToRecordsPreservesAbsoluteNames(t *testing.T) {
+func TestMapPathToImportRecordsPreservesUnmatchedNames(t *testing.T) {
 	records := app.Records{{Path: "/explicit/path"}}
-	basePath, err := app.ParseBasePath("/app/prod")
-	require.NoError(t, err)
+	mappings := app.PathMappings{{AWSPath: "/app/prod", FilePath: "local"}}
 
-	resolved, err := records.ResolveNames(basePath)
+	resolved, err := records.MapNamesToAWS(mappings)
 
 	require.NoError(t, err)
 	assert.Equal(t, "/explicit/path", resolved[0].Path)
 }
 
-func TestApplyBasePathToRecordsRejectsRelativeNamesWithoutBase(t *testing.T) {
-	_, err := (app.Records{{Path: "DATABASE_URL"}}).ResolveNames("")
+func TestMapPathToImportRecordsRejectsEmptyNames(t *testing.T) {
+	_, err := (app.Records{{Path: ""}}).MapNamesToAWS(nil)
 
 	require.Error(t, err)
-	assert.ErrorContains(t, err, "requires a base path")
+	assert.ErrorContains(t, err, "parameter name is required")
 }
 
 func TestImportDryRunDoesNotWriteParametersOrPrompt(t *testing.T) {

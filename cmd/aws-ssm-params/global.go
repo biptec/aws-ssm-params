@@ -14,14 +14,13 @@ import (
 )
 
 const (
-	flagRegion      = "region"
-	flagAllRegions  = "all-regions"
-	flagProfile     = "profile"
-	flagNoColor     = "no-color"
-	flagKeymap      = "keymap"
-	flagLogLevel    = "log-level"
-	flagFiltersFile = "filters-file"
-	flagFilter      = "filter"
+	flagRegion     = "region"
+	flagAllRegions = "all-regions"
+	flagProfile    = "profile"
+	flagNoColor    = "no-color"
+	flagKeymap     = "keymap"
+	flagLogLevel   = "log-level"
+	flagFilter     = "filter"
 
 	envRegion           = envVarPrefix + "REGION"
 	envAllRegions       = envVarPrefix + "ALL_REGIONS"
@@ -29,7 +28,6 @@ const (
 	envNoColor          = envVarPrefix + "NO_COLOR"
 	envKeymap           = envVarPrefix + "KEYMAP"
 	envLogLevel         = envVarPrefix + "LOG_LEVEL"
-	envFiltersFile      = envVarPrefix + "FILTER_FILE"
 	envFilter           = envVarPrefix + "FILTER"
 	envAWSRegion        = "AWS_REGION"
 	envAWSDefaultRegion = "AWS_DEFAULT_REGION"
@@ -51,7 +49,6 @@ func globalFlags() []cli.Flag {
 		&cli.BoolFlag{Name: flagNoColor, Sources: cli.EnvVars(envNoColor), Usage: "disable colored output"},
 		&cli.StringFlag{Name: flagKeymap, Value: "emacs", Sources: cli.EnvVars(envKeymap), Usage: "keyboard navigation style: emacs or vi"},
 		&cli.StringFlag{Name: flagLogLevel, Value: "off", Sources: cli.EnvVars(envLogLevel), Usage: "log level: trace, debug, info, warn, error, or off"},
-		&cli.StringFlag{Name: flagFiltersFile, Sources: cli.EnvVars(envFiltersFile), Usage: "file with filter groups; one OR group per line"},
 		&cli.StringSliceFlag{Name: flagFilter, Sources: cli.EnvVars(envFilter), Usage: "filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values"},
 	}
 }
@@ -93,9 +90,7 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 		return globalOptions{}, fmt.Errorf("unsupported --%s %q; expected emacs or vi", flagKeymap, keymap)
 	}
 
-	filtersFile := strings.TrimSpace(stringFlagValueAny(cmd, flagFiltersFile, "", envFiltersFile))
-
-	filterGroups, err := parseFilterGroups(stringSliceFlagValue(cmd, flagFilter, envFilter), filtersFile)
+	filterGroups, err := parseFilterGroups(stringSliceFlagValue(cmd, flagFilter, envFilter))
 	if err != nil {
 		return globalOptions{}, err
 	}

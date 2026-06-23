@@ -1,9 +1,7 @@
 package filter
 
 import (
-	"bufio"
 	"fmt"
-	"io"
 	"strings"
 )
 
@@ -22,39 +20,6 @@ func ParseGroups(values []string) (Groups, error) {
 		}
 
 		groups = append(groups, group)
-	}
-
-	return groups, nil
-}
-
-// ParseFile parses a filters file. Blank lines and # comments are ignored.
-func ParseFile(r io.Reader) (Groups, error) {
-	scanner := bufio.NewScanner(r)
-	groups := Groups{}
-
-	lineNumber := 0
-	for scanner.Scan() {
-		lineNumber++
-
-		line := strings.TrimSpace(scanner.Text())
-		if idx := strings.Index(line, "#"); idx >= 0 {
-			line = strings.TrimSpace(line[:idx])
-		}
-
-		if line == "" {
-			continue
-		}
-
-		group, err := ParseGroup(line)
-		if err != nil {
-			return nil, fmt.Errorf("invalid filter line %d: %w", lineNumber, err)
-		}
-
-		groups = append(groups, group)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan filters file: %w", err)
 	}
 
 	return groups, nil

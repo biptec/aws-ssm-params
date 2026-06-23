@@ -85,12 +85,9 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 	assert.Empty(t, record.Description)
 }
 
-func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
-	basePath, err := app.ParseBasePath("/app/prod")
-	require.NoError(t, err)
-
+func TestRecordsMapAWSNamesToFilePaths(t *testing.T) {
 	r := runner{
-		basePath:     basePath,
+		pathMappings: app.PathMappings{{AWSPath: "/app/prod/", FilePath: ""}},
 		recordFields: textio.Fields{textio.FieldName, textio.FieldValue},
 	}
 	statuses := ui.Statuses{{
@@ -99,33 +96,31 @@ func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
 		Value:  "secret",
 	}}
 
-	records, err := r.records(statuses)
+	records := r.records(statuses)
 
-	require.NoError(t, err)
 	require.Len(t, records, 1)
 	assert.Equal(t, "api/token", records[0].Path)
 }
 
-func TestRecordsPreserveAbsoluteNamesWithoutBasePath(t *testing.T) {
-	r := runner{recordFields: textio.Fields{textio.FieldName}}
+func TestRecordsPreserveUnmatchedNamesWithoutPathMappings(t *testing.T) {
+	r := runner{
+		pathMappings: app.PathMappings{{AWSPath: "/shared", FilePath: "shared"}},
+		recordFields: textio.Fields{textio.FieldName},
+	}
 	statuses := ui.Statuses{{
 		Item:   inventory.Item{Path: "/app/prod/api/token"},
 		Exists: true,
 	}}
 
-	records, err := r.records(statuses)
+	records := r.records(statuses)
 
-	require.NoError(t, err)
 	require.Len(t, records, 1)
 	assert.Equal(t, "/app/prod/api/token", records[0].Path)
 }
 
-func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
-	basePath, err := app.ParseBasePath("/app/prod")
-	require.NoError(t, err)
-
+func TestRecordsMapNamesWithoutPathBoundaryChecks(t *testing.T) {
 	r := runner{
-		basePath:     basePath,
+		pathMappings: app.PathMappings{{AWSPath: "/app/prod", FilePath: ""}},
 		recordFields: textio.Fields{textio.FieldName},
 	}
 	statuses := ui.Statuses{{
@@ -133,8 +128,8 @@ func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
 		Exists: true,
 	}}
 
-	_, err = r.records(statuses)
+	records := r.records(statuses)
 
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "outside base path")
+	require.Len(t, records, 1)
+	assert.Equal(t, "2/token", records[0].Path)
 }

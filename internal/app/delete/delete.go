@@ -23,7 +23,7 @@ type Options struct {
 	Format        textio.FormatType
 	FieldMappings textio.FieldMappings
 	KeyField      string
-	BasePath      app.BasePath
+	PathMappings  app.PathMappings
 	NoConfirm     bool
 	DryRun        bool
 }
@@ -98,7 +98,7 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, output io.Wr
 		return nil, errors.New("delete input contains no parameters")
 	}
 
-	records, err := app.Records(parsed).ResolveNames(opts.BasePath)
+	records, err := app.Records(parsed).MapNamesToAWS(opts.PathMappings)
 	if err != nil {
 		return nil, errors.Wrap(err, "resolve delete parameter names")
 	}

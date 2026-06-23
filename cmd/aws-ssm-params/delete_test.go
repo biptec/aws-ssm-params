@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 )
 
@@ -18,7 +19,7 @@ func TestDeleteOptionsParseMappingsAndSafetyFlags(t *testing.T) {
 		"--" + deleteFlagKeyField, textio.FieldName,
 		"--" + deleteFlagMapField, textio.FieldName + ":title",
 		"--" + deleteFlagMapField, textio.FieldRegion + ":area",
-		"--" + deleteFlagBasePath, "/base",
+		"--" + deleteFlagMapPath, "/base/:",
 		"--" + deleteFlagNoConfirm,
 		"--" + deleteFlagDryRun,
 	})
@@ -32,7 +33,7 @@ func TestDeleteOptionsParseMappingsAndSafetyFlags(t *testing.T) {
 		{AWSName: textio.FieldName, FileName: "title"},
 		{AWSName: textio.FieldRegion, FileName: "area"},
 	}, options.FieldMappings)
-	assert.Equal(t, "/base", string(options.BasePath))
+	assert.Equal(t, app.PathMappings{{AWSPath: "/base/", FilePath: ""}}, options.PathMappings)
 	assert.True(t, options.NoConfirm)
 	assert.True(t, options.DryRun)
 }
