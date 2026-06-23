@@ -32,18 +32,17 @@ type Options struct {
 
 // runner owns the configuration and input mode of one TUI invocation.
 type runner struct {
-	ctx  context.Context
 	opts *Options
 }
 
 // Run opens the terminal UI.
 func Run(ctx context.Context, opts *Options) error {
-	r := runner{ctx: ctx, opts: opts}
-	return r.run()
+	r := runner{opts: opts}
+	return r.run(ctx)
 }
 
-func (r *runner) run() error {
-	if err := r.prepare(); err != nil {
+func (r *runner) run(ctx context.Context) error {
+	if err := r.prepare(ctx); err != nil {
 		return err
 	}
 	opts := r.opts.Options
@@ -53,22 +52,22 @@ func (r *runner) run() error {
 		WithDecryption: opts.WithDecryption,
 		Logger:         opts.Logger,
 	})
-	if err := client.CheckAccess(r.ctx); err != nil {
+	if err := client.CheckAccess(ctx); err != nil {
 		return errors.Wrap(err, "check AWS access")
 	}
-	regionLabel, regions, err := r.regionSelection(client)
+	regionLabel, regions, err := r.regionSelection(ctx, client)
 	if err != nil {
 		return err
 	}
 	return errors.Wrap(
-		ui.RunInteractive(r.ctx, client, r.opts.InventoryItems, r.uiOptions(regionLabel, regions)),
+		ui.RunInteractive(ctx, client, r.opts.InventoryItems, r.uiOptions(regionLabel, regions)),
 		"run interactive",
 	)
 }
 
-func (r *runner) prepare() error {
+func (r *runner) prepare(ctx context.Context) error {
 	opts := r.opts.Options
-	items, err := opts.PrepareItems(r.ctx)
+	items, err := opts.PrepareItems(ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
@@ -76,12 +75,12 @@ func (r *runner) prepare() error {
 	return nil
 }
 
-func (r runner) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
+func (r runner) regionSelection(ctx context.Context, client ssm.Client) (regionLabel string, regions []string, err error) {
 	regionLabel = r.opts.Region
 	regions = append([]string(nil), r.opts.Regions...)
 	if r.opts.AllRegions {
 		regionLabel = "all regions"
-		regions, err = client.ListRegions(r.ctx)
+		regions, err = client.ListRegions(ctx)
 		if err != nil {
 			return "", nil, errors.Wrap(err, "list AWS regions")
 		}

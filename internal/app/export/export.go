@@ -34,13 +34,12 @@ func Run(ctx context.Context, opts *Options, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return r.run()
+	return r.run(ctx)
 }
 
 // runner owns the state and dependencies of one export invocation.
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.
 type runner struct {
-	ctx          context.Context
 	opts         *Options
 	client       ssm.Client
 	writer       textio.Writer
@@ -75,7 +74,6 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 
 	fields := fieldsForOptions(opts.Fields)
 	return &runner{
-		ctx:          ctx,
 		opts:         opts,
 		client:       client,
 		writer:       textio.NewWriter(opts.Format, output),
@@ -90,8 +88,8 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 	}, nil
 }
 
-func (r *runner) run() error {
-	statuses := r.loadStatuses()
+func (r *runner) run(ctx context.Context) error {
+	statuses := r.loadStatuses(ctx)
 	r.sortRules.sort(statuses)
 	records, err := r.records(statuses)
 	if err != nil {
@@ -107,7 +105,7 @@ func (r *runner) run() error {
 	return errors.Wrap(r.writer.Export(records, mappings, r.keyField), "write export")
 }
 
-func (r *runner) loadStatuses() ui.Statuses {
+func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {
 	includeValues := r.opts.WithDecryption ||
 		r.recordFields.RequiresValues() ||
 		r.opts.FilterGroups.HasField(filter.FieldValue) ||
@@ -116,7 +114,7 @@ func (r *runner) loadStatuses() ui.Statuses {
 	var statuses ui.Statuses
 	if len(r.opts.FilterGroups) > 0 && len(r.items) == 0 {
 		statuses = ui.LoadFilteredStatusesBatchForRegions(
-			r.ctx,
+			ctx,
 			r.client,
 			r.opts.FilterGroups,
 			includeValues,
@@ -125,7 +123,7 @@ func (r *runner) loadStatuses() ui.Statuses {
 		)
 	} else {
 		statuses = ui.LoadStatusesForRegions(
-			r.ctx,
+			ctx,
 			r.client,
 			r.items,
 			includeValues,

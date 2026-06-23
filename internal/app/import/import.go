@@ -37,12 +37,11 @@ func Run(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.W
 	if err != nil {
 		return err
 	}
-	return r.run()
+	return r.run(ctx)
 }
 
 // runner owns the mutable state and dependencies of one import invocation.
 type runner struct {
-	ctx             context.Context
 	opts            *Options
 	client          ssm.Client
 	records         Records
@@ -110,7 +109,6 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		ctx: ctx, client: client, records: records, opts: opts, fields: opts.Fields,
 	}).resolve()
 	return &runner{
-		ctx:            ctx,
 		opts:           opts,
 		client:         client,
 		records:        records,
@@ -128,9 +126,9 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 	}, nil
 }
 
-func (r *runner) run() error {
+func (r *runner) run(ctx context.Context) error {
 	for i := range r.records {
-		if err := r.processRecord(r.records[i]); err != nil {
+		if err := r.processRecord(ctx, r.records[i]); err != nil {
 			return err
 		}
 	}
@@ -147,7 +145,7 @@ func (r *runner) run() error {
 	return nil
 }
 
-func (r *runner) processRecord(record textio.Record) error {
+func (r *runner) processRecord(ctx context.Context, record textio.Record) error {
 	region := recordRegion(record, r.opts, r.optionsResolver.fields)
 	key := recordKey(region, record.Path)
 	existing, exists := r.metadata[key]
@@ -182,7 +180,7 @@ func (r *runner) processRecord(record textio.Record) error {
 	}
 	opts.Overwrite = exists
 	err = r.client.ForRegion(region).PutParameterWithOptions(
-		r.ctx,
+		ctx,
 		record.Path,
 		record.Value,
 		parameterType,
