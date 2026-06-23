@@ -29,6 +29,9 @@ const (
 	exportEnvMapPath        = envVarPrefix + "MAP_PATH"
 	exportEnvSortBy         = envVarPrefix + "SORT_BY"
 	exportEnvWithDecryption = envVarPrefix + "WITH_DECRYPTION"
+	exportEnvFormat         = envVarPrefix + "FORMAT"
+	exportEnvKeyField       = envVarPrefix + "KEY_FIELD"
+	exportEnvScalar         = envVarPrefix + "SCALAR"
 )
 
 func exportCLICommand() *cli.Command {
@@ -51,9 +54,9 @@ func exportCLICommand() *cli.Command {
 			&cli.StringSliceFlag{Name: exportFlagMapPath, Sources: cli.EnvVars(exportEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
 			&cli.StringSliceFlag{Name: exportFlagSortBy, Sources: cli.EnvVars(exportEnvSortBy), Usage: "export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
 			&cli.BoolFlag{Name: exportFlagWithDecryption, Sources: cli.EnvVars(exportEnvWithDecryption), Usage: "decrypt SecureString values"},
-			&cli.StringFlag{Name: exportFlagFormat, Value: string(textio.FormatDotenv), Usage: "output format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: exportFlagKeyField, Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.BoolFlag{Name: exportFlagScalar, Usage: "write exactly one selected --output-field as scalar values instead of records"},
+			&cli.StringFlag{Name: exportFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(exportEnvFormat), Usage: "output format: dotenv, json, or yaml"},
+			&cli.StringFlag{Name: exportFlagKeyField, Sources: cli.EnvVars(exportEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
+			&cli.BoolFlag{Name: exportFlagScalar, Sources: cli.EnvVars(exportEnvScalar), Usage: "write exactly one selected --output-field as scalar values instead of records"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
@@ -98,7 +101,7 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 		return &exportcmd.Options{}, err
 	}
 
-	keyField := strings.TrimSpace(cmd.String(exportFlagKeyField))
+	keyField := strings.TrimSpace(stringFlagValueAny(cmd, exportFlagKeyField, "", exportEnvKeyField))
 	if err := validateKeyFieldOutputFields(keyField, fields); err != nil {
 		return &exportcmd.Options{}, err
 	}
@@ -114,9 +117,16 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 		exportEnvWithDecryption,
 	)
 
+	format := textio.FormatType(stringFlagValueAny(
+		cmd,
+		exportFlagFormat,
+		string(textio.FormatDotenv),
+		exportEnvFormat,
+	))
+
 	return &exportcmd.Options{
 		Options:       global.Options,
-		Format:        textio.FormatType(cmd.String(exportFlagFormat)),
+		Format:        format,
 		FieldMappings: fieldMappings,
 		Fields:        fields,
 		SortColumns:   compactStrings(stringSliceFlagValue(cmd, exportFlagSortBy, exportEnvSortBy)),
@@ -127,11 +137,11 @@ func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Opt
 }
 
 func exportScalarField(cmd *cli.Command, fields textio.Fields) (string, error) {
-	if !cmd.Bool(exportFlagScalar) {
+	if !boolFlagValueAny(cmd, exportFlagScalar, exportEnvScalar) {
 		return "", nil
 	}
 
-	rawFields := compactStrings(cmd.StringSlice(exportFlagOutputField))
+	rawFields := compactStrings(stringSliceFlagValue(cmd, exportFlagOutputField, exportEnvOutputField))
 	if len(rawFields) != 1 || len(fields) != 1 {
 		return "", fmt.Errorf(
 			"--%s requires exactly one --%s",

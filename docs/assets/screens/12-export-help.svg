@@ -13,9 +13,9 @@
 <text x="28" y="208" xml:space="preserve">   --map-path string [ --map-path string ]          path mapping as aws_path:file_path; repeat for multiple mappings [$AWS_SSM_PARAMS_MAP_PATH]</text>
 <text x="28" y="228" xml:space="preserve">   --sort-by string [ --sort-by string ]            export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values [$AWS_SSM_PARAMS_SORT_BY]</text>
 <text x="28" y="248" xml:space="preserve">   --with-decryption                                decrypt SecureString values [$AWS_SSM_PARAMS_WITH_DECRYPTION]</text>
-<text x="28" y="268" xml:space="preserve">   --format string                                  output format: dotenv, json, or yaml (default: &quot;dotenv&quot;)</text>
-<text x="28" y="288" xml:space="preserve">   --key-field string                               AWS field to use as object/map key for JSON or YAML records</text>
-<text x="28" y="308" xml:space="preserve">   --scalar                                         write exactly one selected --output-field as scalar values instead of records</text>
+<text x="28" y="268" xml:space="preserve">   --format string                                  output format: dotenv, json, or yaml (default: &quot;dotenv&quot;) [$AWS_SSM_PARAMS_FORMAT]</text>
+<text x="28" y="288" xml:space="preserve">   --key-field string                               AWS field to use as object/map key for JSON or YAML records [$AWS_SSM_PARAMS_KEY_FIELD]</text>
+<text x="28" y="308" xml:space="preserve">   --scalar                                         write exactly one selected --output-field as scalar values instead of records [$AWS_SSM_PARAMS_SCALAR]</text>
 <text x="28" y="328" xml:space="preserve">   --help, -h                                       show help</text>
 <text x="28" y="348" xml:space="preserve"></text>
 <text x="28" y="368" xml:space="preserve">GLOBAL OPTIONS:</text>

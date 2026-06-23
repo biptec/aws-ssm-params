@@ -117,6 +117,107 @@ func TestCLIHelpShowsNativeAWSRegionAndProfileAliases(t *testing.T) {
 	assert.NotContains(t, out.String(), "$NO_COLOR")
 }
 
+func TestCommandHelpShowsEnvironmentVariablesForApplicationFlags(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		envs []string
+	}{
+		{
+			name: "root",
+			args: []string{appName, "--help"},
+			envs: []string{
+				envRegion,
+				envAllRegions,
+				envProfile,
+				envNoColor,
+				envKeymap,
+				envLogLevel,
+				envFilter,
+			},
+		},
+		{
+			name: "tui",
+			args: []string{appName, tuiCommandName, "--help"},
+			envs: []string{
+				tuiEnvWithDecryption,
+				tuiEnvShowColumn,
+				tuiEnvSortBy,
+				tuiEnvNoConfirmOverwriteFile,
+				tuiEnvNoConfirmWriteSecureValue,
+				tuiEnvNoConfirmDeleteOne,
+				tuiEnvNoConfirmDeleteAll,
+			},
+		},
+		{
+			name: "export",
+			args: []string{appName, exportCommandName, "--help"},
+			envs: []string{
+				exportEnvOutputField,
+				exportEnvMapField,
+				exportEnvMapPath,
+				exportEnvSortBy,
+				exportEnvWithDecryption,
+				exportEnvFormat,
+				exportEnvKeyField,
+				exportEnvScalar,
+			},
+		},
+		{
+			name: "import",
+			args: []string{appName, importCommandName, "--help"},
+			envs: []string{
+				importEnvMapField,
+				importEnvMapPath,
+				importEnvFormat,
+				importEnvKeyField,
+				importEnvOnCreate,
+				importEnvOnUpdate,
+				importEnvContinueOnError,
+				importEnvSummary,
+				importEnvDryRun,
+				importEnvDefaultType,
+				importEnvDefaultTier,
+				importEnvDefaultDataType,
+				importEnvDefaultRegion,
+				importEnvDefaultDescription,
+				importEnvDefaultPolicies,
+				importEnvDefaultPoliciesFile,
+			},
+		},
+		{
+			name: "delete",
+			args: []string{appName, deleteCommandName, "--help"},
+			envs: []string{
+				deleteEnvFormat,
+				deleteEnvKeyField,
+				deleteEnvMapField,
+				deleteEnvMapPath,
+				deleteEnvNoConfirm,
+				deleteEnvDryRun,
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cliApp := newCLIApp(tc.args[1:])
+
+			var out bytes.Buffer
+
+			cliApp.Writer = &out
+
+			err := cliApp.Run(context.Background(), tc.args)
+
+			require.NoError(t, err)
+
+			for _, env := range tc.envs {
+				assert.Contains(t, out.String(), env)
+			}
+		})
+	}
+}
+
 func TestInteractiveCommandIsRemoved(t *testing.T) {
 	cliApp := newCLIApp([]string{removedCommandInteractive, "--help"})
 

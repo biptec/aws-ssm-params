@@ -38,6 +38,31 @@ func TestDeleteOptionsParseMappingsAndSafetyFlags(t *testing.T) {
 	assert.True(t, options.DryRun)
 }
 
+func TestDeleteOptionsReadEnvironmentFlags(t *testing.T) {
+	t.Setenv(deleteEnvFormat, string(textio.FormatJSON))
+	t.Setenv(deleteEnvKeyField, textio.FieldName)
+	t.Setenv(deleteEnvMapField, textio.FieldName+":title,"+textio.FieldRegion+":area")
+	t.Setenv(deleteEnvMapPath, "/base/:")
+	t.Setenv(deleteEnvNoConfirm, "true")
+	t.Setenv(deleteEnvDryRun, "true")
+
+	flags := append(globalFlags(), deleteCLICommand().Flags...)
+	cmd := testParsedCommand(t, flags, nil)
+
+	options, err := deleteOptionsFromCLI(context.Background(), cmd)
+
+	require.NoError(t, err)
+	assert.Equal(t, textio.FormatJSON, options.Format)
+	assert.Equal(t, textio.FieldName, options.KeyField)
+	assert.Equal(t, textio.FieldMappings{
+		{AWSName: textio.FieldName, FileName: "title"},
+		{AWSName: textio.FieldRegion, FileName: "area"},
+	}, options.FieldMappings)
+	assert.Equal(t, app.PathMappings{{AWSPath: "/base/", FilePath: ""}}, options.PathMappings)
+	assert.True(t, options.NoConfirm)
+	assert.True(t, options.DryRun)
+}
+
 func TestDeleteRejectsUnsupportedMappedField(t *testing.T) {
 	flags := append(globalFlags(), deleteCLICommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{

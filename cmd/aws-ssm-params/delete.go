@@ -22,7 +22,12 @@ const (
 	deleteFlagNoConfirm = "no-confirm"
 	deleteFlagDryRun    = "dry-run"
 
-	deleteEnvMapPath = envVarPrefix + "MAP_PATH"
+	deleteEnvFormat    = envVarPrefix + "FORMAT"
+	deleteEnvKeyField  = envVarPrefix + "KEY_FIELD"
+	deleteEnvMapField  = envVarPrefix + "MAP_FIELD"
+	deleteEnvMapPath   = envVarPrefix + "MAP_PATH"
+	deleteEnvNoConfirm = envVarPrefix + "NO_CONFIRM"
+	deleteEnvDryRun    = envVarPrefix + "DRY_RUN"
 )
 
 func deleteCLICommand() *cli.Command {
@@ -34,12 +39,12 @@ func deleteCLICommand() *cli.Command {
 			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), deleteFlagMapField, deleteFlagMapPath)
 		},
 		Flags: []cli.Flag{
-			&cli.StringFlag{Name: deleteFlagFormat, Value: string(textio.FormatDotenv), Usage: "input format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: deleteFlagKeyField, Usage: "field represented by JSON or YAML object keys: name or region"},
-			&cli.StringSliceFlag{Name: deleteFlagMapField, Usage: "input field mapping as name:file_field or region:file_field; repeat for both mappings"},
+			&cli.StringFlag{Name: deleteFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(deleteEnvFormat), Usage: "input format: dotenv, json, or yaml"},
+			&cli.StringFlag{Name: deleteFlagKeyField, Sources: cli.EnvVars(deleteEnvKeyField), Usage: "field represented by JSON or YAML object keys: name or region"},
+			&cli.StringSliceFlag{Name: deleteFlagMapField, Sources: cli.EnvVars(deleteEnvMapField), Usage: "input field mapping as name:file_field or region:file_field; repeat for both mappings"},
 			&cli.StringSliceFlag{Name: deleteFlagMapPath, Sources: cli.EnvVars(deleteEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
-			&cli.BoolFlag{Name: deleteFlagNoConfirm, Usage: "delete every filtered input record without interactive confirmation"},
-			&cli.BoolFlag{Name: deleteFlagDryRun, Usage: "show parameters that would be deleted without deleting them"},
+			&cli.BoolFlag{Name: deleteFlagNoConfirm, Sources: cli.EnvVars(deleteEnvNoConfirm), Usage: "delete every filtered input record without interactive confirmation"},
+			&cli.BoolFlag{Name: deleteFlagDryRun, Sources: cli.EnvVars(deleteEnvDryRun), Usage: "show parameters that would be deleted without deleting them"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
@@ -65,7 +70,10 @@ func deleteOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*deletecmd.Opt
 		return &deletecmd.Options{}, err
 	}
 
-	fieldMappings, err := parseFieldMappings(cmd.StringSlice(deleteFlagMapField), deleteFlagMapField)
+	fieldMappings, err := parseFieldMappings(
+		stringSliceFlagValue(cmd, deleteFlagMapField, deleteEnvMapField),
+		deleteFlagMapField,
+	)
 	if err != nil {
 		return &deletecmd.Options{}, err
 	}
@@ -74,7 +82,9 @@ func deleteOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*deletecmd.Opt
 		return &deletecmd.Options{}, err
 	}
 
-	keyField, err := parseDeleteKeyField(cmd.String(deleteFlagKeyField))
+	keyField, err := parseDeleteKeyField(
+		stringFlagValueAny(cmd, deleteFlagKeyField, "", deleteEnvKeyField),
+	)
 	if err != nil {
 		return &deletecmd.Options{}, err
 	}
@@ -87,14 +97,21 @@ func deleteOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*deletecmd.Opt
 		return &deletecmd.Options{}, err
 	}
 
+	format := strings.ToLower(strings.TrimSpace(stringFlagValueAny(
+		cmd,
+		deleteFlagFormat,
+		string(textio.FormatDotenv),
+		deleteEnvFormat,
+	)))
+
 	return &deletecmd.Options{
 		Options:       global.Options,
-		Format:        textio.FormatType(strings.ToLower(strings.TrimSpace(cmd.String(deleteFlagFormat)))),
+		Format:        textio.FormatType(format),
 		FieldMappings: fieldMappings,
 		KeyField:      keyField,
 		PathMappings:  pathMappings,
-		NoConfirm:     cmd.Bool(deleteFlagNoConfirm),
-		DryRun:        cmd.Bool(deleteFlagDryRun),
+		NoConfirm:     boolFlagValueAny(cmd, deleteFlagNoConfirm, deleteEnvNoConfirm),
+		DryRun:        boolFlagValueAny(cmd, deleteFlagDryRun, deleteEnvDryRun),
 	}, nil
 }
 

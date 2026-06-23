@@ -40,7 +40,22 @@ const (
 	importPolicyErrorValue = "error"
 	importPolicyAskValue   = "ask"
 
-	importEnvMapPath = envVarPrefix + "MAP_PATH"
+	importEnvMapField            = envVarPrefix + "MAP_FIELD"
+	importEnvMapPath             = envVarPrefix + "MAP_PATH"
+	importEnvFormat              = envVarPrefix + "FORMAT"
+	importEnvKeyField            = envVarPrefix + "KEY_FIELD"
+	importEnvOnCreate            = envVarPrefix + "ON_CREATE"
+	importEnvOnUpdate            = envVarPrefix + "ON_UPDATE"
+	importEnvContinueOnError     = envVarPrefix + "CONTINUE_ON_ERROR"
+	importEnvSummary             = envVarPrefix + "SUMMARY"
+	importEnvDryRun              = envVarPrefix + "DRY_RUN"
+	importEnvDefaultType         = envVarPrefix + "DEFAULT_TYPE"
+	importEnvDefaultTier         = envVarPrefix + "DEFAULT_TIER"
+	importEnvDefaultDataType     = envVarPrefix + "DEFAULT_DATA_TYPE"
+	importEnvDefaultRegion       = envVarPrefix + "DEFAULT_REGION"
+	importEnvDefaultDescription  = envVarPrefix + "DEFAULT_DESCRIPTION"
+	importEnvDefaultPolicies     = envVarPrefix + "DEFAULT_POLICIES"
+	importEnvDefaultPoliciesFile = envVarPrefix + "DEFAULT_POLICIES_FILE"
 )
 
 func importCLICommand() *cli.Command {
@@ -52,22 +67,22 @@ func importCLICommand() *cli.Command {
 			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), importFlagMapField, importFlagMapPath)
 		},
 		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: importFlagMapField, Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+			&cli.StringSliceFlag{Name: importFlagMapField, Sources: cli.EnvVars(importEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
 			&cli.StringSliceFlag{Name: importFlagMapPath, Sources: cli.EnvVars(importEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
-			&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Usage: "input format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: importFlagKeyField, Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
-			&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Usage: "when an imported parameter already exists: none, skip, error, or ask"},
-			&cli.BoolFlag{Name: importFlagContinueOnError, Usage: "continue importing remaining records after per-record errors"},
-			&cli.BoolFlag{Name: importFlagSummary, Usage: "print an import summary after processing records"},
-			&cli.BoolFlag{Name: importFlagDryRun, Usage: "validate and show writes without changing Parameter Store"},
-			&cli.StringFlag{Name: importFlagDefaultType, Usage: "default parameter type: string, string-list, or secure-string"},
-			&cli.StringFlag{Name: importFlagDefaultTier, Usage: "default parameter tier: standard, advanced, or intelligent-tiering"},
-			&cli.StringFlag{Name: importFlagDefaultDataType, Usage: "default parameter data type: text, aws:ec2:image, or aws:ssm:integration"},
-			&cli.StringFlag{Name: importFlagDefaultRegion, Usage: "default AWS region for imported records without region metadata"},
-			&cli.StringFlag{Name: importFlagDefaultDescription, Usage: "default parameter description"},
-			&cli.StringFlag{Name: importFlagDefaultPolicies, Usage: "default parameter policies JSON"},
-			&cli.StringFlag{Name: importFlagDefaultPoliciesFile, Usage: "read default parameter policies JSON from file"},
+			&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(importEnvFormat), Usage: "input format: dotenv, json, or yaml"},
+			&cli.StringFlag{Name: importFlagKeyField, Sources: cli.EnvVars(importEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
+			&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Sources: cli.EnvVars(importEnvOnCreate), Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
+			&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Sources: cli.EnvVars(importEnvOnUpdate), Usage: "when an imported parameter already exists: none, skip, error, or ask"},
+			&cli.BoolFlag{Name: importFlagContinueOnError, Sources: cli.EnvVars(importEnvContinueOnError), Usage: "continue importing remaining records after per-record errors"},
+			&cli.BoolFlag{Name: importFlagSummary, Sources: cli.EnvVars(importEnvSummary), Usage: "print an import summary after processing records"},
+			&cli.BoolFlag{Name: importFlagDryRun, Sources: cli.EnvVars(importEnvDryRun), Usage: "validate and show writes without changing Parameter Store"},
+			&cli.StringFlag{Name: importFlagDefaultType, Sources: cli.EnvVars(importEnvDefaultType), Usage: "default parameter type: string, string-list, or secure-string"},
+			&cli.StringFlag{Name: importFlagDefaultTier, Sources: cli.EnvVars(importEnvDefaultTier), Usage: "default parameter tier: standard, advanced, or intelligent-tiering"},
+			&cli.StringFlag{Name: importFlagDefaultDataType, Sources: cli.EnvVars(importEnvDefaultDataType), Usage: "default parameter data type: text, aws:ec2:image, or aws:ssm:integration"},
+			&cli.StringFlag{Name: importFlagDefaultRegion, Sources: cli.EnvVars(importEnvDefaultRegion), Usage: "default AWS region for imported records without region metadata"},
+			&cli.StringFlag{Name: importFlagDefaultDescription, Sources: cli.EnvVars(importEnvDefaultDescription), Usage: "default parameter description"},
+			&cli.StringFlag{Name: importFlagDefaultPolicies, Sources: cli.EnvVars(importEnvDefaultPolicies), Usage: "default parameter policies JSON"},
+			&cli.StringFlag{Name: importFlagDefaultPoliciesFile, Sources: cli.EnvVars(importEnvDefaultPoliciesFile), Usage: "read default parameter policies JSON from file"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
@@ -111,7 +126,10 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		)
 	}
 
-	fieldMappings, err := parseFieldMappings(cmd.StringSlice(importFlagMapField), importFlagMapField)
+	fieldMappings, err := parseFieldMappings(
+		stringSliceFlagValue(cmd, importFlagMapField, importEnvMapField),
+		importFlagMapField,
+	)
 	if err != nil {
 		return &importcmd.Options{}, err
 	}
@@ -124,7 +142,9 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		return &importcmd.Options{}, err
 	}
 
-	defaultType, err := ssm.ParseParameterType(cmd.String(importFlagDefaultType))
+	defaultType, err := ssm.ParseParameterType(
+		stringFlagValueAny(cmd, importFlagDefaultType, "", importEnvDefaultType),
+	)
 	if err != nil {
 		return &importcmd.Options{}, errors.Wrap(err, "parse default type")
 	}
@@ -139,35 +159,58 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Opt
 		return &importcmd.Options{}, err
 	}
 
+	format := textio.FormatType(stringFlagValueAny(
+		cmd,
+		importFlagFormat,
+		string(textio.FormatDotenv),
+		importEnvFormat,
+	))
+	keyField := strings.TrimSpace(stringFlagValueAny(cmd, importFlagKeyField, "", importEnvKeyField))
+	defaultRegion := strings.TrimSpace(stringFlagValueAny(
+		cmd,
+		importFlagDefaultRegion,
+		"",
+		importEnvDefaultRegion,
+	))
+
 	return &importcmd.Options{
 		Options:         global.Options,
-		Format:          textio.FormatType(cmd.String(importFlagFormat)),
+		Format:          format,
 		FieldMappings:   fieldMappings,
-		KeyField:        strings.TrimSpace(cmd.String(importFlagKeyField)),
+		KeyField:        keyField,
 		PathMappings:    pathMappings,
-		DefaultRegion:   strings.TrimSpace(cmd.String(importFlagDefaultRegion)),
+		DefaultRegion:   defaultRegion,
 		DefaultType:     defaultType,
 		DefaultOptions:  defaultOptions,
 		Policy:          policy,
-		ContinueOnError: cmd.Bool(importFlagContinueOnError),
-		Summary:         cmd.Bool(importFlagSummary),
-		DryRun:          cmd.Bool(importFlagDryRun),
+		ContinueOnError: boolFlagValueAny(cmd, importFlagContinueOnError, importEnvContinueOnError),
+		Summary:         boolFlagValueAny(cmd, importFlagSummary, importEnvSummary),
+		DryRun:          boolFlagValueAny(cmd, importFlagDryRun, importEnvDryRun),
 	}, nil
 }
 
 func importDefaultOptionsFromCLI(cmd *cli.Command) (ssm.PutParameterOptions, error) {
-	tier, err := ssm.ParseParameterTier(cmd.String(importFlagDefaultTier))
+	tier, err := ssm.ParseParameterTier(
+		stringFlagValueAny(cmd, importFlagDefaultTier, "", importEnvDefaultTier),
+	)
 	if err != nil {
 		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default tier")
 	}
 
-	dataType, err := ssm.ParseParameterDataType(cmd.String(importFlagDefaultDataType))
+	dataType, err := ssm.ParseParameterDataType(
+		stringFlagValueAny(cmd, importFlagDefaultDataType, "", importEnvDefaultDataType),
+	)
 	if err != nil {
 		return ssm.PutParameterOptions{}, errors.Wrap(err, "parse default data type")
 	}
 
-	policies := cmd.String(importFlagDefaultPolicies)
-	if policiesFile := strings.TrimSpace(cmd.String(importFlagDefaultPoliciesFile)); policiesFile != "" {
+	policies := stringFlagValueAny(cmd, importFlagDefaultPolicies, "", importEnvDefaultPolicies)
+	if policiesFile := strings.TrimSpace(stringFlagValueAny(
+		cmd,
+		importFlagDefaultPoliciesFile,
+		"",
+		importEnvDefaultPoliciesFile,
+	)); policiesFile != "" {
 		data, err := fileio.ReadFile(policiesFile)
 		if err != nil {
 			return ssm.PutParameterOptions{}, errors.Wrapf(err, "read default policies file %s", policiesFile)
@@ -179,18 +222,24 @@ func importDefaultOptionsFromCLI(cmd *cli.Command) (ssm.PutParameterOptions, err
 	return ssm.PutParameterOptions{
 		Tier:        tier,
 		DataType:    dataType,
-		Description: cmd.String(importFlagDefaultDescription),
+		Description: stringFlagValueAny(cmd, importFlagDefaultDescription, "", importEnvDefaultDescription),
 		Policies:    policies,
 	}, nil
 }
 
 func importPolicyFromCLI(cmd *cli.Command) (importcmd.Policy, error) {
-	onCreate, err := parseImportPolicyAction(cmd.String(importFlagOnCreate), importFlagOnCreate)
+	onCreate, err := parseImportPolicyAction(
+		stringFlagValueAny(cmd, importFlagOnCreate, importPolicyNoneValue, importEnvOnCreate),
+		importFlagOnCreate,
+	)
 	if err != nil {
 		return importcmd.Policy{}, err
 	}
 
-	onUpdate, err := parseImportPolicyAction(cmd.String(importFlagOnUpdate), importFlagOnUpdate)
+	onUpdate, err := parseImportPolicyAction(
+		stringFlagValueAny(cmd, importFlagOnUpdate, importPolicyAskValue, importEnvOnUpdate),
+		importFlagOnUpdate,
+	)
 	if err != nil {
 		return importcmd.Policy{}, err
 	}

@@ -43,8 +43,15 @@ func TestExportScalarRequiresExactlyOneOutputField(t *testing.T) {
 	assert.ErrorContains(t, err, "--"+exportFlagOutputField)
 }
 
-func TestExportOptionsReadPathMappingsFromEnvironment(t *testing.T) {
+func TestExportOptionsReadEnvironmentFlags(t *testing.T) {
+	t.Setenv(exportEnvOutputField, textio.FieldValue)
+	t.Setenv(exportEnvMapField, textio.FieldName+":title")
 	t.Setenv(exportEnvMapPath, "/app/dev:/dev,/app/stage:/stage")
+	t.Setenv(exportEnvSortBy, textio.FieldName+":asc")
+	t.Setenv(exportEnvWithDecryption, "true")
+	t.Setenv(exportEnvFormat, string(textio.FormatYAML))
+	t.Setenv(exportEnvKeyField, textio.FieldName)
+	t.Setenv(exportEnvScalar, "true")
 
 	flags := append(globalFlags(), exportCLICommand().Flags...)
 	cmd := testParsedCommand(t, flags, nil)
@@ -52,10 +59,17 @@ func TestExportOptionsReadPathMappingsFromEnvironment(t *testing.T) {
 	options, err := exportOptionsFromCLI(context.Background(), cmd)
 
 	require.NoError(t, err)
+	assert.Equal(t, textio.FormatYAML, options.Format)
+	assert.Equal(t, textio.FieldMappings{{AWSName: textio.FieldName, FileName: "title"}}, options.FieldMappings)
+	assert.Equal(t, textio.Fields{textio.FieldValue}, options.Fields)
 	assert.Equal(t, app.PathMappings{
 		{AWSPath: "/app/dev", FilePath: "/dev"},
 		{AWSPath: "/app/stage", FilePath: "/stage"},
 	}, options.PathMappings)
+	assert.Equal(t, []string{textio.FieldName + ":asc"}, options.SortColumns)
+	assert.Equal(t, textio.FieldName, options.KeyField)
+	assert.Equal(t, textio.FieldValue, options.ScalarField)
+	assert.True(t, options.WithDecryption)
 }
 
 func TestExportRejectsInvalidPathMapping(t *testing.T) {
