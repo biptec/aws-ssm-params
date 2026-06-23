@@ -103,7 +103,7 @@ func TestExportRecordFromStatusRespectsExplicitFields(t *testing.T) {
 func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
 	basePath, err := app.ParseBasePath("/app/prod")
 	require.NoError(t, err)
-	command := Command{
+	r := runner{
 		basePath:     basePath,
 		recordFields: textio.Fields{textio.FieldName, textio.FieldValue},
 	}
@@ -113,7 +113,7 @@ func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
 		Value:  "secret",
 	}}
 
-	records, err := command.records(statuses)
+	records, err := r.records(statuses)
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -121,13 +121,13 @@ func TestRecordsMakeNamesRelativeToBasePath(t *testing.T) {
 }
 
 func TestRecordsPreserveAbsoluteNamesWithoutBasePath(t *testing.T) {
-	command := Command{recordFields: textio.Fields{textio.FieldName}}
+	r := runner{recordFields: textio.Fields{textio.FieldName}}
 	statuses := ui.Statuses{{
 		Item:   inventory.Item{Path: "/app/prod/api/token"},
 		Exists: true,
 	}}
 
-	records, err := command.records(statuses)
+	records, err := r.records(statuses)
 
 	require.NoError(t, err)
 	require.Len(t, records, 1)
@@ -137,7 +137,7 @@ func TestRecordsPreserveAbsoluteNamesWithoutBasePath(t *testing.T) {
 func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
 	basePath, err := app.ParseBasePath("/app/prod")
 	require.NoError(t, err)
-	command := Command{
+	r := runner{
 		basePath:     basePath,
 		recordFields: textio.Fields{textio.FieldName},
 	}
@@ -146,7 +146,7 @@ func TestRecordsRejectNamesOutsideBasePath(t *testing.T) {
 		Exists: true,
 	}}
 
-	_, err = command.records(statuses)
+	_, err = r.records(statuses)
 
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "outside base path")

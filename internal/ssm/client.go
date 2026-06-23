@@ -34,6 +34,22 @@ type Client interface {
 	DeleteMany(ctx context.Context, paths []string) error
 }
 
+// ClientConfig configures an AWS-backed SSM client.
+type ClientConfig struct {
+	Profile        string
+	Region         string
+	WithDecryption bool
+	Logger         *slog.Logger
+}
+
+// NewClient creates an SSM client from runtime configuration.
+func NewClient(cfg ClientConfig) Client {
+	client := NewAWSClient(cfg.Profile, cfg.Region)
+	client.WithDecryption = cfg.WithDecryption
+	client.Logger = cfg.Logger
+	return client
+}
+
 // AWSClient implements Client with AWS SDK for Go v2.
 // It uses the default SDK credential and config chain, including AWS profiles, SSO sessions, environment variables,
 // shared config files, web identity, IMDS, and any other provider supported by the SDK.

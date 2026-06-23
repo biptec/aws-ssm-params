@@ -32,15 +32,15 @@ type Options struct {
 
 // Run reads records, resolves their SSM names, and writes values to Parameter Store.
 func Run(ctx context.Context, options Options, input io.Reader, summaryOutput io.Writer) error {
-	command, err := newCommand(ctx, options, input, summaryOutput)
+	r, err := newRunner(ctx, options, input, summaryOutput)
 	if err != nil {
 		return err
 	}
-	return command.run()
+	return r.run()
 }
 
-// Command owns the mutable state and dependencies of one import invocation.
-type Command struct {
+// runner owns the mutable state and dependencies of one import invocation.
+type runner struct {
 	ctx             context.Context
 	cfg             app.Config
 	client          ssm.Client
@@ -65,7 +65,7 @@ type Summary struct {
 	Failed  int
 }
 
-func newCommand(ctx context.Context, options Options, input io.Reader, summaryOutput io.Writer) (*Command, error) {
+func newRunner(ctx context.Context, options Options, input io.Reader, summaryOutput io.Writer) (*runner, error) {
 	cfg := options.Config
 	if defaultRegion := strings.TrimSpace(options.DefaultRegion); defaultRegion != "" && cfg.Region == "" {
 		cfg.Region = defaultRegion
@@ -100,11 +100,16 @@ func newCommand(ctx context.Context, options Options, input io.Reader, summaryOu
 		return nil, errors.New("import requires the value field")
 	}
 
-	client := app.NewClient(cfg)
+	client := ssm.NewClient(ssm.ClientConfig{
+		Profile:        cfg.Profile,
+		Region:         cfg.Region,
+		WithDecryption: cfg.WithDecryption,
+		Logger:         cfg.Logger,
+	})
 	metadata, metadataErrors := (MetadataResolver{
 		ctx: ctx, client: client, records: records, cfg: cfg, fields: options.Fields,
 	}).resolve()
-	return &Command{
+	return &runner{
 		ctx:            ctx,
 		cfg:            cfg,
 		client:         client,
@@ -123,96 +128,96 @@ func newCommand(ctx context.Context, options Options, input io.Reader, summaryOu
 	}, nil
 }
 
-func (command *Command) run() error {
-	for i := range command.records {
-		if err := command.processRecord(command.records[i]); err != nil {
+func (r *runner) run() error {
+	for i := range r.records {
+		if err := r.processRecord(r.records[i]); err != nil {
 			return err
 		}
 	}
-	if command.summaryEnabled {
-		command.writeSummary()
+	if r.summaryEnabled {
+		r.writeSummary()
 	}
-	if len(command.recordErrors) > 0 {
+	if len(r.recordErrors) > 0 {
 		return fmt.Errorf(
 			"import completed with %d error(s):\n%s",
-			len(command.recordErrors),
-			strings.Join(command.recordErrors, "\n"),
+			len(r.recordErrors),
+			strings.Join(r.recordErrors, "\n"),
 		)
 	}
 	return nil
 }
 
-func (command *Command) processRecord(record textio.Record) error {
-	region := recordRegion(record, command.cfg, command.optionsResolver.fields)
+func (r *runner) processRecord(record textio.Record) error {
+	region := recordRegion(record, r.cfg, r.optionsResolver.fields)
 	key := recordKey(region, record.Path)
-	existing, exists := command.metadata[key]
-	if err, ok := command.metadataErrors[key]; ok {
+	existing, exists := r.metadata[key]
+	if err, ok := r.metadataErrors[key]; ok {
 		if !errors.Is(err, ssm.ErrNotFound) {
-			return command.handleRecordError(writeOperationUpdate, region, record.Path, err)
+			return r.handleRecordError(writeOperationUpdate, region, record.Path, err)
 		}
 		exists = false
 	}
 
-	operation, policyAction := command.policy.operation(exists)
+	operation, policyAction := r.policy.operation(exists)
 	if strings.TrimSpace(record.Value) == "" {
-		return command.handleRecordError(operation, region, record.Path, errors.New("import record value is required"))
+		return r.handleRecordError(operation, region, record.Path, errors.New("import record value is required"))
 	}
 	shouldWrite, err := policyAction.resolve(operation, region, record.Path)
 	if err != nil {
-		return command.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, region, record.Path, err)
 	}
 	if !shouldWrite {
-		logSkipped(command.cfg.Logger, operation, policyAction, region, record.Path)
-		command.summary.Skipped++
+		logSkipped(r.cfg.Logger, operation, policyAction, region, record.Path)
+		r.summary.Skipped++
 		return nil
 	}
 
-	parameterType, err := resolveType(command.defaultType, existing, exists, record, command.optionsResolver.fields)
+	parameterType, err := resolveType(r.defaultType, existing, exists, record, r.optionsResolver.fields)
 	if err != nil {
-		return command.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, region, record.Path, err)
 	}
-	options, err := command.optionsResolver.forRecord(record, existing, exists)
+	options, err := r.optionsResolver.forRecord(record, existing, exists)
 	if err != nil {
-		return command.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, region, record.Path, err)
 	}
 	options.Overwrite = exists
-	err = command.client.ForRegion(region).PutParameterWithOptions(
-		command.ctx,
+	err = r.client.ForRegion(region).PutParameterWithOptions(
+		r.ctx,
 		record.Path,
 		record.Value,
 		parameterType,
 		options,
 	)
 	if err != nil {
-		return command.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, region, record.Path, err)
 	}
 	if exists {
-		command.summary.Updated++
+		r.summary.Updated++
 	} else {
-		command.summary.Created++
+		r.summary.Created++
 	}
 	return nil
 }
 
-func (command *Command) handleRecordError(operation writeOperation, region, name string, err error) error {
+func (r *runner) handleRecordError(operation writeOperation, region, name string, err error) error {
 	wrapped := errors.Wrap(err, name)
-	logRecordError(command.cfg.Logger, operation, region, name, wrapped)
-	command.summary.Failed++
-	command.recordErrors = append(command.recordErrors, wrapped.Error())
-	if command.continueOnError {
-		logContinueOnError(command.cfg.Logger, region, name)
+	logRecordError(r.cfg.Logger, operation, region, name, wrapped)
+	r.summary.Failed++
+	r.recordErrors = append(r.recordErrors, wrapped.Error())
+	if r.continueOnError {
+		logContinueOnError(r.cfg.Logger, region, name)
 		return nil
 	}
 	return wrapped
 }
 
-func (command *Command) writeSummary() {
+func (r *runner) writeSummary() {
 	_, _ = fmt.Fprintf(
-		command.summaryOutput,
+		r.summaryOutput,
 		"Import summary:\n  created: %d\n  updated: %d\n  skipped: %d\n  failed: %d\n",
-		command.summary.Created,
-		command.summary.Updated,
-		command.summary.Skipped,
-		command.summary.Failed,
+		r.summary.Created,
+		r.summary.Updated,
+		r.summary.Skipped,
+		r.summary.Failed,
 	)
 }

@@ -29,54 +29,60 @@ type Options struct {
 	UseInputTTY               bool
 }
 
-// Command owns the configuration and input mode of one TUI invocation.
-type Command struct {
+// runner owns the configuration and input mode of one TUI invocation.
+type runner struct {
 	ctx     context.Context
 	options Options
 }
 
 // Run opens the terminal UI.
 func Run(ctx context.Context, options Options) error {
-	command := Command{ctx: ctx, options: options}
-	return command.run()
+	r := runner{ctx: ctx, options: options}
+	return r.run()
 }
 
-func (command *Command) run() error {
-	if err := command.prepare(); err != nil {
+func (r *runner) run() error {
+	if err := r.prepare(); err != nil {
 		return err
 	}
-	client := app.NewClient(command.options.Config)
-	if err := client.CheckAccess(command.ctx); err != nil {
+	cfg := r.options.Config
+	client := ssm.NewClient(ssm.ClientConfig{
+		Profile:        cfg.Profile,
+		Region:         cfg.Region,
+		WithDecryption: cfg.WithDecryption,
+		Logger:         cfg.Logger,
+	})
+	if err := client.CheckAccess(r.ctx); err != nil {
 		return errors.Wrap(err, "check AWS access")
 	}
-	regionLabel, regions, err := command.regionSelection(client)
+	regionLabel, regions, err := r.regionSelection(client)
 	if err != nil {
 		return err
 	}
 	return errors.Wrap(
-		ui.RunInteractive(command.ctx, client, command.options.Config.InventoryItems, command.uiOptions(regionLabel, regions)),
+		ui.RunInteractive(r.ctx, client, r.options.Config.InventoryItems, r.uiOptions(regionLabel, regions)),
 		"run interactive",
 	)
 }
 
-func (command *Command) prepare() error {
-	cfg := command.options.Config
-	items, err := app.PrepareItems(command.ctx, &cfg)
+func (r *runner) prepare() error {
+	cfg := r.options.Config
+	items, err := app.PrepareItems(r.ctx, &cfg)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	cfg.InventoryItems = items
-	command.options.Config = cfg
+	r.options.Config = cfg
 	return nil
 }
 
-func (command Command) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
-	cfg := command.options.Config
+func (r runner) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
+	cfg := r.options.Config
 	regionLabel = cfg.Region
 	regions = append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
 		regionLabel = "all regions"
-		regions, err = client.ListRegions(command.ctx)
+		regions, err = client.ListRegions(r.ctx)
 		if err != nil {
 			return "", nil, errors.Wrap(err, "list AWS regions")
 		}
@@ -86,9 +92,9 @@ func (command Command) regionSelection(client ssm.Client) (regionLabel string, r
 	return regionLabel, regions, nil
 }
 
-func (command Command) uiOptions(regionLabel string, regions []string) ui.Options {
-	cfg := command.options.Config
-	options := command.options
+func (r runner) uiOptions(regionLabel string, regions []string) ui.Options {
+	cfg := r.options.Config
+	options := r.options
 	return ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,

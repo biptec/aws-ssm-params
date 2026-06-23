@@ -29,16 +29,16 @@ type Options struct {
 
 // Run loads statuses for the requested inventory and writes existing parameter values.
 func Run(ctx context.Context, options Options, output io.Writer) error {
-	command, err := newCommand(ctx, options, output)
+	r, err := newRunner(ctx, options, output)
 	if err != nil {
 		return err
 	}
-	return command.run()
+	return r.run()
 }
 
-// Command owns the state and dependencies of one export invocation.
+// runner owns the state and dependencies of one export invocation.
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.
-type Command struct {
+type runner struct {
 	ctx          context.Context
 	cfg          app.Config
 	client       ssm.Client
@@ -53,13 +53,18 @@ type Command struct {
 	fieldMaps    textio.FieldMappings
 }
 
-func newCommand(ctx context.Context, options Options, output io.Writer) (*Command, error) {
+func newRunner(ctx context.Context, options Options, output io.Writer) (*runner, error) {
 	cfg := options.Config
 	items, err := app.PrepareItems(ctx, &cfg)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	client := app.NewClient(cfg)
+	client := ssm.NewClient(ssm.ClientConfig{
+		Profile:        cfg.Profile,
+		Region:         cfg.Region,
+		WithDecryption: cfg.WithDecryption,
+		Logger:         cfg.Logger,
+	})
 	regions := append([]string(nil), cfg.Regions...)
 	if cfg.AllRegions {
 		regions, err = client.ListRegions(ctx)
@@ -69,7 +74,7 @@ func newCommand(ctx context.Context, options Options, output io.Writer) (*Comman
 	}
 
 	fields := fieldsForOptions(options.Fields)
-	return &Command{
+	return &runner{
 		ctx:          ctx,
 		cfg:          cfg,
 		client:       client,
@@ -85,62 +90,62 @@ func newCommand(ctx context.Context, options Options, output io.Writer) (*Comman
 	}, nil
 }
 
-func (command *Command) run() error {
-	statuses := command.loadStatuses()
-	command.sortRules.sort(statuses)
-	records, err := command.records(statuses)
+func (r *runner) run() error {
+	statuses := r.loadStatuses()
+	r.sortRules.sort(statuses)
+	records, err := r.records(statuses)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if command.scalarField != "" {
+	if r.scalarField != "" {
 		return errors.Wrap(
-			command.writer.ExportScalar(records, command.scalarField, command.keyField),
+			r.writer.ExportScalar(records, r.scalarField, r.keyField),
 			"write scalar export",
 		)
 	}
-	mappings := command.fieldMaps.WithDefaults().ForFields(command.recordFields)
-	return errors.Wrap(command.writer.Export(records, mappings, command.keyField), "write export")
+	mappings := r.fieldMaps.WithDefaults().ForFields(r.recordFields)
+	return errors.Wrap(r.writer.Export(records, mappings, r.keyField), "write export")
 }
 
-func (command *Command) loadStatuses() ui.Statuses {
-	includeValues := command.cfg.WithDecryption ||
-		command.recordFields.RequiresValues() ||
-		command.cfg.FilterGroups.HasField(filter.FieldValue) ||
-		command.sortRules.requiresValues()
+func (r *runner) loadStatuses() ui.Statuses {
+	includeValues := r.cfg.WithDecryption ||
+		r.recordFields.RequiresValues() ||
+		r.cfg.FilterGroups.HasField(filter.FieldValue) ||
+		r.sortRules.requiresValues()
 
 	var statuses ui.Statuses
-	if len(command.cfg.FilterGroups) > 0 && len(command.items) == 0 {
+	if len(r.cfg.FilterGroups) > 0 && len(r.items) == 0 {
 		statuses = ui.LoadFilteredStatusesBatchForRegions(
-			command.ctx,
-			command.client,
-			command.cfg.FilterGroups,
+			r.ctx,
+			r.client,
+			r.cfg.FilterGroups,
 			includeValues,
-			command.regions,
+			r.regions,
 			nil,
 		)
 	} else {
 		statuses = ui.LoadStatusesForRegions(
-			command.ctx,
-			command.client,
-			command.items,
+			r.ctx,
+			r.client,
+			r.items,
 			includeValues,
-			command.regions,
+			r.regions,
 		)
 	}
-	if len(command.items) > 0 {
-		return statuses.Filter(command.cfg.FilterGroups)
+	if len(r.items) > 0 {
+		return statuses.Filter(r.cfg.FilterGroups)
 	}
 	return statuses
 }
 
-func (command *Command) records(statuses ui.Statuses) (textio.Records, error) {
+func (r *runner) records(statuses ui.Statuses) (textio.Records, error) {
 	records := make(textio.Records, 0, len(statuses))
 	for i := range statuses {
 		if !statuses[i].Exists {
 			continue
 		}
-		record := recordFromStatus(statuses[i], command.recordFields)
-		path, err := command.basePath.Relativize(record.Path)
+		record := recordFromStatus(statuses[i], r.recordFields)
+		path, err := r.basePath.Relativize(record.Path)
 		if err != nil {
 			return nil, errors.Wrap(err, "make export parameter name relative")
 		}
