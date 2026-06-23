@@ -12,7 +12,7 @@ import (
 )
 
 func TestDeleteOptionsParseMappingsAndSafetyFlags(t *testing.T) {
-	flags := append(globalFlags(), deleteCLICommand().Flags...)
+	flags := append(globalFlags(), deleteCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 		"--" + deleteFlagFormat, "json",
@@ -46,7 +46,7 @@ func TestDeleteOptionsReadEnvironmentFlags(t *testing.T) {
 	t.Setenv(deleteEnvNoConfirm, "true")
 	t.Setenv(deleteEnvDryRun, "true")
 
-	flags := append(globalFlags(), deleteCLICommand().Flags...)
+	flags := append(globalFlags(), deleteCommand().Flags...)
 	cmd := testParsedCommand(t, flags, nil)
 
 	options, err := deleteOptionsFromCLI(context.Background(), cmd)
@@ -64,7 +64,7 @@ func TestDeleteOptionsReadEnvironmentFlags(t *testing.T) {
 }
 
 func TestDeleteRejectsUnsupportedMappedField(t *testing.T) {
-	flags := append(globalFlags(), deleteCLICommand().Flags...)
+	flags := append(globalFlags(), deleteCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + deleteFlagMapField, textio.FieldValue + ":secret",
 	})
@@ -76,7 +76,7 @@ func TestDeleteRejectsUnsupportedMappedField(t *testing.T) {
 }
 
 func TestDeleteRejectsUnsupportedKeyField(t *testing.T) {
-	flags := append(globalFlags(), deleteCLICommand().Flags...)
+	flags := append(globalFlags(), deleteCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + deleteFlagKeyField, textio.FieldValue,
 	})

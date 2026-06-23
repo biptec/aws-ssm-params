@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -34,7 +35,24 @@ const (
 	exportEnvScalar         = envVarPrefix + "SCALAR"
 )
 
-func exportCLICommand() *cli.Command {
+func exportFlags() []cli.Flag {
+	flags := []cli.Flag{
+		&cli.StringSliceFlag{Name: exportFlagOutputField, Sources: cli.EnvVars(exportEnvOutputField), Usage: "AWS field to include in export output; repeat for multiple fields"},
+		&cli.StringSliceFlag{Name: exportFlagMapField, Sources: cli.EnvVars(exportEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+		&cli.StringSliceFlag{Name: exportFlagMapPath, Sources: cli.EnvVars(exportEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
+		&cli.StringSliceFlag{Name: exportFlagSortBy, Sources: cli.EnvVars(exportEnvSortBy), Usage: "export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
+		&cli.BoolFlag{Name: exportFlagWithDecryption, Sources: cli.EnvVars(exportEnvWithDecryption), Usage: "decrypt SecureString values"},
+		&cli.StringFlag{Name: exportFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(exportEnvFormat), Usage: "output format: dotenv, json, or yaml"},
+		&cli.StringFlag{Name: exportFlagKeyField, Sources: cli.EnvVars(exportEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
+		&cli.BoolFlag{Name: exportFlagScalar, Sources: cli.EnvVars(exportEnvScalar), Usage: "write exactly one selected --output-field as scalar values instead of records"},
+	}
+
+	sort.Sort(cli.FlagsByName(flags))
+
+	return flags
+}
+
+func exportCommand() *cli.Command {
 	return &cli.Command{
 		Name:      exportCommandName,
 		Usage:     "Export parameter values to stdout",
@@ -48,16 +66,7 @@ func exportCLICommand() *cli.Command {
 				exportFlagSortBy,
 			)
 		},
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: exportFlagOutputField, Sources: cli.EnvVars(exportEnvOutputField), Usage: "AWS field to include in export output; repeat for multiple fields"},
-			&cli.StringSliceFlag{Name: exportFlagMapField, Sources: cli.EnvVars(exportEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
-			&cli.StringSliceFlag{Name: exportFlagMapPath, Sources: cli.EnvVars(exportEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
-			&cli.StringSliceFlag{Name: exportFlagSortBy, Sources: cli.EnvVars(exportEnvSortBy), Usage: "export sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
-			&cli.BoolFlag{Name: exportFlagWithDecryption, Sources: cli.EnvVars(exportEnvWithDecryption), Usage: "decrypt SecureString values"},
-			&cli.StringFlag{Name: exportFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(exportEnvFormat), Usage: "output format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: exportFlagKeyField, Sources: cli.EnvVars(exportEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.BoolFlag{Name: exportFlagScalar, Sources: cli.EnvVars(exportEnvScalar), Usage: "write exactly one selected --output-field as scalar values instead of records"},
-		},
+		Flags: exportFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
 				options, err := exportOptionsFromCLI(ctx, cmd)

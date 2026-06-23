@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -58,7 +59,32 @@ const (
 	importEnvDefaultPoliciesFile = envVarPrefix + "DEFAULT_POLICIES_FILE"
 )
 
-func importCLICommand() *cli.Command {
+func importFlags() []cli.Flag {
+	flags := []cli.Flag{
+		&cli.StringSliceFlag{Name: importFlagMapField, Sources: cli.EnvVars(importEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
+		&cli.StringSliceFlag{Name: importFlagMapPath, Sources: cli.EnvVars(importEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
+		&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(importEnvFormat), Usage: "input format: dotenv, json, or yaml"},
+		&cli.StringFlag{Name: importFlagKeyField, Sources: cli.EnvVars(importEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
+		&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Sources: cli.EnvVars(importEnvOnCreate), Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
+		&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Sources: cli.EnvVars(importEnvOnUpdate), Usage: "when an imported parameter already exists: none, skip, error, or ask"},
+		&cli.BoolFlag{Name: importFlagContinueOnError, Sources: cli.EnvVars(importEnvContinueOnError), Usage: "continue importing remaining records after per-record errors"},
+		&cli.BoolFlag{Name: importFlagSummary, Sources: cli.EnvVars(importEnvSummary), Usage: "print an import summary after processing records"},
+		&cli.BoolFlag{Name: importFlagDryRun, Sources: cli.EnvVars(importEnvDryRun), Usage: "validate and show writes without changing Parameter Store"},
+		&cli.StringFlag{Name: importFlagDefaultType, Sources: cli.EnvVars(importEnvDefaultType), Usage: "default parameter type: string, string-list, or secure-string"},
+		&cli.StringFlag{Name: importFlagDefaultTier, Sources: cli.EnvVars(importEnvDefaultTier), Usage: "default parameter tier: standard, advanced, or intelligent-tiering"},
+		&cli.StringFlag{Name: importFlagDefaultDataType, Sources: cli.EnvVars(importEnvDefaultDataType), Usage: "default parameter data type: text, aws:ec2:image, or aws:ssm:integration"},
+		&cli.StringFlag{Name: importFlagDefaultRegion, Sources: cli.EnvVars(importEnvDefaultRegion), Usage: "default AWS region for imported records without region metadata"},
+		&cli.StringFlag{Name: importFlagDefaultDescription, Sources: cli.EnvVars(importEnvDefaultDescription), Usage: "default parameter description"},
+		&cli.StringFlag{Name: importFlagDefaultPolicies, Sources: cli.EnvVars(importEnvDefaultPolicies), Usage: "default parameter policies JSON"},
+		&cli.StringFlag{Name: importFlagDefaultPoliciesFile, Sources: cli.EnvVars(importEnvDefaultPoliciesFile), Usage: "read default parameter policies JSON from file"},
+	}
+
+	sort.Sort(cli.FlagsByName(flags))
+
+	return flags
+}
+
+func importCommand() *cli.Command {
 	return &cli.Command{
 		Name:      importCommandName,
 		Usage:     "Import parameter values from stdin",
@@ -66,24 +92,7 @@ func importCLICommand() *cli.Command {
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), importFlagMapField, importFlagMapPath)
 		},
-		Flags: []cli.Flag{
-			&cli.StringSliceFlag{Name: importFlagMapField, Sources: cli.EnvVars(importEnvMapField), Usage: "field mapping as aws_field:file_field; repeat for multiple mappings"},
-			&cli.StringSliceFlag{Name: importFlagMapPath, Sources: cli.EnvVars(importEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
-			&cli.StringFlag{Name: importFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(importEnvFormat), Usage: "input format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: importFlagKeyField, Sources: cli.EnvVars(importEnvKeyField), Usage: "AWS field to use as object/map key for JSON or YAML records"},
-			&cli.StringFlag{Name: importFlagOnCreate, Value: importPolicyNoneValue, Sources: cli.EnvVars(importEnvOnCreate), Usage: "when an imported parameter does not exist: none, skip, error, or ask"},
-			&cli.StringFlag{Name: importFlagOnUpdate, Value: importPolicyAskValue, Sources: cli.EnvVars(importEnvOnUpdate), Usage: "when an imported parameter already exists: none, skip, error, or ask"},
-			&cli.BoolFlag{Name: importFlagContinueOnError, Sources: cli.EnvVars(importEnvContinueOnError), Usage: "continue importing remaining records after per-record errors"},
-			&cli.BoolFlag{Name: importFlagSummary, Sources: cli.EnvVars(importEnvSummary), Usage: "print an import summary after processing records"},
-			&cli.BoolFlag{Name: importFlagDryRun, Sources: cli.EnvVars(importEnvDryRun), Usage: "validate and show writes without changing Parameter Store"},
-			&cli.StringFlag{Name: importFlagDefaultType, Sources: cli.EnvVars(importEnvDefaultType), Usage: "default parameter type: string, string-list, or secure-string"},
-			&cli.StringFlag{Name: importFlagDefaultTier, Sources: cli.EnvVars(importEnvDefaultTier), Usage: "default parameter tier: standard, advanced, or intelligent-tiering"},
-			&cli.StringFlag{Name: importFlagDefaultDataType, Sources: cli.EnvVars(importEnvDefaultDataType), Usage: "default parameter data type: text, aws:ec2:image, or aws:ssm:integration"},
-			&cli.StringFlag{Name: importFlagDefaultRegion, Sources: cli.EnvVars(importEnvDefaultRegion), Usage: "default AWS region for imported records without region metadata"},
-			&cli.StringFlag{Name: importFlagDefaultDescription, Sources: cli.EnvVars(importEnvDefaultDescription), Usage: "default parameter description"},
-			&cli.StringFlag{Name: importFlagDefaultPolicies, Sources: cli.EnvVars(importEnvDefaultPolicies), Usage: "default parameter policies JSON"},
-			&cli.StringFlag{Name: importFlagDefaultPoliciesFile, Sources: cli.EnvVars(importEnvDefaultPoliciesFile), Usage: "read default parameter policies JSON from file"},
-		},
+		Flags: importFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
 				options, err := importOptionsFromCLI(ctx, cmd)

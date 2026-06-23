@@ -40,10 +40,10 @@ func newCLIApp(rawArgs []string) *cli.Command {
 			return cli.ShowRootCommandHelp(cmd)
 		},
 		Commands: []*cli.Command{
-			tuiCLICommand(),
-			importCLICommand(),
-			exportCLICommand(),
-			deleteCLICommand(),
+			tuiCommand(),
+			importCommand(),
+			exportCommand(),
+			deleteCommand(),
 		},
 	}
 }

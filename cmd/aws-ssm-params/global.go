@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -42,7 +43,7 @@ type globalOptions struct {
 }
 
 func globalFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := []cli.Flag{
 		&cli.StringSliceFlag{Name: flagRegion, Sources: cli.EnvVars(envRegion, envAWSRegion), Usage: "AWS region; repeat the flag for multiple regions; env accepts comma-separated values"},
 		&cli.BoolFlag{Name: flagAllRegions, Sources: cli.EnvVars(envAllRegions), Usage: "search parameters across all enabled AWS regions"},
 		&cli.StringFlag{Name: flagProfile, Sources: cli.EnvVars(envProfile, envAWSProfile), Usage: "AWS profile"},
@@ -51,6 +52,10 @@ func globalFlags() []cli.Flag {
 		&cli.StringFlag{Name: flagLogLevel, Value: "off", Sources: cli.EnvVars(envLogLevel), Usage: "log level: trace, debug, info, warn, error, or off"},
 		&cli.StringSliceFlag{Name: flagFilter, Sources: cli.EnvVars(envFilter), Usage: "filter group; conditions inside one value are separated by semicolons; env accepts comma-separated values"},
 	}
+
+	sort.Sort(cli.FlagsByName(flags))
+
+	return flags
 }
 
 func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions, error) {

@@ -12,7 +12,7 @@ import (
 )
 
 func TestExportOptionsParseFieldsMappingsAndSort(t *testing.T) {
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 		"--" + exportFlagOutputField, textio.FieldName,
@@ -34,7 +34,7 @@ func TestExportOptionsParseFieldsMappingsAndSort(t *testing.T) {
 }
 
 func TestExportScalarRequiresExactlyOneOutputField(t *testing.T) {
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{"--" + exportFlagScalar})
 
 	_, err := exportOptionsFromCLI(context.Background(), cmd)
@@ -53,7 +53,7 @@ func TestExportOptionsReadEnvironmentFlags(t *testing.T) {
 	t.Setenv(exportEnvKeyField, textio.FieldName)
 	t.Setenv(exportEnvScalar, "true")
 
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, nil)
 
 	options, err := exportOptionsFromCLI(context.Background(), cmd)
@@ -73,7 +73,7 @@ func TestExportOptionsReadEnvironmentFlags(t *testing.T) {
 }
 
 func TestExportRejectsInvalidPathMapping(t *testing.T) {
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + exportFlagMapPath, "/app/dev",
 	})
@@ -85,7 +85,7 @@ func TestExportRejectsInvalidPathMapping(t *testing.T) {
 }
 
 func TestExportRejectsKeyAndOutputFieldCollision(t *testing.T) {
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + exportFlagOutputField, textio.FieldName,
 		"--" + exportFlagKeyField, textio.FieldName,
@@ -98,7 +98,7 @@ func TestExportRejectsKeyAndOutputFieldCollision(t *testing.T) {
 }
 
 func TestExportRejectsOutputFieldAliasSyntax(t *testing.T) {
-	flags := append(globalFlags(), exportCLICommand().Flags...)
+	flags := append(globalFlags(), exportCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + exportFlagOutputField, textio.FieldValue + ":text",
 	})

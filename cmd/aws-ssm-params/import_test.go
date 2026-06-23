@@ -15,7 +15,7 @@ import (
 )
 
 func TestImportOptionsParseDefaultsAndPolicies(t *testing.T) {
-	flags := append(globalFlags(), importCLICommand().Flags...)
+	flags := append(globalFlags(), importCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 		"--" + importFlagDefaultType, "string",
@@ -60,7 +60,7 @@ func TestImportOptionsReadEnvironmentFlags(t *testing.T) {
 	t.Setenv(importEnvDefaultDescription, "from env")
 	t.Setenv(importEnvDefaultPoliciesFile, policiesFile)
 
-	flags := append(globalFlags(), importCLICommand().Flags...)
+	flags := append(globalFlags(), importCommand().Flags...)
 	cmd := testParsedCommand(t, flags, nil)
 
 	options, err := importOptionsFromCLI(context.Background(), cmd)
@@ -88,7 +88,7 @@ func TestImportOptionsReadEnvironmentFlags(t *testing.T) {
 }
 
 func TestImportRejectsUnsupportedPolicy(t *testing.T) {
-	flags := append(globalFlags(), importCLICommand().Flags...)
+	flags := append(globalFlags(), importCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 		"--" + importFlagOnCreate, "apply",
@@ -101,7 +101,7 @@ func TestImportRejectsUnsupportedPolicy(t *testing.T) {
 }
 
 func TestImportPolicyDefaultsCreateWithoutPromptAndAsksOnUpdate(t *testing.T) {
-	flags := append(globalFlags(), importCLICommand().Flags...)
+	flags := append(globalFlags(), importCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 	})
@@ -114,7 +114,7 @@ func TestImportPolicyDefaultsCreateWithoutPromptAndAsksOnUpdate(t *testing.T) {
 }
 
 func TestImportPolicyAcceptsExplicitNone(t *testing.T) {
-	flags := append(globalFlags(), importCLICommand().Flags...)
+	flags := append(globalFlags(), importCommand().Flags...)
 	cmd := testParsedCommand(t, flags, []string{
 		"--" + flagRegion, "eu-north-1",
 		"--" + importFlagOnCreate, importPolicyNoneValue,

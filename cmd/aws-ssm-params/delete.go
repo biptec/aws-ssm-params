@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -30,7 +31,22 @@ const (
 	deleteEnvDryRun    = envVarPrefix + "DRY_RUN"
 )
 
-func deleteCLICommand() *cli.Command {
+func deleteFlags() []cli.Flag {
+	flags := []cli.Flag{
+		&cli.StringFlag{Name: deleteFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(deleteEnvFormat), Usage: "input format: dotenv, json, or yaml"},
+		&cli.StringFlag{Name: deleteFlagKeyField, Sources: cli.EnvVars(deleteEnvKeyField), Usage: "field represented by JSON or YAML object keys: name or region"},
+		&cli.StringSliceFlag{Name: deleteFlagMapField, Sources: cli.EnvVars(deleteEnvMapField), Usage: "input field mapping as name:file_field or region:file_field; repeat for both mappings"},
+		&cli.StringSliceFlag{Name: deleteFlagMapPath, Sources: cli.EnvVars(deleteEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
+		&cli.BoolFlag{Name: deleteFlagNoConfirm, Sources: cli.EnvVars(deleteEnvNoConfirm), Usage: "delete every filtered input record without interactive confirmation"},
+		&cli.BoolFlag{Name: deleteFlagDryRun, Sources: cli.EnvVars(deleteEnvDryRun), Usage: "show parameters that would be deleted without deleting them"},
+	}
+
+	sort.Sort(cli.FlagsByName(flags))
+
+	return flags
+}
+
+func deleteCommand() *cli.Command {
 	return &cli.Command{
 		Name:      deleteCommandName,
 		Usage:     "Delete parameters described by records from stdin",
@@ -38,14 +54,7 @@ func deleteCLICommand() *cli.Command {
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), deleteFlagMapField, deleteFlagMapPath)
 		},
-		Flags: []cli.Flag{
-			&cli.StringFlag{Name: deleteFlagFormat, Value: string(textio.FormatDotenv), Sources: cli.EnvVars(deleteEnvFormat), Usage: "input format: dotenv, json, or yaml"},
-			&cli.StringFlag{Name: deleteFlagKeyField, Sources: cli.EnvVars(deleteEnvKeyField), Usage: "field represented by JSON or YAML object keys: name or region"},
-			&cli.StringSliceFlag{Name: deleteFlagMapField, Sources: cli.EnvVars(deleteEnvMapField), Usage: "input field mapping as name:file_field or region:file_field; repeat for both mappings"},
-			&cli.StringSliceFlag{Name: deleteFlagMapPath, Sources: cli.EnvVars(deleteEnvMapPath), Usage: "path mapping as aws_path:file_path; repeat for multiple mappings"},
-			&cli.BoolFlag{Name: deleteFlagNoConfirm, Sources: cli.EnvVars(deleteEnvNoConfirm), Usage: "delete every filtered input record without interactive confirmation"},
-			&cli.BoolFlag{Name: deleteFlagDryRun, Sources: cli.EnvVars(deleteEnvDryRun), Usage: "show parameters that would be deleted without deleting them"},
-		},
+		Flags: deleteFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, false, func(ctx context.Context) error {
 				options, err := deleteOptionsFromCLI(ctx, cmd)

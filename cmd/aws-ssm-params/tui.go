@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/cockroachdb/errors"
@@ -33,7 +34,23 @@ const (
 	tuiEnvNoConfirmDeleteAll        = envVarPrefix + "NO_CONFIRM_DELETE_ALL"
 )
 
-func tuiCLICommand() *cli.Command {
+func tuiFlags() []cli.Flag {
+	flags := []cli.Flag{
+		&cli.BoolFlag{Name: tuiFlagWithDecryption, Sources: cli.EnvVars(tuiEnvWithDecryption), Usage: "decrypt SecureString values"},
+		&cli.StringSliceFlag{Name: tuiFlagShowColumn, Sources: cli.EnvVars(tuiEnvShowColumn), Usage: "optional column to show in the TUI; repeat for multiple columns; env accepts comma-separated values"},
+		&cli.StringSliceFlag{Name: tuiFlagSortBy, Sources: cli.EnvVars(tuiEnvSortBy), Usage: "initial sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
+		&cli.BoolFlag{Name: tuiFlagNoConfirmOverwriteFile, Sources: cli.EnvVars(tuiEnvNoConfirmOverwriteFile), Usage: "do not ask before overwriting local files from the TUI"},
+		&cli.BoolFlag{Name: tuiFlagNoConfirmWriteSecureValue, Sources: cli.EnvVars(tuiEnvNoConfirmWriteSecureValue), Usage: "do not ask before writing SecureString values to local files in plaintext"},
+		&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteOne, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteOne), Usage: "do not ask before deleting one parameter in the TUI"},
+		&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteAll, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteAll), Usage: "do not ask before deleting all visible parameters in the TUI"},
+	}
+
+	sort.Sort(cli.FlagsByName(flags))
+
+	return flags
+}
+
+func tuiCommand() *cli.Command {
 	return &cli.Command{
 		Name:      tuiCommandName,
 		Usage:     "Open the TUI",
@@ -41,15 +58,7 @@ func tuiCLICommand() *cli.Command {
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			return ctx, rejectCommaSeparatedFlagArgs(cmd.Args().Slice(), tuiFlagShowColumn)
 		},
-		Flags: []cli.Flag{
-			&cli.BoolFlag{Name: tuiFlagWithDecryption, Sources: cli.EnvVars(tuiEnvWithDecryption), Usage: "decrypt SecureString values"},
-			&cli.StringSliceFlag{Name: tuiFlagShowColumn, Sources: cli.EnvVars(tuiEnvShowColumn), Usage: "optional column to show in the TUI; repeat for multiple columns; env accepts comma-separated values"},
-			&cli.StringSliceFlag{Name: tuiFlagSortBy, Sources: cli.EnvVars(tuiEnvSortBy), Usage: "initial sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
-			&cli.BoolFlag{Name: tuiFlagNoConfirmOverwriteFile, Sources: cli.EnvVars(tuiEnvNoConfirmOverwriteFile), Usage: "do not ask before overwriting local files from the TUI"},
-			&cli.BoolFlag{Name: tuiFlagNoConfirmWriteSecureValue, Sources: cli.EnvVars(tuiEnvNoConfirmWriteSecureValue), Usage: "do not ask before writing SecureString values to local files in plaintext"},
-			&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteOne, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteOne), Usage: "do not ask before deleting one parameter in the TUI"},
-			&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteAll, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteAll), Usage: "do not ask before deleting all visible parameters in the TUI"},
-		},
+		Flags: tuiFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			return runWithLogging(ctx, cmd, true, func(ctx context.Context) error {
 				options, err := tuiOptionsFromCLI(ctx, cmd)
