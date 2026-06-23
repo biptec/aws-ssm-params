@@ -36,7 +36,8 @@ const (
 )
 
 type globalOptions struct {
-	Config  app.Config
+	*app.Options
+
 	NoColor bool
 	Keymap  string
 }
@@ -90,7 +91,7 @@ func globalOptionsFromCLI(ctx context.Context, cmd *cli.Command) (globalOptions,
 		return globalOptions{}, err
 	}
 	return globalOptions{
-		Config: app.Config{
+		Options: &app.Options{
 			Logger:       logging.FromContext(ctx),
 			FilterGroups: filterGroups,
 			Region:       region,

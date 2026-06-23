@@ -23,12 +23,12 @@ func TestGlobalOptionsParseRepeatedRegionsAndFilters(t *testing.T) {
 	options, err := globalOptionsFromCLI(context.Background(), cmd)
 
 	require.NoError(t, err)
-	assert.Equal(t, "eu-north-1", options.Config.Region)
-	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, options.Config.Regions)
-	assert.Equal(t, "cli-profile", options.Config.Profile)
+	assert.Equal(t, "eu-north-1", options.Region)
+	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, options.Regions)
+	assert.Equal(t, "cli-profile", options.Profile)
 	assert.Equal(t, "vi", options.Keymap)
-	require.Len(t, options.Config.FilterGroups, 1)
-	assert.True(t, options.Config.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
+	require.Len(t, options.FilterGroups, 1)
+	assert.True(t, options.FilterGroups[0].Match(filter.Record{Name: "/prod/db", Region: "eu-north-1"}))
 }
 
 func TestGlobalOptionsUseCommaSeparatedEnvironmentLists(t *testing.T) {
@@ -38,7 +38,7 @@ func TestGlobalOptionsUseCommaSeparatedEnvironmentLists(t *testing.T) {
 	options, err := globalOptionsFromCLI(context.Background(), cmd)
 
 	require.NoError(t, err)
-	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, options.Config.Regions)
+	assert.Equal(t, []string{"eu-north-1", "eu-central-1"}, options.Regions)
 }
 
 func TestGlobalOptionsPreferToolEnvironmentAliases(t *testing.T) {
@@ -51,8 +51,8 @@ func TestGlobalOptionsPreferToolEnvironmentAliases(t *testing.T) {
 	options, err := globalOptionsFromCLI(context.Background(), cmd)
 
 	require.NoError(t, err)
-	assert.Equal(t, "eu-north-1", options.Config.Region)
-	assert.Equal(t, "tool-profile", options.Config.Profile)
+	assert.Equal(t, "eu-north-1", options.Region)
+	assert.Equal(t, "tool-profile", options.Profile)
 }
 
 func TestGlobalOptionsRejectRegionWithAllRegions(t *testing.T) {

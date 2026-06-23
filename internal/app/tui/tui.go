@@ -16,7 +16,8 @@ import (
 
 // Options contains the complete runtime configuration for one TUI session.
 type Options struct {
-	Config                    app.Config
+	*app.Options
+
 	NoColor                   bool
 	Keymap                    string
 	ShowColumns               []string
@@ -31,13 +32,13 @@ type Options struct {
 
 // runner owns the configuration and input mode of one TUI invocation.
 type runner struct {
-	ctx     context.Context
-	options Options
+	ctx  context.Context
+	opts *Options
 }
 
 // Run opens the terminal UI.
-func Run(ctx context.Context, options Options) error {
-	r := runner{ctx: ctx, options: options}
+func Run(ctx context.Context, opts *Options) error {
+	r := runner{ctx: ctx, opts: opts}
 	return r.run()
 }
 
@@ -45,12 +46,12 @@ func (r *runner) run() error {
 	if err := r.prepare(); err != nil {
 		return err
 	}
-	cfg := r.options.Config
+	opts := r.opts.Options
 	client := ssm.NewClient(ssm.ClientConfig{
-		Profile:        cfg.Profile,
-		Region:         cfg.Region,
-		WithDecryption: cfg.WithDecryption,
-		Logger:         cfg.Logger,
+		Profile:        opts.Profile,
+		Region:         opts.Region,
+		WithDecryption: opts.WithDecryption,
+		Logger:         opts.Logger,
 	})
 	if err := client.CheckAccess(r.ctx); err != nil {
 		return errors.Wrap(err, "check AWS access")
@@ -60,27 +61,25 @@ func (r *runner) run() error {
 		return err
 	}
 	return errors.Wrap(
-		ui.RunInteractive(r.ctx, client, r.options.Config.InventoryItems, r.uiOptions(regionLabel, regions)),
+		ui.RunInteractive(r.ctx, client, r.opts.InventoryItems, r.uiOptions(regionLabel, regions)),
 		"run interactive",
 	)
 }
 
 func (r *runner) prepare() error {
-	cfg := r.options.Config
-	items, err := app.PrepareItems(r.ctx, &cfg)
+	opts := r.opts.Options
+	items, err := opts.PrepareItems(r.ctx)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	cfg.InventoryItems = items
-	r.options.Config = cfg
+	r.opts.InventoryItems = items
 	return nil
 }
 
 func (r runner) regionSelection(client ssm.Client) (regionLabel string, regions []string, err error) {
-	cfg := r.options.Config
-	regionLabel = cfg.Region
-	regions = append([]string(nil), cfg.Regions...)
-	if cfg.AllRegions {
+	regionLabel = r.opts.Region
+	regions = append([]string(nil), r.opts.Regions...)
+	if r.opts.AllRegions {
 		regionLabel = "all regions"
 		regions, err = client.ListRegions(r.ctx)
 		if err != nil {
@@ -93,24 +92,24 @@ func (r runner) regionSelection(client ssm.Client) (regionLabel string, regions 
 }
 
 func (r runner) uiOptions(regionLabel string, regions []string) ui.Options {
-	cfg := r.options.Config
-	options := r.options
+	opts := r.opts
+
 	return ui.Options{
 		Region:                    regionLabel,
 		Regions:                   regions,
-		Profile:                   cfg.Profile,
-		FilterGroups:              cfg.FilterGroups,
-		NoColor:                   options.NoColor,
-		Keymap:                    options.Keymap,
-		ShowColumns:               options.ShowColumns,
-		Sort:                      options.SortColumns,
-		Fields:                    options.Fields,
-		IncludeValues:             cfg.WithDecryption || options.Fields.RequiresValues() || cfg.FilterGroups.HasField(filter.FieldValue),
-		ShowSecureValues:          cfg.WithDecryption,
-		NoConfirmOverwriteFile:    options.NoConfirmOverwriteFile,
-		NoConfirmWriteSecureValue: options.NoConfirmWriteSecureValue,
-		NoConfirmDeleteOne:        options.NoConfirmDeleteOne,
-		NoConfirmDeleteAll:        options.NoConfirmDeleteAll,
-		UseInputTTY:               options.UseInputTTY,
+		Profile:                   opts.Profile,
+		FilterGroups:              opts.FilterGroups,
+		NoColor:                   opts.NoColor,
+		Keymap:                    opts.Keymap,
+		ShowColumns:               opts.ShowColumns,
+		Sort:                      opts.SortColumns,
+		Fields:                    opts.Fields,
+		IncludeValues:             opts.WithDecryption || opts.Fields.RequiresValues() || opts.FilterGroups.HasField(filter.FieldValue),
+		ShowSecureValues:          opts.WithDecryption,
+		NoConfirmOverwriteFile:    opts.NoConfirmOverwriteFile,
+		NoConfirmWriteSecureValue: opts.NoConfirmWriteSecureValue,
+		NoConfirmDeleteOne:        opts.NoConfirmDeleteOne,
+		NoConfirmDeleteAll:        opts.NoConfirmDeleteAll,
+		UseInputTTY:               opts.UseInputTTY,
 	}
 }

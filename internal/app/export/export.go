@@ -17,7 +17,8 @@ import (
 
 // Options contains the complete runtime configuration for one export.
 type Options struct {
-	Config        app.Config
+	*app.Options
+
 	Format        textio.FormatType
 	FieldMappings textio.FieldMappings
 	Fields        textio.Fields
@@ -28,8 +29,8 @@ type Options struct {
 }
 
 // Run loads statuses for the requested inventory and writes existing parameter values.
-func Run(ctx context.Context, options Options, output io.Writer) error {
-	r, err := newRunner(ctx, options, output)
+func Run(ctx context.Context, opts *Options, output io.Writer) error {
+	r, err := newRunner(ctx, opts, output)
 	if err != nil {
 		return err
 	}
@@ -40,7 +41,7 @@ func Run(ctx context.Context, options Options, output io.Writer) error {
 // Pure formatting and sorting helpers remain package functions; orchestration lives here.
 type runner struct {
 	ctx          context.Context
-	cfg          app.Config
+	opts         *Options
 	client       ssm.Client
 	writer       textio.Writer
 	items        inventory.Items
@@ -53,40 +54,39 @@ type runner struct {
 	fieldMaps    textio.FieldMappings
 }
 
-func newRunner(ctx context.Context, options Options, output io.Writer) (*runner, error) {
-	cfg := options.Config
-	items, err := app.PrepareItems(ctx, &cfg)
+func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, error) {
+	items, err := opts.PrepareItems(ctx)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 	client := ssm.NewClient(ssm.ClientConfig{
-		Profile:        cfg.Profile,
-		Region:         cfg.Region,
-		WithDecryption: cfg.WithDecryption,
-		Logger:         cfg.Logger,
+		Profile:        opts.Profile,
+		Region:         opts.Region,
+		WithDecryption: opts.WithDecryption,
+		Logger:         opts.Logger,
 	})
-	regions := append([]string(nil), cfg.Regions...)
-	if cfg.AllRegions {
+	regions := append([]string(nil), opts.Regions...)
+	if opts.AllRegions {
 		regions, err = client.ListRegions(ctx)
 		if err != nil {
 			return nil, errors.Wrap(err, "list AWS regions")
 		}
 	}
 
-	fields := fieldsForOptions(options.Fields)
+	fields := fieldsForOptions(opts.Fields)
 	return &runner{
 		ctx:          ctx,
-		cfg:          cfg,
+		opts:         opts,
 		client:       client,
-		writer:       textio.NewWriter(options.Format, output),
+		writer:       textio.NewWriter(opts.Format, output),
 		items:        items,
 		regions:      regions,
-		keyField:     options.KeyField,
-		scalarField:  options.ScalarField,
-		recordFields: recordFields(fields, options.ScalarField, options.KeyField),
-		sortRules:    parseSortRules(options.SortColumns),
-		basePath:     options.BasePath,
-		fieldMaps:    options.FieldMappings,
+		keyField:     opts.KeyField,
+		scalarField:  opts.ScalarField,
+		recordFields: recordFields(fields, opts.ScalarField, opts.KeyField),
+		sortRules:    parseSortRules(opts.SortColumns),
+		basePath:     opts.BasePath,
+		fieldMaps:    opts.FieldMappings,
 	}, nil
 }
 
@@ -108,17 +108,17 @@ func (r *runner) run() error {
 }
 
 func (r *runner) loadStatuses() ui.Statuses {
-	includeValues := r.cfg.WithDecryption ||
+	includeValues := r.opts.WithDecryption ||
 		r.recordFields.RequiresValues() ||
-		r.cfg.FilterGroups.HasField(filter.FieldValue) ||
+		r.opts.FilterGroups.HasField(filter.FieldValue) ||
 		r.sortRules.requiresValues()
 
 	var statuses ui.Statuses
-	if len(r.cfg.FilterGroups) > 0 && len(r.items) == 0 {
+	if len(r.opts.FilterGroups) > 0 && len(r.items) == 0 {
 		statuses = ui.LoadFilteredStatusesBatchForRegions(
 			r.ctx,
 			r.client,
-			r.cfg.FilterGroups,
+			r.opts.FilterGroups,
 			includeValues,
 			r.regions,
 			nil,
@@ -133,7 +133,7 @@ func (r *runner) loadStatuses() ui.Statuses {
 		)
 	}
 	if len(r.items) > 0 {
-		return statuses.Filter(r.cfg.FilterGroups)
+		return statuses.Filter(r.opts.FilterGroups)
 	}
 	return statuses
 }

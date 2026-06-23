@@ -27,7 +27,7 @@ func TestExportOptionsParseFieldsMappingsAndSort(t *testing.T) {
 	assert.Equal(t, textio.Fields{textio.FieldName, textio.FieldValue}, options.Fields)
 	assert.Equal(t, textio.FieldMappings{{AWSName: textio.FieldName, FileName: "title"}}, options.FieldMappings)
 	assert.Equal(t, []string{textio.FieldName + ":asc"}, options.SortColumns)
-	assert.True(t, options.Config.WithDecryption)
+	assert.True(t, options.WithDecryption)
 }
 
 func TestExportScalarRequiresExactlyOneOutputField(t *testing.T) {

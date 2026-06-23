@@ -66,45 +66,45 @@ func exportCLICommand() *cli.Command {
 	}
 }
 
-func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (exportcmd.Options, error) {
+func exportOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*exportcmd.Options, error) {
 	global, err := globalOptionsFromCLI(ctx, cmd)
 	if err != nil {
-		return exportcmd.Options{}, err
+		return &exportcmd.Options{}, err
 	}
 	fields, err := parseOutputFields(
 		stringSliceFlagValue(cmd, exportFlagOutputField, exportEnvOutputField),
 		exportFlagOutputField,
 	)
 	if err != nil {
-		return exportcmd.Options{}, err
+		return &exportcmd.Options{}, err
 	}
 	fieldMappings, err := parseFieldMappings(
 		stringSliceFlagValue(cmd, exportFlagMapField, exportEnvMapField),
 		exportFlagMapField,
 	)
 	if err != nil {
-		return exportcmd.Options{}, err
+		return &exportcmd.Options{}, err
 	}
 	keyField := strings.TrimSpace(cmd.String(exportFlagKeyField))
 	if err := validateKeyFieldOutputFields(keyField, fields); err != nil {
-		return exportcmd.Options{}, err
+		return &exportcmd.Options{}, err
 	}
 	basePath, err := app.ParseBasePath(cmd.String(exportFlagBasePath))
 	if err != nil {
-		return exportcmd.Options{}, fmt.Errorf("--%s: %w", exportFlagBasePath, err)
+		return &exportcmd.Options{}, fmt.Errorf("--%s: %w", exportFlagBasePath, err)
 	}
 	scalarField, err := exportScalarField(cmd, fields)
 	if err != nil {
-		return exportcmd.Options{}, err
+		return &exportcmd.Options{}, err
 	}
-	global.Config.WithDecryption = boolFlagValueAny(
+	global.WithDecryption = boolFlagValueAny(
 		cmd,
 		exportFlagWithDecryption,
 		false,
 		exportEnvWithDecryption,
 	)
-	return exportcmd.Options{
-		Config:        global.Config,
+	return &exportcmd.Options{
+		Options:       global.Options,
 		Format:        textio.FormatType(cmd.String(exportFlagFormat)),
 		FieldMappings: fieldMappings,
 		Fields:        fields,

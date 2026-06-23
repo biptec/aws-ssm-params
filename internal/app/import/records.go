@@ -60,7 +60,7 @@ type MetadataResolver struct {
 	ctx     context.Context
 	client  ssm.Client
 	records Records
-	cfg     app.Config
+	opts    *Options
 	fields  textio.Fields
 }
 
@@ -89,13 +89,13 @@ func wrapParameterType(parameterType ssm.ParameterType, err error) (ssm.Paramete
 	return parameterType, nil
 }
 
-func recordRegion(record textio.Record, cfg app.Config, fields textio.Fields) string {
+func recordRegion(record textio.Record, opts *Options, fields textio.Fields) string {
 	if fields.Allows(textio.FieldRegion) &&
 		record.HasField(textio.FieldRegion) &&
 		strings.TrimSpace(record.Region) != "" {
 		return strings.TrimSpace(record.Region)
 	}
-	return cfg.Region
+	return opts.Region
 }
 
 func (resolver MetadataResolver) resolve() (metadataByKey map[string]ssm.Metadata, errorsByKey map[string]error) {
@@ -103,7 +103,7 @@ func (resolver MetadataResolver) resolve() (metadataByKey map[string]ssm.Metadat
 	seen := map[string]bool{}
 	for i := range resolver.records {
 		record := &resolver.records[i]
-		region := recordRegion(*record, resolver.cfg, resolver.fields)
+		region := recordRegion(*record, resolver.opts, resolver.fields)
 		key := recordKey(region, record.Path)
 		if seen[key] {
 			continue

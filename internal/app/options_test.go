@@ -11,7 +11,7 @@ import (
 )
 
 func TestPrepareItemsLoadsExplicitInventorySources(t *testing.T) {
-	cfg := Config{
+	cfg := Options{
 		Region: "eu-north-1",
 		InventoryItems: []inventory.Item{
 			{Path: "/app/from-stdin", Kind: "path-file", Source: "stdin", SecretName: "from-stdin"},
@@ -19,7 +19,7 @@ func TestPrepareItemsLoadsExplicitInventorySources(t *testing.T) {
 		},
 	}
 
-	items, err := PrepareItems(context.Background(), &cfg)
+	items, err := cfg.PrepareItems(context.Background())
 
 	require.NoError(t, err)
 	require.Len(t, items, 1)
@@ -29,13 +29,13 @@ func TestPrepareItemsLoadsExplicitInventorySources(t *testing.T) {
 }
 
 func TestPrepareItemsMarksExplicitInventoryWildcardForMultipleRegions(t *testing.T) {
-	cfg := Config{
+	cfg := Options{
 		Regions:        []string{"eu-north-1", "eu-central-1"},
 		Region:         "eu-north-1",
 		InventoryItems: []inventory.Item{{Path: "/app/shared", Kind: "path-file", Source: "stdin", SecretName: "shared"}},
 	}
 
-	items, err := PrepareItems(context.Background(), &cfg)
+	items, err := cfg.PrepareItems(context.Background())
 
 	require.NoError(t, err)
 	require.Len(t, items, 1)

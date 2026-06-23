@@ -78,21 +78,21 @@ func importCLICommand() *cli.Command {
 	}
 }
 
-func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (importcmd.Options, error) {
+func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*importcmd.Options, error) {
 	global, err := globalOptionsFromCLI(ctx, cmd)
 	if err != nil {
-		return importcmd.Options{}, err
+		return &importcmd.Options{}, err
 	}
-	if global.Config.AllRegions {
-		return importcmd.Options{}, fmt.Errorf(
+	if global.AllRegions {
+		return &importcmd.Options{}, fmt.Errorf(
 			"--%s is not supported for %s; specify --%s",
 			flagAllRegions,
 			importCommandName,
 			flagRegion,
 		)
 	}
-	if len(global.Config.Regions) > 1 {
-		return importcmd.Options{}, fmt.Errorf(
+	if len(global.Regions) > 1 {
+		return &importcmd.Options{}, fmt.Errorf(
 			"multiple --%s values are only supported for %s and %s",
 			flagRegion,
 			tuiCommandName,
@@ -101,26 +101,26 @@ func importOptionsFromCLI(ctx context.Context, cmd *cli.Command) (importcmd.Opti
 	}
 	fieldMappings, err := parseFieldMappings(cmd.StringSlice(importFlagMapField), importFlagMapField)
 	if err != nil {
-		return importcmd.Options{}, err
+		return &importcmd.Options{}, err
 	}
 	basePath, err := app.ParseBasePath(cmd.String(importFlagBasePath))
 	if err != nil {
-		return importcmd.Options{}, fmt.Errorf("--%s: %w", importFlagBasePath, err)
+		return &importcmd.Options{}, fmt.Errorf("--%s: %w", importFlagBasePath, err)
 	}
 	defaultType, err := ssm.ParseParameterType(cmd.String(importFlagDefaultType))
 	if err != nil {
-		return importcmd.Options{}, errors.Wrap(err, "parse default type")
+		return &importcmd.Options{}, errors.Wrap(err, "parse default type")
 	}
 	defaultOptions, err := importDefaultOptionsFromCLI(cmd)
 	if err != nil {
-		return importcmd.Options{}, err
+		return &importcmd.Options{}, err
 	}
 	policy, err := importPolicyFromCLI(cmd)
 	if err != nil {
-		return importcmd.Options{}, err
+		return &importcmd.Options{}, err
 	}
-	return importcmd.Options{
-		Config:          global.Config,
+	return &importcmd.Options{
+		Options:         global.Options,
 		Format:          textio.FormatType(cmd.String(importFlagFormat)),
 		FieldMappings:   fieldMappings,
 		KeyField:        strings.TrimSpace(cmd.String(importFlagKeyField)),

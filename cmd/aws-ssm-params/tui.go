@@ -62,31 +62,31 @@ func tuiCLICommand() *cli.Command {
 	}
 }
 
-func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (tuicmd.Options, error) {
+func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, error) {
 	global, err := globalOptionsFromCLI(ctx, cmd)
 	if err != nil {
-		return tuicmd.Options{}, err
+		return &tuicmd.Options{}, err
 	}
 	showColumns, err := ui.ParseColumnOption(strings.Join(
 		stringSliceFlagValue(cmd, tuiFlagShowColumn, tuiEnvShowColumn),
 		",",
 	))
 	if err != nil {
-		return tuicmd.Options{}, errors.Wrap(err, "parse show columns")
+		return &tuicmd.Options{}, errors.Wrap(err, "parse show columns")
 	}
 	stdinItems, useInputTTY, err := loadTUIInventoryFromStdin()
 	if err != nil {
-		return tuicmd.Options{}, err
+		return &tuicmd.Options{}, err
 	}
-	global.Config.InventoryItems = append(global.Config.InventoryItems, stdinItems...)
-	global.Config.WithDecryption = boolFlagValueAny(
+	global.InventoryItems = append(global.InventoryItems, stdinItems...)
+	global.WithDecryption = boolFlagValueAny(
 		cmd,
 		tuiFlagWithDecryption,
 		false,
 		tuiEnvWithDecryption,
 	)
-	return tuicmd.Options{
-		Config:                    global.Config,
+	return &tuicmd.Options{
+		Options:                   global.Options,
 		NoColor:                   global.NoColor,
 		Keymap:                    global.Keymap,
 		ShowColumns:               showColumns,
