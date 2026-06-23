@@ -36,7 +36,24 @@ linters:
     - wrapcheck
     - godox
     - depguard
+    - containedctx
+    - wsl_v5
+    - nlreturn
+    - whitespace
   settings:
+    wsl_v5:
+      default: default
+      branch-max-lines: 2
+      case-max-lines: 0
+      cuddle-max-statements: 1
+
+    nlreturn:
+      block-size: 2
+
+    whitespace:
+      multi-if: true
+      multi-func: true
+
     depguard:
       rules:
         main:
@@ -46,6 +63,7 @@ linters:
           deny:
             - pkg: "errors$"
               desc: "Use github.com/cockroachdb/errors instead of standard library errors"
+
     nolintlint:
       require-specific: true
       require-explanation: true
@@ -68,6 +86,7 @@ linters:
         nosec: true
       excludes:
         - G304 # This CLI intentionally reads user-provided inventory/import/export paths.
+
     govet:
       enable-all: true
       disable:
@@ -83,8 +102,6 @@ linters:
         - diagnostic
         - performance
         - style
-      disabled-checks:
-        - hugeParam
 
     importas:
       no-unaliased: true
