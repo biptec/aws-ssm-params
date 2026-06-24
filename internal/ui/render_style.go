@@ -76,10 +76,10 @@ func (renderer *styleRenderer) selectedRow(s string) string {
 
 func (renderer *styleRenderer) selectedMarker() string {
 	if renderer.noColor {
-		return "| "
+		return "> "
 	}
 
-	return lipgloss.NewStyle().Foreground(selectedFg).Render("| ")
+	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
 }
 
 func (renderer *styleRenderer) searchLine() string {

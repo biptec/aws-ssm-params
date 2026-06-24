@@ -759,7 +759,7 @@ func TestRenderRegionSelectScreenUsesLoadedFullRegionOptions(t *testing.T) {
 	assert.Contains(t, view, "ap-southeast-1")
 	assert.True(t, strings.Index(view, "ap-southeast-1") < strings.Index(view, "eu-central-1"))
 	assert.True(t, strings.Index(view, "eu-central-1") < strings.Index(view, "us-east-1"))
-	assert.Contains(t, view, "| us-east-1")
+	assert.Contains(t, view, "> us-east-1")
 }
 
 func TestReplaceStatusWhenSSMPathChangesKeepsMatchingRegion(t *testing.T) {
@@ -2783,7 +2783,7 @@ func TestSortPopupRendersCheckboxSelectionWithoutInlineHotkeys(t *testing.T) {
 	view := m.View()
 
 	assert.Contains(t, view, "Sort By")
-	assert.Contains(t, view, "| [x] Value")
+	assert.Contains(t, view, "> [x] Value")
 	assert.Contains(t, view, "[ ] Name")
 	assert.Contains(t, view, "[ ] User")
 	assert.False(t, strings.Contains(view, "[ ] Type"))
