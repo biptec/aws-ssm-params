@@ -261,7 +261,7 @@ Global options apply to all commands.
 | `--all-regions`<br>`AWS_SSM_PARAMS_ALL_REGIONS` | Query all enabled AWS regions. |
 | `--profile value`<br>`AWS_SSM_PARAMS_PROFILE`<br>`AWS_PROFILE` | AWS profile. The tool-specific env var has priority over the native AWS alias. |
 | `--no-color`<br>`AWS_SSM_PARAMS_NO_COLOR` | Disable color output. |
-| `--keymap emacs/vi`<br>`AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. |
+| `--keymap value`<br>`AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style: `emacs` or `vi`. Default is `emacs`. |
 | `--log-level value`<br>`AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. |
 | `--filter value`<br>`AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. |
 | `--version` | Print the build version. Release builds use the current git tag. |
@@ -450,7 +450,7 @@ Use the TUI when you want to:
 | --- | --- |
 | `--with-decryption`<br>`AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. |
 | `--show-column value`<br>`AWS_SSM_PARAMS_SHOW_COLUMN` | Optional column to show. Repeat or use comma-separated env values. |
-| `--sort-by field:asc/desc`<br>`AWS_SSM_PARAMS_SORT_BY` | Initial sort. Repeat for multi-column sort priority. |
+| `--sort-by field:direction`<br>`AWS_SSM_PARAMS_SORT_BY` | Initial sort. Direction is `asc` or `desc`. Repeat for multi-column sort priority. |
 | `--no-confirm-overwrite-file`<br>`AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE` | Skip confirmation before overwriting local files from TUI actions. |
 | `--no-confirm-write-securestring`<br>`AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING` | Skip confirmation before writing SecureString plaintext to local files. |
 | `--no-confirm-delete-one`<br>`AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE` | Skip confirmation for deleting one parameter. |
@@ -601,9 +601,9 @@ Use `export` when you want to:
 | `--output-field field`<br>`AWS_SSM_PARAMS_OUTPUT_FIELD` | Include one AWS field in output. Repeat for multiple fields. |
 | `--map-field aws_field:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Rename a field in JSON/YAML/dotenv output. Repeat for multiple mappings. |
 | `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map exported AWS path prefixes to file path prefixes. Repeat for multiple mappings. |
-| `--sort-by field:asc/desc`<br>`AWS_SSM_PARAMS_SORT_BY` | Sort exported records. Repeat for multi-field sort. |
+| `--sort-by field:direction`<br>`AWS_SSM_PARAMS_SORT_BY` | Sort exported records. Direction is `asc` or `desc`. Repeat for multi-field sort. |
 | `--with-decryption`<br>`AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. |
-| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Output format. Default is `dotenv`. |
+| `--format value`<br>`AWS_SSM_PARAMS_FORMAT` | Output format: `dotenv`, `json`, or `yaml`. Default is `dotenv`. |
 | `--key-field field`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Write JSON/YAML as an object/map keyed by this AWS field. |
 | `--scalar`<br>`AWS_SSM_PARAMS_SCALAR` | Write exactly one selected output field as scalar values. |
 
@@ -732,10 +732,10 @@ Use `import` when you want to:
 | --- | --- |
 | `--map-field aws_field:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map input file field names to AWS field names. Repeat for multiple mappings. |
 | `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. |
-| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. |
+| `--format value`<br>`AWS_SSM_PARAMS_FORMAT` | Input format: `dotenv`, `json`, or `yaml`. Default is `dotenv`. |
 | `--key-field field`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as this AWS field. |
-| `--on-create none/skip/error/ask`<br>`AWS_SSM_PARAMS_ON_CREATE` | Behavior when the parameter does not exist. Default is `none`. |
-| `--on-update none/skip/error/ask`<br>`AWS_SSM_PARAMS_ON_UPDATE` | Behavior when the parameter already exists. Default is `ask`. |
+| `--on-create value`<br>`AWS_SSM_PARAMS_ON_CREATE` | Behavior when the parameter does not exist: `none`, `skip`, `error`, or `ask`. Default is `none`. |
+| `--on-update value`<br>`AWS_SSM_PARAMS_ON_UPDATE` | Behavior when the parameter already exists: `none`, `skip`, `error`, or `ask`. Default is `ask`. |
 | `--continue-on-error`<br>`AWS_SSM_PARAMS_CONTINUE_ON_ERROR` | Continue after per-record failures. |
 | `--summary`<br>`AWS_SSM_PARAMS_SUMMARY` | Print created/updated/skipped/failed counts to stderr. |
 | `--dry-run`<br>`AWS_SSM_PARAMS_DRY_RUN` | Validate records and show create/update operations without writing them. |
@@ -928,8 +928,8 @@ aws-ssm-params [global options] delete [command options] < input-file
 
 | Option | Description |
 | --- | --- |
-| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. |
-| `--key-field name/region`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as the parameter name or region. |
+| `--format value`<br>`AWS_SSM_PARAMS_FORMAT` | Input format: `dotenv`, `json`, or `yaml`. Default is `dotenv`. |
+| `--key-field value`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as `name` or `region`. |
 | `--map-field name:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `name`. |
 | `--map-field region:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `region`. |
 | `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. |
