@@ -13,12 +13,18 @@ type editorActionsComponent struct {
 func (component *editorActionsComponent) openActionsPopupForFocusedField() bool {
 	m := &component.model
 	switch m.editField {
-	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
+	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return false
 	case editFieldValue:
 		m.valueActionCursor = 0
 		m.fileActionField = editFieldValue
 		m.pushPopup(popupValueActions)
+
+		return true
+	case editFieldDescription:
+		m.valueActionCursor = 0
+		m.fileActionField = editFieldDescription
+		m.pushPopup(popupDescriptionActions)
 
 		return true
 	case editFieldPolicies:
@@ -110,8 +116,15 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 }
 
 func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	return component.updateTextActionsPopup(msg, editFieldPolicies, policiesActions())
+}
+
+func (component editorActionsComponent) updateDescriptionActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	return component.updateTextActionsPopup(msg, editFieldDescription, descriptionActions())
+}
+
+func (component editorActionsComponent) updateTextActionsPopup(msg tea.KeyMsg, field editField, items valueActionItems) (tea.Model, tea.Cmd) {
 	m := component.model
-	items := policiesActions()
 
 	key := msg.String()
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
@@ -135,28 +148,25 @@ func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMs
 	choose := func(action string) (tea.Model, tea.Cmd) {
 		switch action {
 		case "clear":
-			m.editPoliciesArea.SetValue("")
-			m.clearPopupStack()
-			m.message = "Policies cleared. Press Ctrl-s to save."
-			m.focusEditField(editFieldPolicies)
+			m.clearTextActionField(field)
 
 			return m, nil
 		case "load":
 			m.fileActionMode = "load"
-			m.fileActionField = editFieldPolicies
-			m.input.SetValue(m.editFileInput.Value())
+			m.fileActionField = field
+			m.input.SetValue(m.initialTextActionFilePath())
 			m.input.Placeholder = ""
 			m.input.Focus()
-			m.pushPopup(popupFileAction)
+			m.pushNestedPopup(popupFileAction)
 
 			return m, nil
 		case "write":
 			m.fileActionMode = "write"
-			m.fileActionField = editFieldPolicies
-			m.input.SetValue(m.editFileInput.Value())
+			m.fileActionField = field
+			m.input.SetValue(m.initialTextActionFilePath())
 			m.input.Placeholder = ""
 			m.input.Focus()
-			m.pushPopup(popupFileAction)
+			m.pushNestedPopup(popupFileAction)
 
 			return m, nil
 		}
@@ -181,13 +191,116 @@ func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMs
 	return m, nil
 }
 
+func (m *model) openImportDefaultActionsPopup(field editField) {
+	m.valueActionCursor = 0
+	m.fileActionField = field
+
+	switch field {
+	case editFieldPolicies:
+		m.pushNestedPopup(popupPoliciesActions)
+	case editFieldDescription:
+		m.pushNestedPopup(popupDescriptionActions)
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
+	}
+}
+
+func (m *model) clearTextActionField(field editField) {
+	switch {
+	case m.importDefaultsInPopupStack():
+		switch field {
+		case editFieldPolicies:
+			m.importDefaultPolicies.SetValue("")
+			m.importDefaultsCursor = 4
+			m.message = "Policies cleared."
+		case editFieldDescription:
+			m.importDefaultDescription.SetValue("")
+			m.importDefaultsCursor = 5
+			m.message = "Description cleared."
+		case editFieldValue,
+			editFieldSSMPath,
+			editFieldRegion,
+			editFieldType,
+			editFieldTier,
+			editFieldDataType,
+			editFieldOverwrite,
+			editFieldFilePath:
+		}
+
+		m.returnToImportDefaultsPopup()
+	default:
+		switch field {
+		case editFieldPolicies:
+			m.editPoliciesArea.SetValue("")
+			m.message = "Policies cleared. Press Ctrl-s to save."
+		case editFieldDescription:
+			m.editDescriptionArea.SetValue("")
+			m.message = "Description cleared. Press Ctrl-s to save."
+		case editFieldValue,
+			editFieldSSMPath,
+			editFieldRegion,
+			editFieldType,
+			editFieldTier,
+			editFieldDataType,
+			editFieldOverwrite,
+			editFieldFilePath:
+			return
+		}
+
+		m.clearPopupStack()
+		*m = m.focusEditField(field)
+	}
+}
+
+func (m model) initialTextActionFilePath() string {
+	if m.importDefaultsInPopupStack() {
+		return ""
+	}
+
+	return m.editFileInput.Value()
+}
+
+func (m model) importDefaultsInPopupStack() bool {
+	if m.activePopup == popupImportDefaults {
+		return true
+	}
+
+	for _, kind := range m.popupStack {
+		if kind == popupImportDefaults {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *model) returnToImportDefaultsPopup() {
+	for m.activePopup != popupNone && m.activePopup != popupImportDefaults {
+		m.popPopup()
+	}
+
+	if m.activePopup == popupImportDefaults {
+		m.focusImportDefaults()
+	}
+}
+
 func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	key := msg.String()
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
 			if mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone {
-				mm.clearPopupStack()
+				if mm.importDefaultsInPopupStack() {
+					mm.returnToImportDefaultsPopup()
+				} else {
+					mm.clearPopupStack()
+				}
 			} else if mm.activePopup == popupFileAction {
 				mm.input.Focus()
 			}
@@ -239,10 +352,16 @@ func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (t
 
 		switch m.fileActionMode {
 		case "load":
-			m.editFileInput.SetValue(m.input.Value())
+			if !m.importDefaultsInPopupStack() {
+				m.editFileInput.SetValue(m.input.Value())
+			}
+
 			updated, cmd = m.loadValueFromFile()
 		case "write":
-			m.editFileInput.SetValue(m.input.Value())
+			if !m.importDefaultsInPopupStack() {
+				m.editFileInput.SetValue(m.input.Value())
+			}
+
 			updated, cmd = m.writeValueToFile(false, false)
 		case "random-custom":
 			updated, cmd = m.generateRandomValueIntoEditor("base64-custom")
@@ -266,7 +385,11 @@ func (component editorActionsComponent) updateFileWriteConfirmPopup(msg tea.KeyM
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
 			if mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone {
-				mm.clearPopupStack()
+				if mm.importDefaultsInPopupStack() {
+					mm.returnToImportDefaultsPopup()
+				} else {
+					mm.clearPopupStack()
+				}
 			} else if mm.activePopup == popupFileAction {
 				mm.input.Focus()
 			}
@@ -399,6 +522,14 @@ func valueActions() valueActionItems {
 func policiesActions() valueActionItems {
 	return valueActionItems{
 		{hotkey: "c", value: "clear", label: "Clear policies"},
+		{hotkey: "l", value: "load", label: "Load from file"},
+		{hotkey: "w", value: "write", label: "Write to file"},
+	}
+}
+
+func descriptionActions() valueActionItems {
+	return valueActionItems{
+		{hotkey: "c", value: "clear", label: "Clear description"},
 		{hotkey: "l", value: "load", label: "Load from file"},
 		{hotkey: "w", value: "write", label: "Write to file"},
 	}

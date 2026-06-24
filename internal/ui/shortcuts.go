@@ -6,26 +6,36 @@ import (
 )
 
 type shortcuts struct {
-	screen             screen
-	shortcutsFor       screen
-	shortcutsPopupFor  popupKind
-	fileActionMode     string
-	viInsertMode       bool
-	keys               keymap
-	popupSortOptions   []sortItem
-	visibleSortOptions []sortItem
+	screen               screen
+	shortcutsFor         screen
+	shortcutsPopupFor    popupKind
+	fileActionMode       string
+	viInsertMode         bool
+	keys                 keymap
+	popupSortOptions     []sortItem
+	visibleSortOptions   []sortItem
+	importMainCursor     int
+	importDefaultsCursor int
+
+	importDefaultPoliciesExpanded    bool
+	importDefaultDescriptionExpanded bool
 }
 
 func newShortcuts(m model) *shortcuts {
 	return &shortcuts{
-		screen:             m.screen,
-		shortcutsFor:       m.shortcutsFor,
-		shortcutsPopupFor:  m.shortcutsPopupFor,
-		fileActionMode:     m.fileActionMode,
-		viInsertMode:       m.viInsertMode,
-		keys:               newKeymap(m),
-		popupSortOptions:   m.popupSortItems(),
-		visibleSortOptions: m.visibleSortItems(),
+		screen:               m.screen,
+		shortcutsFor:         m.shortcutsFor,
+		shortcutsPopupFor:    m.shortcutsPopupFor,
+		fileActionMode:       m.fileActionMode,
+		viInsertMode:         m.viInsertMode,
+		keys:                 newKeymap(m),
+		popupSortOptions:     m.popupSortItems(),
+		visibleSortOptions:   m.visibleSortItems(),
+		importMainCursor:     m.importMainCursor,
+		importDefaultsCursor: m.importDefaultsCursor,
+
+		importDefaultPoliciesExpanded:    m.importDefaultAreaExpanded(&m.importDefaultPolicies),
+		importDefaultDescriptionExpanded: m.importDefaultAreaExpanded(&m.importDefaultDescription),
 	}
 }
 
@@ -48,7 +58,7 @@ func mainFooterText(detailsShown bool) string {
 		detailsAction = "d hide details"
 	}
 
-	return "ctrl+/ help • enter edit • n new • " + detailsAction + " • / search • c columns • s sort • x delete • X delete visible • esc quit"
+	return "ctrl+/ help • enter edit • n new • i import • " + detailsAction + " • / search • c columns • s sort • x delete • X delete visible • esc quit"
 }
 
 func searchFooterText() string {
@@ -68,6 +78,8 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 	case popupValueActions:
 		return "ctrl+/ help • enter select • c clear • r random • l load • w write • esc cancel"
 	case popupPoliciesActions:
+		return "ctrl+/ help • enter select • c clear • l load • w write • esc cancel"
+	case popupDescriptionActions:
 		return "ctrl+/ help • enter select • c clear • l load • w write • esc cancel"
 	case popupRandomValue:
 		return "ctrl+/ help • enter select • b base64 • x hex • u uuid • c custom • esc cancel"
@@ -100,6 +112,28 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 		return "ctrl+/ help • enter select • t text • a AMI • i integration • esc cancel"
 	case popupOverwriteSelect:
 		return "ctrl+/ help • enter select • t true • f false • esc cancel"
+	case popupImportFile:
+		return "ctrl+/ help • enter open/load • esc cancel"
+	case popupImportKeyField, popupImportFormat:
+		return "ctrl+/ help • enter select • esc cancel"
+	case popupImportDefaults:
+		enterAction := "apply"
+		if m.importDefaultsCursor >= 0 && m.importDefaultsCursor <= 3 {
+			enterAction = "select"
+		}
+
+		if m.importDefaultsCursor == 4 || m.importDefaultsCursor == 5 {
+			enterAction = "expand/newline"
+			if m.importDefaultAreaExpanded() {
+				enterAction = "newline"
+			}
+
+			return "ctrl+/ help • enter " + enterAction + " • alt+e actions • esc cancel"
+		}
+
+		return "ctrl+/ help • enter " + enterAction + " • esc cancel"
+	case popupImportMapFields, popupImportMapPaths:
+		return "ctrl+/ help • enter apply • esc cancel"
 	default:
 		return "ctrl+/ help • esc cancel"
 	}
@@ -198,6 +232,13 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
   l            load from file
   w            write to file
   esc / q / ctrl+g  cancel`)
+	case popupDescriptionActions:
+		return strings.TrimSpace(`Actions
+  enter        select focused action
+  c            clear description
+  l            load from file
+  w            write to file
+  esc / q / ctrl+g  cancel`)
 	case popupFileAction:
 		return strings.TrimSpace(`Actions
   enter        confirm input
@@ -250,9 +291,62 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 		return strings.TrimSpace(`Actions
   enter        select focused option
   esc / q / ctrl+g  cancel`)
+	case popupImportFile:
+		return m.importFileActionsShortcuts()
+	case popupImportKeyField, popupImportFormat:
+		return strings.TrimSpace(`Actions
+  enter        select focused option
+  esc / q / ctrl+g  cancel`)
+	case popupImportMapFields, popupImportMapPaths, popupImportDefaults:
+		return m.importChildActionsShortcuts(kind)
 	default:
 		return strings.TrimSpace(`Actions
   esc / q / ctrl+g  cancel`)
+	}
+}
+
+func (m *shortcuts) importFileActionsShortcuts() string {
+	enterAction := "open focused child window"
+	if importMainField(m.importMainCursor) == importMainFieldFilePath {
+		enterAction = "load file"
+	}
+
+	return strings.TrimSpace(fmt.Sprintf(`Actions
+  enter        %s
+  esc / q / ctrl+g  cancel`, enterAction))
+}
+
+func (m *shortcuts) importChildActionsShortcuts(kind popupKind) string {
+	enterAction := "apply values"
+	if kind == popupImportDefaults && m.importDefaultsCursor >= 0 && m.importDefaultsCursor <= 3 {
+		enterAction = "choose focused option"
+	}
+
+	if kind == popupImportDefaults && (m.importDefaultsCursor == 4 || m.importDefaultsCursor == 5) {
+		enterAction = "expand/newline in focused text area"
+		if m.importDefaultAreaExpanded() {
+			enterAction = "insert newline"
+		}
+
+		return strings.TrimSpace(fmt.Sprintf(`Actions
+  enter        %s
+  alt+e        actions popup
+  esc / q / ctrl+g  cancel`, enterAction))
+	}
+
+	return strings.TrimSpace(fmt.Sprintf(`Actions
+  enter        %s
+  esc / q / ctrl+g  cancel`, enterAction))
+}
+
+func (m *shortcuts) importDefaultAreaExpanded() bool {
+	switch m.importDefaultsCursor {
+	case 4:
+		return m.importDefaultPoliciesExpanded
+	case 5:
+		return m.importDefaultDescriptionExpanded
+	default:
+		return false
 	}
 }
 
@@ -275,8 +369,22 @@ func (m *shortcuts) popupNavigationShortcuts(kind popupKind) string {
 	switch kind {
 	case popupNone, popupShortcuts, popupConfirm, popupFileAction, popupFileWriteConfirm, popupUnsavedChanges:
 		return ""
-	case popupSort, popupColumns, popupRegionSelect, popupTypeSelect, popupTierSelect, popupDataTypeSelect, popupOverwriteSelect, popupValueActions, popupPoliciesActions, popupRandomValue:
+	case popupSort,
+		popupColumns,
+		popupRegionSelect,
+		popupTypeSelect,
+		popupTierSelect,
+		popupDataTypeSelect,
+		popupOverwriteSelect,
+		popupValueActions,
+		popupPoliciesActions,
+		popupDescriptionActions,
+		popupRandomValue,
+		popupImportKeyField,
+		popupImportFormat:
 		return m.navigationShortcuts(screenColumns)
+	case popupImportFile, popupImportMapFields, popupImportMapPaths, popupImportDefaults:
+		return m.fieldNavigationShortcuts()
 	default:
 		return ""
 	}
@@ -290,6 +398,7 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
 		return strings.TrimSpace(`Actions
   enter        edit value
   n            new parameter
+  i            import from file
   d            show/hide details
   /            search
   c            columns
@@ -303,21 +412,21 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
 				return strings.TrimSpace(`Actions
   esc          normal mode
   ctrl+s       save
-  alt+e        value/policies actions popup
+  alt+e        value/description/policies actions popup
   y            confirm pending file write warning`)
 			}
 
 			return strings.TrimSpace(`Actions
   i            insert mode
   ctrl+s       save
-  alt+e        value/policies actions popup
+  alt+e        value/description/policies actions popup
   y            confirm pending file write warning
   esc / q / ctrl+g  back`)
 		}
 
 		return strings.TrimSpace(`Actions
   ctrl+s       save
-  alt+e        value/policies actions popup
+  alt+e        value/description/policies actions popup
   enter        expand/newline in Description/Policies/Value / choose selectors / next field
   y            confirm pending file write warning
   esc / q / ctrl+g  back`)
@@ -427,6 +536,18 @@ Editing
 	}
 
 	return ""
+}
+
+func (m *shortcuts) fieldNavigationShortcuts() string {
+	if m.keymapStyle() == keymapVi {
+		return strings.TrimSpace(`Navigation
+  ↑ / k / shift+tab          previous field
+  ↓ / j / tab                next field`)
+	}
+
+	return strings.TrimSpace(`Navigation
+  ↑ / ctrl+p / shift+tab     previous field
+  ↓ / ctrl+n / tab           next field`)
 }
 
 func globalShortcuts() string {

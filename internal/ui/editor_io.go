@@ -39,7 +39,7 @@ func (component *editorIOComponent) openFileWriteConfirmation(kind fileWriteConf
 func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
 	m := component.model
 
-	path := strings.TrimSpace(m.editFileInput.Value())
+	path := strings.TrimSpace(component.fileActionPath())
 	if path == "" {
 		m.errMessage = "File path is required."
 		m.message = ""
@@ -66,11 +66,37 @@ func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.fileActionField == editFieldPolicies {
-		m.editPoliciesArea.SetValue(prettyPoliciesForEditor(string(data)))
-		m = m.focusEditField(editFieldPolicies)
+	switch m.fileActionField {
+	case editFieldPolicies:
+		if m.importDefaultsInPopupStack() {
+			m.importDefaultPolicies.SetValue(prettyPoliciesForEditor(string(data)))
+			m.importDefaultsCursor = 4
+			m.focusImportDefaults()
+		} else {
+			m.editPoliciesArea.SetValue(prettyPoliciesForEditor(string(data)))
+			m = m.focusEditField(editFieldPolicies)
+		}
+
 		m.message = "Loaded policies from " + path
-	} else {
+	case editFieldDescription:
+		if m.importDefaultsInPopupStack() {
+			m.importDefaultDescription.SetValue(string(data))
+			m.importDefaultsCursor = 5
+			m.focusImportDefaults()
+		} else {
+			m.editDescriptionArea.SetValue(string(data))
+			m = m.focusEditField(editFieldDescription)
+		}
+
+		m.message = "Loaded description from " + path
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
 		m.textArea.SetValue(string(data))
 		m = m.focusEditField(editFieldValue)
 		m.message = "Loaded value from " + path
@@ -87,7 +113,7 @@ func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
 func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.Model, tea.Cmd) {
 	m := component.model
 
-	path := strings.TrimSpace(m.editFileInput.Value())
+	path := strings.TrimSpace(component.fileActionPath())
 	if path == "" {
 		m.errMessage = "File path is required."
 		m.message = ""
@@ -107,7 +133,7 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 		return m, nil
 	}
 
-	if m.fileActionField != editFieldPolicies && m.normalizedEditType() == ssm.ParameterTypeSecureString && !secureConfirmed && !m.opts.NoConfirmWriteSecureValue {
+	if m.fileActionField == editFieldValue && m.normalizedEditType() == ssm.ParameterTypeSecureString && !secureConfirmed && !m.opts.NoConfirmWriteSecureValue {
 		m.errMessage = ""
 		m.message = ""
 		m.warningMessage = ""
@@ -145,9 +171,19 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 	m.errMessage = ""
 
 	m.warningMessage = ""
-	if m.fileActionField == editFieldPolicies {
+	switch m.fileActionField {
+	case editFieldPolicies:
 		m.message = "Wrote policies to " + path
-	} else {
+	case editFieldDescription:
+		m.message = "Wrote description to " + path
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
 		m.message = "Wrote value to " + path
 	}
 
@@ -158,11 +194,41 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 
 func (component editorIOComponent) fileActionContents() string {
 	m := component.model
-	if m.fileActionField == editFieldPolicies {
+
+	switch m.fileActionField {
+	case editFieldPolicies:
+		if m.importDefaultsInPopupStack() {
+			return m.importDefaultPolicies.Value()
+		}
+
 		return m.editPoliciesArea.Value()
+	case editFieldDescription:
+		if m.importDefaultsInPopupStack() {
+			return m.importDefaultDescription.Value()
+		}
+
+		return m.editDescriptionArea.Value()
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
+		return m.textArea.Value()
 	}
 
 	return m.textArea.Value()
+}
+
+func (component editorIOComponent) fileActionPath() string {
+	m := component.model
+	if m.importDefaultsInPopupStack() {
+		return m.input.Value()
+	}
+
+	return m.editFileInput.Value()
 }
 
 // startConfirm initializes a confirmation screen for one or more items.

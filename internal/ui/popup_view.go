@@ -38,12 +38,36 @@ func (component popupViewComponent) renderPoliciesActionsPopup() string {
 	return m.renderPopupBoxWithActions("Policies Actions", lines, "Enter select   Esc cancel")
 }
 
+func (component popupViewComponent) renderDescriptionActionsPopup() string {
+	m := component.model
+	items := descriptionActions()
+
+	lines := make([]string, 0, len(items))
+	for i, item := range items {
+		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
+	}
+
+	return m.renderPopupBoxWithActions("Description Actions", lines, "Enter select   Esc cancel")
+}
+
 func (component popupViewComponent) renderFileActionPopup() string {
 	m := component.model
 
 	title := "Load from file"
-	if m.fileActionField == editFieldPolicies {
+
+	switch m.fileActionField {
+	case editFieldPolicies:
 		title = "Load policies from file"
+	case editFieldDescription:
+		title = "Load description from file"
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
 	}
 
 	label := "File path:"
@@ -52,8 +76,20 @@ func (component popupViewComponent) renderFileActionPopup() string {
 	switch m.fileActionMode {
 	case "write":
 		title = "Write to file"
-		if m.fileActionField == editFieldPolicies {
+
+		switch m.fileActionField {
+		case editFieldPolicies:
 			title = "Write policies to file"
+		case editFieldDescription:
+			title = "Write description to file"
+		case editFieldValue,
+			editFieldSSMPath,
+			editFieldRegion,
+			editFieldType,
+			editFieldTier,
+			editFieldDataType,
+			editFieldOverwrite,
+			editFieldFilePath:
 		}
 	case "random-custom":
 		title = "Random Value"
@@ -192,11 +228,21 @@ func (component popupViewComponent) renderRegionSelectPopup() string {
 func (component popupViewComponent) regionSelectLines() []string {
 	m := component.model
 	regions := m.regionSelectOptions()
-	lines := make([]string, 0, 2+len(regions))
 
+	if m.importSelectorActive() {
+		regions = m.importDefaultRegionOptions()
+	}
+
+	lines := make([]string, 0, 2+len(regions))
 	lines = append(lines, m.muted("Choose region for saving this value:"), "")
+
 	for i, region := range regions {
-		lines = append(lines, m.singleSelectLine(region, i == m.regionCursor, i == m.regionCursor))
+		label := region
+		if label == "" {
+			label = "none"
+		}
+
+		lines = append(lines, m.singleSelectLine(label, i == m.regionCursor, i == m.regionCursor))
 	}
 
 	return lines
@@ -246,11 +292,16 @@ func (component popupViewComponent) renderOverwriteSelectPopup() string {
 func (component popupViewComponent) typeSelectLines() []string {
 	m := component.model
 	typeItems := parameterTypeItems()
+
+	if m.importSelectorActive() {
+		typeItems = importParameterTypeItems()
+	}
+
 	lines := make([]string, 0, 2+len(typeItems))
 	lines = append(lines, m.muted("Choose how this value should be stored in AWS SSM Parameter Store:"), "")
 
 	for i, it := range typeItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
+		row := optionLabelWithDescription(it.label, it.description)
 		lines = append(lines, m.singleSelectLine(row, i == m.typeCursor, i == m.typeCursor))
 	}
 
@@ -260,11 +311,16 @@ func (component popupViewComponent) typeSelectLines() []string {
 func (component popupViewComponent) tierSelectLines() []string {
 	m := component.model
 	tierItems := parameterTierItems()
+
+	if m.importSelectorActive() {
+		tierItems = importParameterTierItems()
+	}
+
 	lines := make([]string, 0, 2+len(tierItems))
 	lines = append(lines, m.muted("Choose the AWS SSM storage tier for this parameter:"), "")
 
 	for i, it := range tierItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
+		row := optionLabelWithDescription(it.label, it.description)
 		lines = append(lines, m.singleSelectLine(row, i == m.tierCursor, i == m.tierCursor))
 	}
 
@@ -274,15 +330,28 @@ func (component popupViewComponent) tierSelectLines() []string {
 func (component popupViewComponent) dataTypeSelectLines() []string {
 	m := component.model
 	dataTypeItems := parameterDataTypeItems()
+
+	if m.importSelectorActive() {
+		dataTypeItems = importParameterDataTypeItems()
+	}
+
 	lines := make([]string, 0, 2+len(dataTypeItems))
 	lines = append(lines, m.muted("Choose AWS SSM value validation data type:"), "")
 
 	for i, it := range dataTypeItems {
-		row := fmt.Sprintf("%s — %s", it.label, it.description)
+		row := optionLabelWithDescription(it.label, it.description)
 		lines = append(lines, m.singleSelectLine(row, i == m.dataTypeCursor, i == m.dataTypeCursor))
 	}
 
 	return lines
+}
+
+func optionLabelWithDescription(label, description string) string {
+	if strings.TrimSpace(description) == "" {
+		return label
+	}
+
+	return fmt.Sprintf("%s — %s", label, description)
 }
 
 func (component popupViewComponent) overwriteSelectLines() []string {

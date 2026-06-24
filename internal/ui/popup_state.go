@@ -38,10 +38,17 @@ const (
 	popupOverwriteSelect
 	popupValueActions
 	popupPoliciesActions
+	popupDescriptionActions
 	popupFileAction
 	popupFileWriteConfirm
 	popupUnsavedChanges
 	popupRandomValue
+	popupImportFile
+	popupImportKeyField
+	popupImportFormat
+	popupImportMapFields
+	popupImportMapPaths
+	popupImportDefaults
 )
 
 func (m *popupState) openShortcuts(from screen) {
@@ -63,7 +70,6 @@ func (m *popupState) pushPopup(kind popupKind) {
 }
 
 func (m *popupState) pushNestedPopup(kind popupKind) {
-	m.popupStack = nil
 	if m.activePopup != popupNone {
 		m.popupStack = append(m.popupStack, m.activePopup)
 	}

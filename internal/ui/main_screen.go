@@ -88,6 +88,8 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		return m.startMultiline()
 	case "n":
 		return m.startNewParameter(screenMain)
+	case "i":
+		m.openImportPopup()
 	case "/":
 		m.searchMode = true
 		m.query = m.effectiveQuery

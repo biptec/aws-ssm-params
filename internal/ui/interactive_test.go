@@ -360,7 +360,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, editFieldRegion, m.editField)
 	assert.Empty(t, m.editRegionOptions)
-	assert.Contains(t, m.renderTextAreaScreen(), "eu-north-1 <")
+	assert.Contains(t, stripANSI(m.renderTextAreaScreen()), "eu-north-1 <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -379,7 +379,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	m = updated.(model)
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.Equal(t, editFieldType, m.editField)
-	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditType().String()+" <")
+	assert.Contains(t, stripANSI(m.renderTextAreaScreen()), m.normalizedEditType().String()+" <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -396,7 +396,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	assert.Equal(t, editFieldTier, m.editField)
-	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditTier().String()+" <")
+	assert.Contains(t, stripANSI(m.renderTextAreaScreen()), m.normalizedEditTier().String()+" <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -413,7 +413,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	assert.Equal(t, editFieldDataType, m.editField)
-	assert.Contains(t, m.renderTextAreaScreen(), m.normalizedEditDataType().String()+" <")
+	assert.Contains(t, stripANSI(m.renderTextAreaScreen()), m.normalizedEditDataType().String()+" <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -430,7 +430,7 @@ func TestUpdateTextAreaTabsThroughInputsAndOpensSelectorsOnEnter(t *testing.T) {
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyTab})
 	m = updated.(model)
 	assert.Equal(t, editFieldOverwrite, m.editField)
-	assert.Contains(t, m.renderTextAreaScreen(), strconv.FormatBool(m.editOverwrite)+" <")
+	assert.Contains(t, stripANSI(m.renderTextAreaScreen()), strconv.FormatBool(m.editOverwrite)+" <")
 
 	updated, _ = m.updateTextArea(tea.KeyMsg{Type: tea.KeyEnter})
 	m = updated.(model)
@@ -1097,6 +1097,7 @@ func TestTextAreaFilePathErrorDoesNotCreateFakePromptRows(t *testing.T) {
 	m.height = 32
 	m.screen = screenTextArea
 	m.editField = editFieldValue
+	m.editTier = ssm.ParameterTierAdvanced
 	m.editPathInput.SetValue("/app/value")
 	m.editRegion = "eu-north-1"
 	m.editType = ssm.ParameterTypeString
@@ -1225,6 +1226,522 @@ func TestMainColumnsHotkeyOpensPopupWithoutChangingScreen(t *testing.T) {
 	assert.Equal(t, popupColumns, m.activePopup)
 	assert.Contains(t, m.View(), "Columns")
 	assert.Contains(t, m.View(), "# and NAME are always visible.")
+}
+
+func TestMainImportHotkeyOpensPopupWithSelectedValues(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.statuses = []Status{{Item: inventory.Item{Path: "/app/value", Region: "eu-north-1"}, Exists: true}}
+
+	updated, _ := m.updateMain(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	m = updated.(model)
+
+	assert.Equal(t, screenMain, m.screen)
+	assert.Equal(t, popupImportFile, m.activePopup)
+
+	view := m.View()
+	assert.Contains(t, view, "Import from file")
+	assert.Contains(t, view, "File path:")
+	assert.Contains(t, view, "Key field:      none")
+	assert.Contains(t, view, "Format:         dotenv")
+	assert.NotContains(t, view, "> Key field")
+}
+
+func TestImportSelectorsUpdateParentPopupValues(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+
+	m.importMainCursor = int(importMainFieldKeyField)
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupImportKeyField, m.activePopup)
+	assert.Equal(t, []popupKind{popupImportFile}, m.popupStack)
+
+	updated, _ = m.updateImportKeyFieldPopup(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	updated, _ = m.updateImportKeyFieldPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Equal(t, popupImportFile, m.activePopup)
+	assert.Equal(t, "name", m.importKeyField)
+	assert.Contains(t, m.View(), "Key field:      name <")
+
+	m.importMainCursor = int(importMainFieldFormat)
+	updated, _ = m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupImportFormat, m.activePopup)
+	assert.Equal(t, []popupKind{popupImportFile}, m.popupStack)
+
+	updated, _ = m.updateImportFormatPopup(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	updated, _ = m.updateImportFormatPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Equal(t, popupImportFile, m.activePopup)
+	assert.Equal(t, "json", m.importFormat)
+	assert.Contains(t, m.View(), "Format:         json <")
+}
+
+func TestImportRadioSelectorsMoveSelectedMarkerWithCursor(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+
+	m.importMainCursor = int(importMainFieldFormat)
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	updated, _ = m.updateImportFormatPopup(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+
+	view := stripANSI(m.renderImportFormatPopup())
+	assert.Contains(t, view, "> (*) json")
+	assert.NotContains(t, view, "  (*) dotenv")
+}
+
+func TestImportFormNavigationMatchesEditorFieldMovement(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+	m.importMainCursor = int(importMainFieldKeyField)
+	m.focusImportMain()
+
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnd})
+	m = updated.(model)
+	assert.Equal(t, int(importMainFieldKeyField), m.importMainCursor)
+
+	updated, _ = m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(model)
+	assert.Equal(t, int(importMainFieldFormat), m.importMainCursor)
+
+	updated, _ = m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyHome})
+	m = updated.(model)
+	assert.Equal(t, int(importMainFieldFormat), m.importMainCursor)
+}
+
+func TestImportMapPathsBackspaceMovesToPreviousEmptyInput(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.openImportPopup()
+	m.importMapPathRows = []importMapPathRow{
+		newImportMapPathRow(&m.opts),
+		newImportMapPathRow(&m.opts),
+		newImportMapPathRow(&m.opts),
+	}
+	m.importMapPathRows[0].awsPath.SetValue("aws1")
+	m.importMapPathRows[0].filePath.SetValue("file1")
+	m.importMapPathRows[1].awsPath.SetValue("aws2")
+	m.importMapPathsCursor = 3
+	m.focusImportMapPath()
+
+	updated, _ := m.updateImportMapPathsPopup(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(model)
+	updated, _ = m.updateImportMapPathsPopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Z'}})
+	m = updated.(model)
+
+	assert.Equal(t, "aws2Z", m.importMapPathRows[1].awsPath.Value())
+	assert.Empty(t, m.importMapPathRows[1].filePath.Value())
+
+	m.importMapPathsCursor = 4
+	m.focusImportMapPath()
+
+	updated, _ = m.updateImportMapPathsPopup(tea.KeyMsg{Type: tea.KeyBackspace})
+	m = updated.(model)
+	updated, _ = m.updateImportMapPathsPopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Q'}})
+	m = updated.(model)
+
+	assert.Equal(t, "Q", m.importMapPathRows[1].filePath.Value())
+}
+
+func TestImportFormNavigationUsesConfiguredKeymap(t *testing.T) {
+	vi := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi"})
+	vi.screen = screenMain
+	vi.openImportPopup()
+
+	updated, _ := vi.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	vi = updated.(model)
+	assert.Equal(t, int(importMainFieldKeyField), vi.importMainCursor)
+
+	updated, _ = vi.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	vi = updated.(model)
+	assert.Equal(t, int(importMainFieldFilePath), vi.importMainCursor)
+
+	emacs := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
+	emacs.screen = screenMain
+	emacs.openImportPopup()
+
+	updated, _ = emacs.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyCtrlN})
+	emacs = updated.(model)
+	assert.Equal(t, int(importMainFieldKeyField), emacs.importMainCursor)
+
+	updated, _ = emacs.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyCtrlP})
+	emacs = updated.(model)
+	assert.Equal(t, int(importMainFieldFilePath), emacs.importMainCursor)
+}
+
+func TestImportShortcutsFollowFocusedElementAndKeymap(t *testing.T) {
+	emacs := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "emacs"})
+	emacs.openImportPopup()
+	emacs.importMainCursor = int(importMainFieldFilePath)
+	emacs.openPopupShortcuts(screenMain, popupImportFile)
+
+	text := emacs.shortcutsText()
+	assert.Contains(t, text, "enter        load file")
+	assert.Contains(t, text, "↑ / ctrl+p / shift+tab     previous field")
+	assert.Contains(t, text, "↓ / ctrl+n / tab           next field")
+	assert.NotContains(t, text, "Home / alt+<")
+
+	vi := newModel(context.Background(), nil, nil, &Options{NoColor: true, Keymap: "vi"})
+	vi.openImportPopup()
+	vi.importMainCursor = int(importMainFieldKeyField)
+	vi.openPopupShortcuts(screenMain, popupImportFile)
+
+	text = vi.shortcutsText()
+	assert.Contains(t, text, "enter        open focused child window")
+	assert.Contains(t, text, "↑ / k / shift+tab          previous field")
+	assert.Contains(t, text, "↓ / j / tab                next field")
+	assert.NotContains(t, text, "Home / gg")
+}
+
+func TestImportPopupWidthAdaptsToInputContent(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.width = 140
+	m.height = 40
+	m.openImportPopup()
+
+	compactWidth := lipgloss.Width(renderLines(m.renderImportFilePopup())[0])
+
+	m.importFilePathInput.SetValue(strings.Repeat("a", 60))
+	m.importFilePathInput.SetCursor(60)
+	wideWidth := lipgloss.Width(renderLines(m.renderImportFilePopup())[0])
+
+	assert.Less(t, compactWidth, 60)
+	assert.Greater(t, wideWidth, compactWidth)
+	assert.LessOrEqual(t, wideWidth, m.width)
+}
+
+func TestImportMapPathRowsUseCommonInputRenderingAndTrimTrailingEmptyRows(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.width = 120
+	m.height = 40
+	m.importMapPathRows = []importMapPathRow{newImportMapPathRow(&m.opts), newImportMapPathRow(&m.opts)}
+
+	m.normalizeMapPathRows(&m.opts)
+
+	require.Len(t, m.importMapPathRows, 1)
+	assert.NotContains(t, m.renderImportMapPathsPopup(), "___")
+
+	m.importMapPathRows[0].awsPath.SetValue("/app")
+	m.normalizeMapPathRows(&m.opts)
+	require.Len(t, m.importMapPathRows, 2)
+
+	m.importMapPathRows[0].awsPath.SetValue("")
+	m.normalizeMapPathRows(&m.opts)
+
+	require.Len(t, m.importMapPathRows, 1)
+}
+
+func TestImportParentSummariesUseEmptyAndConfiguredValues(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-west-1"})
+	m.width = 140
+	m.height = 40
+	m.openImportPopup()
+
+	view := m.renderImportFilePopup()
+	assert.Contains(t, view, "Map fields:     empty")
+	assert.Contains(t, view, "Map paths:      empty")
+	assert.Contains(t, view, "Defaults:       empty")
+
+	m.importMapFieldInputs[0].SetValue("title")
+	m.importMapPathRows[0].awsPath.SetValue("/app")
+	m.importMapPathRows[0].filePath.SetValue("/file")
+	m.importDefaultType = ssm.ParameterTypeString
+	m.importDefaultDescription.SetValue("hello\nworld")
+
+	view = m.renderImportFilePopup()
+	assert.Contains(t, view, "Map fields:     name:title")
+	assert.Contains(t, view, "Map paths:      /app:/file")
+	assert.Contains(t, view, "Defaults:       type:String;description:hello world")
+}
+
+func TestImportDefaultShortcutsFollowFocusedElement(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.importDefaultsCursor = 1
+	m.openPopupShortcuts(screenMain, popupImportDefaults)
+
+	assert.Contains(t, m.shortcutsText(), "enter        choose focused option")
+
+	m.importDefaultsCursor = 4
+
+	assert.Contains(t, m.shortcutsText(), "enter        expand/newline in focused text area")
+
+	m.importDefaultPolicies.SetValue("one\ntwo")
+
+	assert.Contains(t, m.shortcutsText(), "enter        insert newline")
+	assert.Contains(t, m.shortcutsText(), "alt+e        actions popup")
+}
+
+func TestImportDefaultTextAreaExpandsLikeEditorDescription(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+
+	m.importMainCursor = int(importMainFieldDefaults)
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	require.Equal(t, popupImportDefaults, m.activePopup)
+
+	m.importDefaultsCursor = 5
+	m.importDefaultDescription.SetValue("Some text")
+	setTextAreaAbsPosition(&m.importDefaultDescription, len("Some text"))
+	m.focusImportDefaults()
+
+	view := m.renderImportDefaultsPopup()
+	assert.Contains(t, view, "Description: Some text")
+	assert.NotContains(t, view, "1 │ Some text")
+
+	updated, _ = m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	assert.Equal(t, popupImportDefaults, m.activePopup)
+	assert.True(t, m.importDefaultAreaExpanded(&m.importDefaultDescription))
+	assert.Equal(t, "Some text\n", m.importDefaultDescription.Value())
+
+	view = m.renderImportDefaultsPopup()
+	assert.Contains(t, view, "Description:")
+	assert.Contains(t, view, "1 │ Some text")
+	assert.Contains(t, view, "2 │ █")
+}
+
+func TestMultilineAreaShowsTailWhenUnfocused(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	area := newImportTextArea(&m.opts)
+	area.SetValue("one\ntwo\nthree\nfour\nfive")
+
+	lines := m.formMultilineAreaLines(&area, 2, 20, false)
+	text := strings.Join(lines, "\n")
+
+	assert.Contains(t, text, "4 │ four")
+	assert.Contains(t, text, "5 │ five")
+	assert.NotContains(t, text, "1 │ one")
+}
+
+func TestImportDefaultTextareaLayoutKeepsUnfocusedAreasWhenSpaceAllows(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.width = 120
+	m.height = 24
+	m.importDefaultsCursor = 5
+	m.importDefaultPolicies.SetValue("p1\np2\np3\np4\np5")
+	m.importDefaultDescription.SetValue("d1\nd2\nd3\nd4\nd5\nd6")
+	setTextAreaAbsPosition(&m.importDefaultDescription, len(m.importDefaultDescription.Value()))
+	m.focusImportDefaults()
+
+	view := m.renderImportDefaultsPopup()
+
+	assert.Contains(t, view, "1 │ p1")
+	assert.Contains(t, view, "5 │ p5")
+	assert.Contains(t, view, "1 │ d1")
+	assert.Contains(t, view, "6 │ d6")
+}
+
+func TestImportDefaultExpandedTextAreaNavigatesPastThreeLines(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.width = 120
+	m.height = 40
+	m.importDefaultsCursor = 4
+	m.importDefaultPolicies.SetHeight(20)
+	m.importDefaultPolicies.SetValue("one\ntwo\nthree\nfour\nfive")
+	setTextAreaAbsPosition(&m.importDefaultPolicies, 0)
+	m.focusImportDefaults()
+
+	for i := 0; i < 4; i++ {
+		updated, _ := m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyDown})
+		m = updated.(model)
+	}
+
+	line, _ := textAreaCursorLineOffset(&m.importDefaultPolicies)
+	assert.Equal(t, 4, line)
+}
+
+func TestEditorTextareaLayoutKeepsUnfocusedAreasWhenSpaceAllows(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+	m.width = 120
+	m.height = 26
+	m.screen = screenTextArea
+	m.editField = editFieldValue
+	m.editTier = ssm.ParameterTierAdvanced
+	m.editPathInput.SetValue("/app/value")
+	m.editDescriptionArea.SetValue("desc1\ndesc2\ndesc3\ndesc4")
+	m.editPoliciesArea.SetValue("pol1\npol2\npol3\npol4")
+	m.textArea.SetValue("value1\nvalue2\nvalue3\nvalue4\nvalue5")
+	m.textArea.Focus()
+	m.expandedFields = map[editField]bool{editFieldDescription: true, editFieldPolicies: true, editFieldValue: true}
+
+	view := m.renderTextAreaScreen()
+
+	assert.Contains(t, view, "1 │ desc1")
+	assert.Contains(t, view, "3 │ desc3")
+	assert.Contains(t, view, "4 │ desc4")
+	assert.Contains(t, view, "1 │ pol1")
+	assert.Contains(t, view, "3 │ pol3")
+	assert.Contains(t, view, "4 │ pol4")
+	assert.Contains(t, view, "5 │ value5")
+}
+
+func TestImportDefaultsReuseEditorSelectorsAndKeepPopupParents(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-central-1"})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+
+	m.importMainCursor = int(importMainFieldDefaults)
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupImportDefaults, m.activePopup)
+	assert.Equal(t, []popupKind{popupImportFile}, m.popupStack)
+
+	view := m.View()
+	assert.Contains(t, view, "Region:      none <")
+	assert.Contains(t, view, "Type:        none")
+	assert.Contains(t, view, "Tier:        none")
+	assert.Contains(t, view, "DataType:    none")
+
+	m.importDefaultsCursor = 1
+	updated, _ = m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+	assert.Equal(t, popupTypeSelect, m.activePopup)
+	assert.Equal(t, []popupKind{popupImportFile, popupImportDefaults}, m.popupStack)
+	assert.Contains(t, m.View(), "none")
+
+	updated, _ = m.updateTypeSelectPopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	m = updated.(model)
+
+	assert.Equal(t, popupImportDefaults, m.activePopup)
+	assert.Equal(t, []popupKind{popupImportFile}, m.popupStack)
+	assert.Equal(t, ssm.ParameterTypeString, m.importDefaultType)
+	assert.Contains(t, m.View(), "Type:        String <")
+
+	updated, _ = m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	assert.Equal(t, popupImportFile, m.activePopup)
+	assert.Empty(t, m.popupStack)
+}
+
+func TestImportDefaultSelectorsExposeNoneAsDefaultChoice(t *testing.T) {
+	m := newModel(context.Background(), nil, nil, &Options{NoColor: true, Region: "eu-central-1"})
+	m.screen = screenMain
+	m.width = 120
+	m.height = 40
+	m.openImportPopup()
+
+	m.importMainCursor = int(importMainFieldDefaults)
+	updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(model)
+
+	tests := []struct {
+		cursor int
+		open   func(model, tea.KeyMsg) (tea.Model, tea.Cmd)
+		view   func(model) string
+	}{
+		{cursor: 0, open: model.updateRegionSelectPopup, view: model.renderRegionSelectPopup},
+		{cursor: 1, open: model.updateTypeSelectPopup, view: model.renderTypeSelectPopup},
+		{cursor: 2, open: model.updateTierSelectPopup, view: model.renderTierSelectPopup},
+		{cursor: 3, open: model.updateDataTypeSelectPopup, view: model.renderDataTypeSelectPopup},
+	}
+
+	for _, tt := range tests {
+		m.importDefaultsCursor = tt.cursor
+		updated, _ = m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(model)
+
+		assert.Contains(t, tt.view(m), "none")
+
+		updated, _ = tt.open(m, tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(model)
+		assert.Equal(t, popupImportDefaults, m.activePopup)
+	}
+
+	assert.Empty(t, m.importDefaultRegion)
+	assert.False(t, m.importDefaultType.IsValid())
+	assert.False(t, m.importDefaultTier.IsValid())
+	assert.False(t, m.importDefaultDataType.IsValid())
+}
+
+func TestImportDefaultActionsPopupClearsTextAreasAndKeepsDefaultsOpen(t *testing.T) {
+	tests := []struct {
+		name        string
+		cursor      int
+		value       string
+		expected    popupKind
+		assertEmpty func(*testing.T, model)
+	}{
+		{
+			name:     "policies",
+			cursor:   4,
+			value:    "policy",
+			expected: popupPoliciesActions,
+			assertEmpty: func(t *testing.T, m model) {
+				t.Helper()
+				assert.Empty(t, m.importDefaultPolicies.Value())
+			},
+		},
+		{
+			name:     "description",
+			cursor:   5,
+			value:    "description",
+			expected: popupDescriptionActions,
+			assertEmpty: func(t *testing.T, m model) {
+				t.Helper()
+				assert.Empty(t, m.importDefaultDescription.Value())
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
+			m.screen = screenMain
+			m.width = 120
+			m.height = 40
+			m.openImportPopup()
+
+			m.importMainCursor = int(importMainFieldDefaults)
+			updated, _ := m.updateImportFilePopup(tea.KeyMsg{Type: tea.KeyEnter})
+			m = updated.(model)
+
+			m.importDefaultsCursor = tt.cursor
+			if tt.cursor == 4 {
+				m.importDefaultPolicies.SetValue(tt.value)
+			} else {
+				m.importDefaultDescription.SetValue(tt.value)
+			}
+
+			m.focusImportDefaults()
+			updated, _ = m.updateImportDefaultsPopup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}, Alt: true})
+			m = updated.(model)
+
+			assert.Equal(t, tt.expected, m.activePopup)
+			assert.Equal(t, []popupKind{popupImportFile, popupImportDefaults}, m.popupStack)
+
+			updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+			m = updated.(model)
+
+			assert.Equal(t, popupImportDefaults, m.activePopup)
+			assert.Equal(t, []popupKind{popupImportFile}, m.popupStack)
+			tt.assertEmpty(t, m)
+		})
+	}
 }
 
 func TestColumnsPopupAppliesImmediatelyAndEscCloses(t *testing.T) {
@@ -1805,7 +2322,7 @@ func TestCursorRenderingDoesNotInsertExtraCharacterInsideText(t *testing.T) {
 
 	assert.Contains(t, plain, "1 │ hello world")
 	assert.False(t, strings.Contains(plain, "he█llo"))
-	assert.Equal(t, lipgloss.Width("1 │ hello world"), lipgloss.Width(plain))
+	assert.Equal(t, lipgloss.Width("1 │ hello world"), lipgloss.Width(strings.TrimRight(plain, " ")))
 }
 
 func TestNewParameterSaveCommandCreatesStatus(t *testing.T) {
@@ -3210,6 +3727,14 @@ func TestOverlayPopupLinePreservesTextOutsidePopupBounds(t *testing.T) {
 	row := overlayPopupLine("0123456789abcdefghij", "POP", 8, 3, 20)
 
 	assert.Equal(t, "01234567POPbcdefghij", row)
+}
+
+func TestOverlayPopupLinePreservesANSIOutsidePopupBounds(t *testing.T) {
+	row := overlayPopupLine("\x1b[31mABCDE\x1b[0m", "X", 2, 1, 5)
+
+	assert.Equal(t, "ABXDE", stripANSI(row))
+	assert.Contains(t, row, "\x1b[31mAB")
+	assert.Contains(t, row, "\x1b[31mDE")
 }
 
 func TestOverlayPopupOnBodyOnlyReplacesPopupRectangle(t *testing.T) {

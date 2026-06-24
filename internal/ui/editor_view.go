@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -12,6 +11,12 @@ import (
 
 type editorViewComponent struct {
 	model model
+}
+
+type editorExpandableFieldView struct {
+	field editField
+	label string
+	area  *textarea.Model
 }
 
 func (component editorViewComponent) renderTextAreaScreen() string {
@@ -47,7 +52,35 @@ func (component editorViewComponent) renderTextAreaScreen() string {
 
 	preferredHeight := m.textAreaBodyHeight()
 	innerHeight := max(1, preferredHeight-2)
-	remaining := max(1, innerHeight-len(lines))
+	expandableFields := component.editorExpandableFieldViews()
+	expandedFields := component.expandedEditorTextareaItems(expandableFields)
+
+	fixedLines := len(lines) + len(expandableFields) + component.editorExpandableSeparatorCount(expandableFields)
+	if m.shouldShowEncryptedEditPlaceholder() {
+		fixedLines++
+	}
+
+	rowLimits := formTextareaRowLimits(expandedFields, max(1, innerHeight-fixedLines))
+
+	for _, field := range expandableFields {
+		maxRows := rowLimits[int(field.field)]
+		if maxRows == 0 {
+			maxRows = 1
+		}
+
+		lines = append(lines, m.renderExpandableField(field.field, field.label, field.area, labelWidth, maxRows, m.hasVisibleFieldAfter(field.field))...)
+	}
+
+	if m.shouldShowEncryptedEditPlaceholder() {
+		lines = append(lines, m.editFieldLine(editFieldValue, "Value", m.encryptedPlaceholder(), labelWidth))
+	}
+
+	return m.renderBox(title, lines, preferredHeight)
+}
+
+func (component editorViewComponent) editorExpandableFieldViews() []editorExpandableFieldView {
+	m := component.model
+	fields := make([]editorExpandableFieldView, 0, 3)
 
 	if m.editFieldAllowed(editFieldDescription) {
 		descriptionArea := m.editDescriptionArea
@@ -55,25 +88,56 @@ func (component editorViewComponent) renderTextAreaScreen() string {
 			descriptionArea.SetValue(m.editDescriptionInput.Value())
 		}
 
-		descriptionLines := m.renderExpandableField(editFieldDescription, "Description", &descriptionArea, labelWidth, max(1, remaining-1), m.hasVisibleFieldAfter(editFieldDescription))
-		lines = append(lines, descriptionLines...)
-		remaining = max(1, innerHeight-len(lines))
+		fields = append(fields, editorExpandableFieldView{field: editFieldDescription, label: "Description", area: &descriptionArea})
 	}
 
 	if m.shouldShowPoliciesField() {
-		policyLines := m.renderExpandableField(editFieldPolicies, "Policies", &m.editPoliciesArea, labelWidth, max(1, remaining-1), m.hasVisibleFieldAfter(editFieldPolicies))
-		lines = append(lines, policyLines...)
-		remaining = max(1, innerHeight-len(lines))
+		fields = append(fields, editorExpandableFieldView{field: editFieldPolicies, label: "Policies", area: &m.editPoliciesArea})
 	}
 
-	if m.shouldShowEncryptedEditPlaceholder() {
-		lines = append(lines, m.editFieldLine(editFieldValue, "Value", m.encryptedPlaceholder(), labelWidth))
-	} else if m.editFieldAllowed(editFieldValue) {
-		valueLines := m.renderExpandableField(editFieldValue, "Value", &m.textArea, labelWidth, max(1, remaining-1), false)
-		lines = append(lines, valueLines...)
+	if !m.shouldShowEncryptedEditPlaceholder() && m.editFieldAllowed(editFieldValue) {
+		fields = append(fields, editorExpandableFieldView{field: editFieldValue, label: "Value", area: &m.textArea})
 	}
 
-	return m.renderBox(title, lines, preferredHeight)
+	return fields
+}
+
+func (component editorViewComponent) expandedEditorTextareaItems(fields []editorExpandableFieldView) []formTextareaLayoutItem {
+	m := component.model
+	items := make([]formTextareaLayoutItem, 0, len(fields))
+	contentWidth := m.multilineContentWidth()
+
+	for _, field := range fields {
+		if field.area == nil || !m.shouldRenderExpandedField(field.field, field.area, 11) {
+			continue
+		}
+
+		items = append(items, formTextareaLayoutItem{
+			key:          int(field.field),
+			area:         field.area,
+			focused:      m.editField == field.field && field.area.Focused(),
+			contentWidth: contentWidth,
+		})
+	}
+
+	return items
+}
+
+func (component editorViewComponent) editorExpandableSeparatorCount(fields []editorExpandableFieldView) int {
+	m := component.model
+	count := 0
+
+	for _, field := range fields {
+		if field.area == nil || !m.shouldRenderExpandedField(field.field, field.area, 11) {
+			continue
+		}
+
+		if m.hasVisibleFieldAfter(field.field) {
+			count++
+		}
+	}
+
+	return count
 }
 
 func (component editorViewComponent) renderTextAreaValueLines(maxRows int) []string {
@@ -115,17 +179,9 @@ func (component editorViewComponent) singleLineFieldWidth(labelWidth int) int {
 
 func (component editorViewComponent) singleLineAreaView(field editField, area *textarea.Model, labelWidth int) string {
 	m := component.model
-	width := m.singleLineFieldWidth(labelWidth)
-	value := strings.ReplaceAll(area.Value(), "\n", " ")
-
 	focused := m.editField == field && area.Focused()
-	if !focused {
-		return m.value(truncateStyled(value, width))
-	}
 
-	_, offset := textAreaCursorLineOffset(area)
-
-	return m.value(m.inputValueWithCursor(value, offset, width))
+	return m.formSingleLineAreaView(area, focused, labelWidth, m.boxInnerWidth())
 }
 
 func (component editorViewComponent) expandableFieldValue(field editField) string {
@@ -218,71 +274,9 @@ func (component editorViewComponent) isCurrentExpandableFieldExpanded() bool {
 
 func (component editorViewComponent) renderMultilineFieldLines(field editField, area *textarea.Model, maxRows int) []string {
 	m := component.model
-	maxRows = max(1, maxRows)
-	wrapWidth := m.multilineContentWidth()
-	logicalLines, segments := multilineVisualSegments(area.Value(), wrapWidth)
-	lineCount := max(1, len(logicalLines))
-	lineNumberWidth := len(strconv.Itoa(lineCount))
-	cursorLine := min(max(0, area.Line()), lineCount-1)
-	lineInfo := area.LineInfo()
-	cursorOffset := min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(logicalLines[cursorLine])))
 	focused := m.editField == field && area.Focused()
 
-	cursorVisual := 0
-	if focused {
-		cursorVisual = cursorVisualSegmentIndex(logicalLines, segments, cursorLine, cursorOffset, wrapWidth)
-	}
-
-	type visualLine struct {
-		text string
-	}
-
-	visual := make([]visualLine, 0, lineCount)
-
-	for visualIndex, segment := range segments {
-		runes := []rune(logicalLines[segment.logical])
-
-		piece := ""
-		if segment.start < segment.end {
-			piece = string(runes[segment.start:segment.end])
-		}
-
-		ownsCursor := focused && visualIndex == cursorVisual
-		if ownsCursor {
-			piece = m.withCursorMarker(piece, cursorOffset-segment.start)
-		}
-
-		prefix := ""
-		if m.showGutters {
-			prefix = fmt.Sprintf("%*d │ ", lineNumberWidth, segment.logical+1)
-			if segment.start > 0 {
-				prefix = fmt.Sprintf("%*s | ", lineNumberWidth, "")
-			}
-		}
-
-		if !m.showGutters {
-			piece = rawLeftLinePrefix + piece
-		}
-
-		visual = append(visual, visualLine{text: prefix + piece})
-	}
-
-	start := 0
-
-	if len(visual) > maxRows {
-		if focused {
-			start = min(max(0, cursorVisual-maxRows+1), len(visual)-maxRows)
-		}
-	}
-
-	end := min(len(visual), start+maxRows)
-
-	lines := make([]string, 0, end-start)
-	for _, line := range visual[start:end] {
-		lines = append(lines, line.text)
-	}
-
-	return lines
+	return m.formMultilineAreaLines(area, maxRows, m.multilineContentWidth(), focused)
 }
 
 type multilineVisualSegment struct {
@@ -342,38 +336,6 @@ func cursorVisualSegmentIndex(lines []string, segments []multilineVisualSegment,
 	return 0
 }
 
-func (component editorViewComponent) multilineContentWidth() int {
-	m := component.model
-	if !m.showGutters {
-		return max(8, m.boxInnerWidth()-2)
-	}
-
-	lineNumberWidth := 4
-	prefixWidth := lineNumberWidth + lipgloss.Width(" │ ")
-
-	return max(8, m.boxInnerWidth()-prefixWidth-2)
-}
-
-func (component editorViewComponent) withCursorMarker(line string, offset int) string {
-	m := component.model
-	runes := []rune(line)
-
-	offset = min(max(0, offset), len(runes))
-	if offset == len(runes) {
-		if m.opts.NoColor {
-			return string(runes) + "█"
-		}
-
-		return string(runes) + cursorStyle.Render(" ")
-	}
-
-	if m.opts.NoColor {
-		return string(runes[:offset]) + "█" + string(runes[offset+1:])
-	}
-
-	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
-}
-
 func (component editorViewComponent) textAreaBodyHeight() int {
 	m := component.model
 	if m.height <= 0 {
@@ -393,14 +355,8 @@ func (component editorViewComponent) editFieldLine(field editField, name, render
 func (component editorViewComponent) editTextInputFieldLine(field editField, name string, input *textinput.Model, labelWidth int) string {
 	m := component.model
 	label := m.editFieldLabel(field, name)
-	labelText := padMin(label+":", labelWidth+1)
-	// Bubbles textinput renders the focused cursor as one visible cell in addition to
-	// its configured width. Reserve that extra cell so the final styled line does not
-	// overflow the box and lose ANSI styling during truncation.
-	available := m.boxInnerWidth() - lipgloss.Width(labelText) - 2
-	input.Width = max(1, available)
 
-	return m.fieldLine(label, input.View(), labelWidth)
+	return m.formTextInputFieldLine(label, input, labelWidth, m.boxInnerWidth())
 }
 
 func (component editorViewComponent) editFieldLabel(field editField, name string) string {
@@ -435,11 +391,7 @@ func (component editorViewComponent) shouldTypePrintableQInEditField() bool {
 
 func (component editorViewComponent) editOptionValue(field editField, value string) string {
 	m := component.model
-	if m.editField == field {
-		value += " <"
-	}
-
-	return m.value(value)
+	return m.formOptionValue(m.editField == field, value)
 }
 
 func (component *editorViewComponent) moveActiveMultilinePage(direction int) {
@@ -467,9 +419,11 @@ func (component editorViewComponent) textAreaFooterText() string {
 	valueAction := ""
 
 	switch m.editField {
-	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
+	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 	case editFieldValue:
 		valueAction = " • alt+e value actions"
+	case editFieldDescription:
+		valueAction = " • alt+e description actions"
 	case editFieldPolicies:
 		valueAction = " • alt+e policies actions"
 

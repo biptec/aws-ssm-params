@@ -54,6 +54,14 @@ func (renderer *styleRenderer) muted(s string) string {
 	return mutedStyle.Render(s)
 }
 
+func (renderer *styleRenderer) focusMarker(s string) string {
+	if renderer.noColor {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(selectedFg).Render(s)
+}
+
 func (renderer *styleRenderer) encryptedPlaceholder() string {
 	return renderer.muted(encryptedPlaceholderText)
 }

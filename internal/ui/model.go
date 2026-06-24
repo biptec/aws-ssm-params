@@ -83,6 +83,7 @@ type modelState struct {
 	listState
 	editorState
 	tableState
+	importState
 	popupState
 }
 
@@ -234,6 +235,11 @@ func (m model) updateValueActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	component := editorActionsComponent{model: m}
 	return component.updatePoliciesActionsPopup(msg)
+}
+
+func (m model) updateDescriptionActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := editorActionsComponent{model: m}
+	return component.updateDescriptionActionsPopup(msg)
 }
 
 func (m model) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -657,16 +663,6 @@ func (m model) renderMultilineFieldLines(field editField, area *textarea.Model, 
 	return component.renderMultilineFieldLines(field, area, maxRows)
 }
 
-func (m model) multilineContentWidth() int {
-	component := editorViewComponent{model: m}
-	return component.multilineContentWidth()
-}
-
-func (m model) withCursorMarker(line string, offset int) string {
-	component := editorViewComponent{model: m}
-	return component.withCursorMarker(line, offset)
-}
-
 func (m model) textAreaBodyHeight() int {
 	component := editorViewComponent{model: m}
 	return component.textAreaBodyHeight()
@@ -825,6 +821,36 @@ func (m model) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return component.updateOverwriteSelectPopup(msg)
 }
 
+func (m model) updateImportFilePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportFilePopup(msg)
+}
+
+func (m model) updateImportKeyFieldPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportKeyFieldPopup(msg)
+}
+
+func (m model) updateImportFormatPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportFormatPopup(msg)
+}
+
+func (m model) updateImportMapFieldsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportMapFieldsPopup(msg)
+}
+
+func (m model) updateImportMapPathsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportMapPathsPopup(msg)
+}
+
+func (m model) updateImportDefaultsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportDefaultsPopup(msg)
+}
+
 func (m model) renderSortPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderSortPopup()
@@ -838,6 +864,11 @@ func (m model) renderValueActionsPopup() string {
 func (m model) renderPoliciesActionsPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderPoliciesActionsPopup()
+}
+
+func (m model) renderDescriptionActionsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderDescriptionActionsPopup()
 }
 
 func (m model) renderFileActionPopup() string {
@@ -858,6 +889,36 @@ func (m model) renderUnsavedChangesPopup() string {
 func (m model) renderRandomValuePopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderRandomValuePopup()
+}
+
+func (m model) renderImportFilePopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportFilePopup()
+}
+
+func (m model) renderImportKeyFieldPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportKeyFieldPopup()
+}
+
+func (m model) renderImportFormatPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportFormatPopup()
+}
+
+func (m model) renderImportMapFieldsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportMapFieldsPopup()
+}
+
+func (m model) renderImportMapPathsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportMapPathsPopup()
+}
+
+func (m model) renderImportDefaultsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportDefaultsPopup()
 }
 
 func (m model) sortOptionLines() []string {
@@ -990,6 +1051,11 @@ func (m model) renderPopupBoxWithActions(title string, lines []string, actions s
 	return component.renderPopupBoxWithActions(title, lines, actions)
 }
 
+func (m model) renderPopupBoxWithActionsMinWidth(title string, lines []string, actions string, minInnerWidth int) string {
+	component := newPopupRenderer(m)
+	return component.renderPopupBoxWithActionsMinWidth(title, lines, actions, minInnerWidth)
+}
+
 func (m model) popupActionLine(actions string) string {
 	component := newPopupRenderer(m)
 	return component.popupActionLine(actions)
@@ -1020,6 +1086,10 @@ func (m model) value(s string) string {
 
 func (m model) muted(s string) string {
 	return newStyleRenderer(m).muted(s)
+}
+
+func (m model) focusMarker(s string) string {
+	return newStyleRenderer(m).focusMarker(s)
 }
 
 func (m model) encryptedPlaceholder() string {
@@ -1317,6 +1387,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.editPoliciesArea.SetHeight(max(1, msg.Height-10))
 		m.editDescriptionArea.SetWidth(max(20, msg.Width-14))
 		m.editDescriptionArea.SetHeight(max(1, msg.Height-10))
+		m.importDefaultPolicies.SetWidth(max(20, msg.Width-14))
+		m.importDefaultPolicies.SetHeight(max(1, msg.Height-10))
+		m.importDefaultDescription.SetWidth(max(20, msg.Width-14))
+		m.importDefaultDescription.SetHeight(max(1, msg.Height-10))
 
 		return m, nil
 
@@ -1338,6 +1412,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		return m, nil
+
+	case importDefaultsAnimationTickMsg:
+		return m.updateImportDefaultsAnimationTick(msg)
 
 	case statusBatchMsg:
 		m.mergeStatusBatch(Statuses(msg))
@@ -1448,6 +1525,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateValueActionsPopup(msg)
 			case popupPoliciesActions:
 				return m.updatePoliciesActionsPopup(msg)
+			case popupDescriptionActions:
+				return m.updateDescriptionActionsPopup(msg)
 			case popupFileAction:
 				return m.updateFileActionPopup(msg)
 			case popupFileWriteConfirm:
@@ -1456,6 +1535,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateUnsavedChangesPopup(msg)
 			case popupRandomValue:
 				return m.updateRandomValuePopup(msg)
+			case popupImportFile:
+				return m.updateImportFilePopup(msg)
+			case popupImportKeyField:
+				return m.updateImportKeyFieldPopup(msg)
+			case popupImportFormat:
+				return m.updateImportFormatPopup(msg)
+			case popupImportMapFields:
+				return m.updateImportMapFieldsPopup(msg)
+			case popupImportMapPaths:
+				return m.updateImportMapPathsPopup(msg)
+			case popupImportDefaults:
+				return m.updateImportDefaultsPopup(msg)
 			}
 		}
 

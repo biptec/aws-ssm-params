@@ -116,12 +116,58 @@ func truncateInline(v string, width int) string {
 }
 
 func truncateStyled(v string, width int) string {
-	plain := stripANSI(v)
-	if len(plain) <= width {
+	if lipgloss.Width(v) <= width {
 		return v
 	}
 
-	return truncateInline(plain, width)
+	if width < 4 {
+		width = 4
+	}
+
+	out := strings.Builder{}
+	used := 0
+	index := 0
+	activeANSI := ""
+
+	for index < len(v) {
+		if v[index] == '\x1b' {
+			sequence, next := ansiSequence(v, index)
+			out.WriteString(sequence)
+			activeANSI = activeANSISequence(activeANSI, sequence)
+			index = next
+
+			continue
+		}
+
+		r, size := decodeVisibleRune(v[index:])
+
+		rw := lipgloss.Width(string(r))
+		if used+rw+3 > width {
+			break
+		}
+
+		out.WriteRune(r)
+
+		used += rw
+		index += size
+	}
+
+	out.WriteString("...")
+
+	if activeANSI != "" {
+		out.WriteString("\x1b[0m")
+	}
+
+	return out.String()
+}
+
+func decodeVisibleRune(s string) (decoded rune, size int) {
+	r := []rune(s)
+	if len(r) == 0 {
+		return 0, 0
+	}
+
+	return r[0], len(string(r[0]))
 }
 
 // stripANSI removes ANSI escape sequences so width calculations work with styled strings.

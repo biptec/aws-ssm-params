@@ -120,6 +120,7 @@ func newModel(ctx context.Context, client ssmclient.Client, items inventory.Item
 	m.editPathInput = editPathInput
 	m.editDescriptionInput = editDescriptionInput
 	m.editFileInput = editFileInput
+	m.importState = newImportState(opts)
 	m.columns = defaultColumnVisibility(opts.ShowColumns)
 	m.sortBy = sortBy
 	m.sortDescending = sortDescending
