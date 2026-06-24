@@ -6,6 +6,9 @@ SHELL := /bin/bash
 GO ?= go
 PKG_DIRS ?= $(shell $(GO) list -f '{{.Dir}}' ./...)
 PKGS ?= $(patsubst $(CURDIR)/%,./%,$(filter-out $(CURDIR)/vendor/%,$(PKG_DIRS)))
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git describe --tags --dirty --always 2>/dev/null || echo dev)
+VERSION_VAR := main.version
+GO_LDFLAGS ?= -X $(VERSION_VAR)=$(VERSION)
 
 # Keep checks offline-safe by default: Go will not auto-download another toolchain.
 # Override when you explicitly want Go toolchain auto-downloads:
@@ -63,6 +66,7 @@ help:
 	@echo ""
 	@echo "Config:"
 	@echo "  GOTOOLCHAIN=$(GOTOOLCHAIN)"
+	@echo "  VERSION=$(VERSION)"
 	@echo "  COVERAGE_MIN=$(COVERAGE_MIN)"
 	@echo "  FORCE_LOCAL_TOOLS=$(FORCE_LOCAL_TOOLS)"
 	@echo "  GOLANGCI_MODULES_DOWNLOAD_MODE=$(GOLANGCI_MODULES_DOWNLOAD_MODE)"
@@ -261,7 +265,7 @@ vet: require-go
 .PHONY: build
 build: require-go
 	@echo "Building all packages..."
-	@$(GO) build $(PKGS)
+	@$(GO) build -ldflags "$(GO_LDFLAGS)" $(PKGS)
 
 .PHONY: test
 test: require-go

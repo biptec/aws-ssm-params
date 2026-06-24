@@ -14,11 +14,14 @@ const (
 	envVarPrefix = "AWS_SSM_PARAMS_"
 )
 
+var version = "dev"
+
 func newCLIApp(rawArgs []string) *cli.Command {
 	return &cli.Command{
 		Name:                  appName,
 		Usage:                 "Manage AWS SSM parameters",
 		UsageText:             appName + " [global options] <command> [command options]",
+		Version:               version,
 		EnableShellCompletion: true,
 		Before: func(ctx context.Context, command *cli.Command) (context.Context, error) {
 			_ = command

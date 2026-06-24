@@ -19,6 +19,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
+      - -X main.version={{ .Tag }}
 
 archives:
   - id: aws-ssm-params
@@ -68,4 +69,4 @@ brews:
     install: |
       bin.install "aws-ssm-params"
     test: |
-      system "#{bin}/aws-ssm-params", "--help"
+      system "#{bin}/aws-ssm-params", "--version"

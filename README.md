@@ -264,6 +264,7 @@ Global options apply to all commands.
 | `--keymap emacs\|vi` | `AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. | You prefer vi-style TUI navigation and editing. |
 | `--log-level value` | `AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. | You need diagnostics without polluting stdout. |
 | `--filter value` | `AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. | You want to limit loaded, exported, imported, deleted, or displayed parameters. |
+| `--version` | - | Print the build version. Release builds use the current git tag. | You want to verify the installed binary. |
 
 ## Fields
 
@@ -1365,6 +1366,8 @@ On a `v*` tag, the release workflow:
 3. generates checksums;
 4. creates or updates the GitHub Release;
 5. publishes the Homebrew Formula to `biptec/homebrew-tools`.
+
+Release builds set `aws-ssm-params --version` from the current git tag.
 
 The workflow uses two tokens:
 

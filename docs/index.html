@@ -19,6 +19,7 @@
         <a href="#tui">TUI</a>
         <a href="#export">Export</a>
         <a href="#import">Import</a>
+        <a href="#delete">Delete</a>
         <a href="#scenarios">Scenarios</a>
       </div>
     </nav>
@@ -131,12 +132,12 @@ go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
         </article>
         <article class="command-card">
           <h3>Import a dotenv file</h3>
-          <p>Use <code>--base-path</code> when dotenv keys are relative names.</p>
+          <p>Use <code>--map-path</code> to map file-side names back to AWS paths.</p>
           <pre><code>aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --base-path /app/prod \
+  --map-path /app/prod/: \
   --summary &lt; .env</code></pre>
         </article>
       </div>
@@ -145,10 +146,11 @@ go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
     <section class="section" id="commands">
       <div class="section-heading">
         <p class="eyebrow">Command model</p>
-        <h2>Three commands: <code>tui</code>, <code>export</code>, and <code>import</code>.</h2>
+        <h2>Four commands: <code>tui</code>, <code>export</code>, <code>import</code>, and <code>delete</code>.</h2>
         <p>
           There are no separate <code>get</code> or <code>put</code> commands. Use scalar export to read a
-          single value, import to write values, and the TUI for manual editing.
+          single value, import to write values, delete to remove identities supplied through stdin, and
+          the TUI for manual editing.
         </p>
       </div>
       <div class="table-wrap">
@@ -171,6 +173,11 @@ go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
               <td><code>import</code></td>
               <td>Creating and updating parameters from dotenv, JSON, or YAML stdin.</td>
               <td><code>aws-ssm-params --region eu-north-1 import &lt; params.yaml</code></td>
+            </tr>
+            <tr>
+              <td><code>delete</code></td>
+              <td>Deleting parameters described by dotenv, JSON, or YAML stdin.</td>
+              <td><code>aws-ssm-params --region eu-north-1 delete --dry-run &lt; params.json</code></td>
             </tr>
           </tbody>
         </table>
@@ -210,8 +217,8 @@ AWS_REGION=eu-north-1 AWS_PROFILE=production aws-ssm-params export</code></pre><
             <tr><td><code>--no-color</code></td><td><code>AWS_SSM_PARAMS_NO_COLOR</code></td><td>Disable color output for CI or plain logs.</td></tr>
             <tr><td><code>--keymap</code></td><td><code>AWS_SSM_PARAMS_KEYMAP</code></td><td>Choose <code>emacs</code> or <code>vi</code> navigation.</td></tr>
             <tr><td><code>--log-level</code></td><td><code>AWS_SSM_PARAMS_LOG_LEVEL</code></td><td>Enable <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, or <code>error</code> logs.</td></tr>
-            <tr><td><code>--filters-file</code></td><td><code>AWS_SSM_PARAMS_FILTER_FILE</code></td><td>Load reusable filter groups from a file.</td></tr>
             <tr><td><code>--filter</code></td><td><code>AWS_SSM_PARAMS_FILTER</code></td><td>Filter loaded, exported, imported, or displayed records.</td></tr>
+            <tr><td><code>--version</code></td><td>—</td><td>Print the build version. Release builds use the current git tag.</td></tr>
           </tbody>
         </table>
       </div>
@@ -428,12 +435,12 @@ aws-ssm-params \
           <tbody>
             <tr><td><code>--output-field</code></td><td><code>AWS_SSM_PARAMS_OUTPUT_FIELD</code></td><td>Include selected AWS fields.</td></tr>
             <tr><td><code>--map-field</code></td><td><code>AWS_SSM_PARAMS_MAP_FIELD</code></td><td>Rename AWS fields in file output.</td></tr>
+            <tr><td><code>--map-path</code></td><td><code>AWS_SSM_PARAMS_MAP_PATH</code></td><td>Map exported AWS path prefixes to file path prefixes.</td></tr>
             <tr><td><code>--sort-by</code></td><td><code>AWS_SSM_PARAMS_SORT_BY</code></td><td>Sort records before writing.</td></tr>
             <tr><td><code>--with-decryption</code></td><td><code>AWS_SSM_PARAMS_WITH_DECRYPTION</code></td><td>Decrypt SecureString values.</td></tr>
-            <tr><td><code>--format</code></td><td>—</td><td><code>dotenv</code>, <code>json</code>, or <code>yaml</code>. Default is <code>dotenv</code>.</td></tr>
-            <tr><td><code>--key-field</code></td><td>—</td><td>Write JSON/YAML as an object/map keyed by a field.</td></tr>
-            <tr><td><code>--base-path</code></td><td>—</td><td>Remove a base path from exported parameter names.</td></tr>
-            <tr><td><code>--scalar</code></td><td>—</td><td>Write exactly one selected output field as scalar values.</td></tr>
+            <tr><td><code>--format</code></td><td><code>AWS_SSM_PARAMS_FORMAT</code></td><td><code>dotenv</code>, <code>json</code>, or <code>yaml</code>. Default is <code>dotenv</code>.</td></tr>
+            <tr><td><code>--key-field</code></td><td><code>AWS_SSM_PARAMS_KEY_FIELD</code></td><td>Write JSON/YAML as an object/map keyed by a field.</td></tr>
+            <tr><td><code>--scalar</code></td><td><code>AWS_SSM_PARAMS_SCALAR</code></td><td>Write exactly one selected output field as scalar values.</td></tr>
           </tbody>
         </table>
       </div>
@@ -491,29 +498,30 @@ aws-ssm-params \
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Flag</th><th>Purpose</th><th>Use when</th></tr></thead>
+          <thead><tr><th>Flag</th><th>Environment</th><th>Purpose</th></tr></thead>
           <tbody>
-            <tr><td><code>--format</code></td><td>Input format: <code>dotenv</code>, <code>json</code>, or <code>yaml</code>.</td><td>Choose parser for stdin.</td></tr>
-            <tr><td><code>--map-field</code></td><td>Map input file keys to AWS fields.</td><td>Your JSON/YAML schema uses custom names.</td></tr>
-            <tr><td><code>--key-field</code></td><td>Use JSON/YAML object keys as an AWS field.</td><td>Input is keyed by name or another field.</td></tr>
-            <tr><td><code>--base-path</code></td><td>Resolve imported names or relativize exported names against a base path.</td><td>Portable dotenv, JSON, or YAML files.</td></tr>
-            <tr><td><code>--on-create</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control missing parameter behavior.</td></tr>
-            <tr><td><code>--on-update</code></td><td><code>skip</code>, <code>error</code>, or <code>ask</code>.</td><td>Control existing parameter behavior.</td></tr>
-            <tr><td><code>--continue-on-error</code></td><td>Continue after per-record failures.</td><td>Bulk imports where one bad row should not stop the run.</td></tr>
-            <tr><td><code>--summary</code></td><td>Print created/updated/skipped/failed counts.</td><td>You want an import report.</td></tr>
-            <tr><td><code>--default-type</code></td><td>Default type: <code>string</code>, <code>string-list</code>, <code>secure-string</code>.</td><td>Input does not include type.</td></tr>
-            <tr><td><code>--default-tier</code></td><td>Default tier: <code>standard</code>, <code>advanced</code>, <code>intelligent-tiering</code>.</td><td>Input does not include tier.</td></tr>
+            <tr><td><code>--format</code></td><td><code>AWS_SSM_PARAMS_FORMAT</code></td><td>Input format: <code>dotenv</code>, <code>json</code>, or <code>yaml</code>.</td></tr>
+            <tr><td><code>--map-field</code></td><td><code>AWS_SSM_PARAMS_MAP_FIELD</code></td><td>Map input file keys to AWS fields.</td></tr>
+            <tr><td><code>--map-path</code></td><td><code>AWS_SSM_PARAMS_MAP_PATH</code></td><td>Map input file path prefixes to AWS path prefixes.</td></tr>
+            <tr><td><code>--key-field</code></td><td><code>AWS_SSM_PARAMS_KEY_FIELD</code></td><td>Use JSON/YAML object keys as an AWS field.</td></tr>
+            <tr><td><code>--on-create</code></td><td><code>AWS_SSM_PARAMS_ON_CREATE</code></td><td><code>none</code>, <code>skip</code>, <code>error</code>, or <code>ask</code>. Default is <code>none</code>.</td></tr>
+            <tr><td><code>--on-update</code></td><td><code>AWS_SSM_PARAMS_ON_UPDATE</code></td><td><code>none</code>, <code>skip</code>, <code>error</code>, or <code>ask</code>. Default is <code>ask</code>.</td></tr>
+            <tr><td><code>--continue-on-error</code></td><td><code>AWS_SSM_PARAMS_CONTINUE_ON_ERROR</code></td><td>Continue after per-record failures.</td></tr>
+            <tr><td><code>--summary</code></td><td><code>AWS_SSM_PARAMS_SUMMARY</code></td><td>Print created/updated/skipped/failed counts.</td></tr>
+            <tr><td><code>--dry-run</code></td><td><code>AWS_SSM_PARAMS_DRY_RUN</code></td><td>Validate and show writes without changing Parameter Store.</td></tr>
+            <tr><td><code>--default-type</code></td><td><code>AWS_SSM_PARAMS_DEFAULT_TYPE</code></td><td>Default type: <code>string</code>, <code>string-list</code>, <code>secure-string</code>.</td></tr>
+            <tr><td><code>--default-tier</code></td><td><code>AWS_SSM_PARAMS_DEFAULT_TIER</code></td><td>Default tier: <code>standard</code>, <code>advanced</code>, <code>intelligent-tiering</code>.</td></tr>
           </tbody>
         </table>
       </div>
       <div class="command-grid">
         <article class="command-card">
-          <h3>Dotenv relative to a base path</h3>
+          <h3>Dotenv mapped to an AWS path</h3>
           <pre><code>aws-ssm-params \
   --region eu-north-1 \
   import \
   --format dotenv \
-  --base-path /app/prod \
+  --map-path /app/prod/: \
   --summary &lt; .env</code></pre>
         </article>
         <article class="command-card">
@@ -548,6 +556,48 @@ aws-ssm-params \
       <div class="note">
         Import supports one target region at a time. <code>--all-regions</code> and multiple
         <code>--region</code> values are intentionally not supported for writes.
+      </div>
+    </section>
+
+    <section class="section" id="delete">
+      <div class="section-heading">
+        <p class="eyebrow">Command: delete</p>
+        <h2>Delete only records supplied through stdin.</h2>
+        <p>
+          Delete never discovers deletion candidates from AWS by filter alone. Global filters only reduce
+          the input records supplied through stdin.
+        </p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Flag</th><th>Environment</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>--format</code></td><td><code>AWS_SSM_PARAMS_FORMAT</code></td><td>Input format: <code>dotenv</code>, <code>json</code>, or <code>yaml</code>.</td></tr>
+            <tr><td><code>--key-field</code></td><td><code>AWS_SSM_PARAMS_KEY_FIELD</code></td><td>Treat JSON/YAML object keys as <code>name</code> or <code>region</code>.</td></tr>
+            <tr><td><code>--map-field</code></td><td><code>AWS_SSM_PARAMS_MAP_FIELD</code></td><td>Map custom input fields to <code>name</code> or <code>region</code>.</td></tr>
+            <tr><td><code>--map-path</code></td><td><code>AWS_SSM_PARAMS_MAP_PATH</code></td><td>Map input file path prefixes to AWS path prefixes.</td></tr>
+            <tr><td><code>--dry-run</code></td><td><code>AWS_SSM_PARAMS_DRY_RUN</code></td><td>Print deletion candidates without deleting or prompting.</td></tr>
+            <tr><td><code>--no-confirm</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM</code></td><td>Delete every filtered input record without prompting.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="command-grid">
+        <article class="command-card">
+          <h3>Review deletion candidates</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  delete \
+  --format json \
+  --dry-run &lt; prod-params.json</code></pre>
+        </article>
+        <article class="command-card">
+          <h3>Delete confirmed records</h3>
+          <pre><code>aws-ssm-params \
+  --region eu-north-1 \
+  delete \
+  --format json \
+  --no-confirm &lt; prod-params.json</code></pre>
+        </article>
       </div>
     </section>
 
@@ -658,6 +708,7 @@ aws-ssm-params --region eu-central-1 \
         <p>
           Tag releases build Linux, macOS, and Windows artifacts, generate checksums, create the GitHub
           Release, and update <code>Formula/aws-ssm-params.rb</code> in the Homebrew tap.
+          Release binaries print the current tag through <code>aws-ssm-params --version</code>.
         </p>
       </div>
       <div class="table-wrap">

@@ -39,6 +39,7 @@ func TestCLIHelpShowsTUICommand(t *testing.T) {
 	assert.Contains(t, out.String(), importCommandName)
 	assert.Contains(t, out.String(), exportCommandName)
 	assert.Contains(t, out.String(), deleteCommandName)
+	assert.Contains(t, out.String(), "--version")
 	assert.NotContains(t, out.String(), "--filters-file")
 	assert.NotContains(t, out.String(), "AWS_SSM_PARAMS_FILTER_FILE")
 	assert.NotContains(t, out.String(), removedCommandInteractive)
@@ -47,6 +48,27 @@ func TestCLIHelpShowsTUICommand(t *testing.T) {
 	assert.NotContains(t, out.String(), "--name")
 	assert.NotContains(t, out.String(), "--names-file")
 	assert.NotContains(t, out.String(), "--json-key-field")
+}
+
+func TestVersionFlagPrintsBuildVersion(t *testing.T) {
+	oldVersion := version
+
+	version = "v1.2.3"
+
+	defer func() {
+		version = oldVersion
+	}()
+
+	cliApp := newCLIApp([]string{"--version"})
+
+	var out bytes.Buffer
+
+	cliApp.Writer = &out
+
+	err := cliApp.Run(context.Background(), []string{appName, "--version"})
+
+	require.NoError(t, err)
+	assert.Equal(t, appName+" version v1.2.3\n", out.String())
 }
 
 func TestTUIHelpUsesShowColumnFlag(t *testing.T) {
