@@ -255,16 +255,16 @@ AWS_SSM_PARAMS_REGION=eu-north-1,eu-central-1 aws-ssm-params export
 
 Global options apply to all commands.
 
-| Option | Description | Use when |
-| --- | --- | --- |
-| `--region value` / `AWS_SSM_PARAMS_REGION` / `AWS_REGION` | AWS region. Repeat for multiple regions. The tool-specific env var has priority over the native AWS alias. | You know the exact region or want a controlled multi-region scan. |
-| `--all-regions` / `AWS_SSM_PARAMS_ALL_REGIONS` | Query all enabled AWS regions. | You are auditing an account and do not know where parameters exist. |
-| `--profile value` / `AWS_SSM_PARAMS_PROFILE` / `AWS_PROFILE` | AWS profile. The tool-specific env var has priority over the native AWS alias. | You use named AWS profiles or SSO. |
-| `--no-color` / `AWS_SSM_PARAMS_NO_COLOR` | Disable color output. | You are running in CI, logs, or a terminal with poor color support. |
-| `--keymap emacs/vi` / `AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. | You prefer vi-style TUI navigation and editing. |
-| `--log-level value` / `AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. | You need diagnostics without polluting stdout. |
-| `--filter value` / `AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. | You want to limit loaded, exported, imported, deleted, or displayed parameters. |
-| `--version` / — | Print the build version. Release builds use the current git tag. | You want to verify the installed binary. |
+| Option | Description |
+| --- | --- |
+| `--region value`<br>`AWS_SSM_PARAMS_REGION`<br>`AWS_REGION` | AWS region. Repeat for multiple regions. The tool-specific env var has priority over the native AWS alias. |
+| `--all-regions`<br>`AWS_SSM_PARAMS_ALL_REGIONS` | Query all enabled AWS regions. |
+| `--profile value`<br>`AWS_SSM_PARAMS_PROFILE`<br>`AWS_PROFILE` | AWS profile. The tool-specific env var has priority over the native AWS alias. |
+| `--no-color`<br>`AWS_SSM_PARAMS_NO_COLOR` | Disable color output. |
+| `--keymap emacs/vi`<br>`AWS_SSM_PARAMS_KEYMAP` | TUI/editor navigation style. Default is `emacs`. |
+| `--log-level value`<br>`AWS_SSM_PARAMS_LOG_LEVEL` | `trace`, `debug`, `info`, `warn`, `error`, or `off`. Default is `off`. |
+| `--filter value`<br>`AWS_SSM_PARAMS_FILTER` | Add one filter group. Repeat for OR logic. |
+| `--version` | Print the build version. Release builds use the current git tag. |
 
 ## Fields
 
@@ -446,15 +446,15 @@ Use the TUI when you want to:
 
 ### TUI options
 
-| Option | Description | Use when |
-| --- | --- | --- |
-| `--with-decryption` / `AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. | You need to inspect or export real secret values in the TUI. |
-| `--show-column value` / `AWS_SSM_PARAMS_SHOW_COLUMN` | Optional column to show. Repeat or use comma-separated env values. | You want a denser table with selected metadata. |
-| `--sort-by field:asc/desc` / `AWS_SSM_PARAMS_SORT_BY` | Initial sort. Repeat for multi-column sort priority. | You want predictable ordering on startup. |
-| `--no-confirm-overwrite-file` / `AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE` | Skip confirmation before overwriting local files from TUI actions. | You are using file actions repeatedly and accept the risk. |
-| `--no-confirm-write-securestring` / `AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING` | Skip confirmation before writing SecureString plaintext to local files. | You intentionally write secrets to local files. |
-| `--no-confirm-delete-one` / `AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE` | Skip confirmation for deleting one parameter. | Fast cleanup with known-safe filters. |
-| `--no-confirm-delete-all` / `AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL` | Skip confirmation for deleting all visible parameters. | Automation-like cleanup inside the TUI. Use carefully. |
+| Option | Description |
+| --- | --- |
+| `--with-decryption`<br>`AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. |
+| `--show-column value`<br>`AWS_SSM_PARAMS_SHOW_COLUMN` | Optional column to show. Repeat or use comma-separated env values. |
+| `--sort-by field:asc/desc`<br>`AWS_SSM_PARAMS_SORT_BY` | Initial sort. Repeat for multi-column sort priority. |
+| `--no-confirm-overwrite-file`<br>`AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE` | Skip confirmation before overwriting local files from TUI actions. |
+| `--no-confirm-write-securestring`<br>`AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING` | Skip confirmation before writing SecureString plaintext to local files. |
+| `--no-confirm-delete-one`<br>`AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE` | Skip confirmation for deleting one parameter. |
+| `--no-confirm-delete-all`<br>`AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL` | Skip confirmation for deleting all visible parameters. |
 
 Accepted optional columns for `--show-column`:
 
@@ -596,16 +596,16 @@ Use `export` when you want to:
 
 ### Export options
 
-| Option | Description | Use when |
-| --- | --- | --- |
-| `--output-field field` / `AWS_SSM_PARAMS_OUTPUT_FIELD` | Include one AWS field in output. Repeat for multiple fields. | You want only selected fields. |
-| `--map-field aws_field:file_field` / `AWS_SSM_PARAMS_MAP_FIELD` | Rename a field in JSON/YAML/dotenv output. Repeat for multiple mappings. | You need compatibility with another file schema. |
-| `--map-path aws_path:file_path` / `AWS_SSM_PARAMS_MAP_PATH` | Map exported AWS path prefixes to file path prefixes. Repeat for multiple mappings. | You need different names in files than in SSM. |
-| `--sort-by field:asc/desc` / `AWS_SSM_PARAMS_SORT_BY` | Sort exported records. Repeat for multi-field sort. | You want stable diffs or predictable output. |
-| `--with-decryption` / `AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. | You need plaintext secret values. |
-| `--format dotenv/json/yaml` / `AWS_SSM_PARAMS_FORMAT` | Output format. Default is `dotenv`. | Choose the target file format. |
-| `--key-field field` / `AWS_SSM_PARAMS_KEY_FIELD` | Write JSON/YAML as an object/map keyed by this AWS field. | You prefer object/map output instead of arrays. |
-| `--scalar` / `AWS_SSM_PARAMS_SCALAR` | Write exactly one selected output field as scalar values. | You need a list of names or one value for a script. |
+| Option | Description |
+| --- | --- |
+| `--output-field field`<br>`AWS_SSM_PARAMS_OUTPUT_FIELD` | Include one AWS field in output. Repeat for multiple fields. |
+| `--map-field aws_field:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Rename a field in JSON/YAML/dotenv output. Repeat for multiple mappings. |
+| `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map exported AWS path prefixes to file path prefixes. Repeat for multiple mappings. |
+| `--sort-by field:asc/desc`<br>`AWS_SSM_PARAMS_SORT_BY` | Sort exported records. Repeat for multi-field sort. |
+| `--with-decryption`<br>`AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. |
+| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Output format. Default is `dotenv`. |
+| `--key-field field`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Write JSON/YAML as an object/map keyed by this AWS field. |
+| `--scalar`<br>`AWS_SSM_PARAMS_SCALAR` | Write exactly one selected output field as scalar values. |
 
 If no `--output-field` is provided, export includes all supported fields.
 
@@ -728,24 +728,24 @@ Use `import` when you want to:
 
 ### Import options
 
-| Option | Description | Use when |
-| --- | --- | --- |
-| `--map-field aws_field:file_field` / `AWS_SSM_PARAMS_MAP_FIELD` | Map input file field names to AWS field names. Repeat for multiple mappings. | Your JSON/YAML uses custom keys. |
-| `--map-path aws_path:file_path` / `AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. | The file names differ from SSM names. |
-| `--format dotenv/json/yaml` / `AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. | Choose parser for stdin. |
-| `--key-field field` / `AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as this AWS field. | Your input is keyed by name, region, or another field. |
-| `--on-create none/skip/error/ask` / `AWS_SSM_PARAMS_ON_CREATE` | Behavior when the parameter does not exist. Default is `none`. | Prevent accidental new parameters or confirm them. |
-| `--on-update none/skip/error/ask` / `AWS_SSM_PARAMS_ON_UPDATE` | Behavior when the parameter already exists. Default is `ask`. | Prevent accidental overwrites or confirm them. |
-| `--continue-on-error` / `AWS_SSM_PARAMS_CONTINUE_ON_ERROR` | Continue after per-record failures. | Bulk imports where one bad record should not stop everything. |
-| `--summary` / `AWS_SSM_PARAMS_SUMMARY` | Print created/updated/skipped/failed counts to stderr. | You want an import report. |
-| `--dry-run` / `AWS_SSM_PARAMS_DRY_RUN` | Validate records and show create/update operations without writing them. | Review an import before changing Parameter Store. |
-| `--default-type value` / `AWS_SSM_PARAMS_DEFAULT_TYPE` | Default type: `string`, `string-list`, `secure-string`. | Input does not include `type`. |
-| `--default-tier value` / `AWS_SSM_PARAMS_DEFAULT_TIER` | Default tier: `standard`, `advanced`, `intelligent-tiering`. | Input does not include `tier`. |
-| `--default-data-type value` / `AWS_SSM_PARAMS_DEFAULT_DATA_TYPE` | Default data type: `text`, `aws:ec2:image`, `aws:ssm:integration`. | Input does not include `data-type`. |
-| `--default-region value` / `AWS_SSM_PARAMS_DEFAULT_REGION` | Default region for records without region metadata. | Migrating into one explicit region. |
-| `--default-description value` / `AWS_SSM_PARAMS_DEFAULT_DESCRIPTION` | Default description. | Imported records should share description text. |
-| `--default-policies value` / `AWS_SSM_PARAMS_DEFAULT_POLICIES` | Default policies JSON. | Creating/updating Advanced parameters with policies. |
-| `--default-policies-file path` / `AWS_SSM_PARAMS_DEFAULT_POLICIES_FILE` | Read default policies JSON from a file. | Policies are multiline or long. |
+| Option | Description |
+| --- | --- |
+| `--map-field aws_field:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map input file field names to AWS field names. Repeat for multiple mappings. |
+| `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. |
+| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. |
+| `--key-field field`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as this AWS field. |
+| `--on-create none/skip/error/ask`<br>`AWS_SSM_PARAMS_ON_CREATE` | Behavior when the parameter does not exist. Default is `none`. |
+| `--on-update none/skip/error/ask`<br>`AWS_SSM_PARAMS_ON_UPDATE` | Behavior when the parameter already exists. Default is `ask`. |
+| `--continue-on-error`<br>`AWS_SSM_PARAMS_CONTINUE_ON_ERROR` | Continue after per-record failures. |
+| `--summary`<br>`AWS_SSM_PARAMS_SUMMARY` | Print created/updated/skipped/failed counts to stderr. |
+| `--dry-run`<br>`AWS_SSM_PARAMS_DRY_RUN` | Validate records and show create/update operations without writing them. |
+| `--default-type value`<br>`AWS_SSM_PARAMS_DEFAULT_TYPE` | Default type: `string`, `string-list`, `secure-string`. |
+| `--default-tier value`<br>`AWS_SSM_PARAMS_DEFAULT_TIER` | Default tier: `standard`, `advanced`, `intelligent-tiering`. |
+| `--default-data-type value`<br>`AWS_SSM_PARAMS_DEFAULT_DATA_TYPE` | Default data type: `text`, `aws:ec2:image`, `aws:ssm:integration`. |
+| `--default-region value`<br>`AWS_SSM_PARAMS_DEFAULT_REGION` | Default region for records without region metadata. |
+| `--default-description value`<br>`AWS_SSM_PARAMS_DEFAULT_DESCRIPTION` | Default description. |
+| `--default-policies value`<br>`AWS_SSM_PARAMS_DEFAULT_POLICIES` | Default policies JSON. |
+| `--default-policies-file path`<br>`AWS_SSM_PARAMS_DEFAULT_POLICIES_FILE` | Read default policies JSON from a file. |
 
 `import` reads from stdin. It supports one target region at a time. `--all-regions` is not supported for import, and multiple `--region` values are not supported for import.
 
@@ -926,15 +926,15 @@ aws-ssm-params [global options] delete [command options] < input-file
 
 ### Delete options
 
-| Option | Description | Use when |
-| --- | --- | --- |
-| `--format dotenv/json/yaml` / `AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. | Choose the parser for stdin. |
-| `--key-field name/region` / `AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as the parameter name or region. | The file was exported with a key field. |
-| `--map-field name:file_field` / `AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `name`. | The file uses a custom name key. |
-| `--map-field region:file_field` / `AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `region`. | The file uses a custom region key. |
-| `--map-path aws_path:file_path` / `AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. | The file names differ from SSM names. |
-| `--no-confirm` / `AWS_SSM_PARAMS_NO_CONFIRM` | Delete every filtered input record without prompting. | Non-interactive automation after reviewing the input. |
-| `--dry-run` / `AWS_SSM_PARAMS_DRY_RUN` | Print deletion candidates without deleting or prompting. | Review the exact regional identities first. |
+| Option | Description |
+| --- | --- |
+| `--format dotenv/json/yaml`<br>`AWS_SSM_PARAMS_FORMAT` | Input format. Default is `dotenv`. |
+| `--key-field name/region`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as the parameter name or region. |
+| `--map-field name:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `name`. |
+| `--map-field region:file_field`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `region`. |
+| `--map-path aws_path:file_path`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes. Repeat for multiple mappings. |
+| `--no-confirm`<br>`AWS_SSM_PARAMS_NO_CONFIRM` | Delete every filtered input record without prompting. |
+| `--dry-run`<br>`AWS_SSM_PARAMS_DRY_RUN` | Print deletion candidates without deleting or prompting. |
 
 Only `name` and `region` may be used with `--map-field`. Other fields in full exported records are preserved for filtering and interactive details but do not determine deletion identity.
 
