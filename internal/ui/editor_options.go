@@ -83,7 +83,7 @@ func parameterTypeItems() parameterTypeOptions {
 // Unlike the editor, import defaults should only write fields the user actually
 // chose; "none" means the imported file or AWS behavior remains authoritative.
 func importParameterTypeItems() parameterTypeOptions {
-	return append(parameterTypeOptions{{label: "none", value: ""}}, parameterTypeItems()...)
+	return append(parameterTypeOptions{{label: "", value: ""}}, parameterTypeItems()...)
 }
 
 // parameterTierItems returns the AWS SSM parameter tiers exposed in the TUI.
@@ -97,7 +97,7 @@ func parameterTierItems() parameterTierOptions {
 
 // importParameterTierItems adds an explicit empty choice for import defaults.
 func importParameterTierItems() parameterTierOptions {
-	return append(parameterTierOptions{{label: "none", value: ""}}, parameterTierItems()...)
+	return append(parameterTierOptions{{label: "", value: ""}}, parameterTierItems()...)
 }
 
 // parameterDataTypeItems returns AWS SSM parameter data types exposed in the TUI.
@@ -111,7 +111,7 @@ func parameterDataTypeItems() parameterDataTypeOptions {
 
 // importParameterDataTypeItems adds an explicit empty choice for import defaults.
 func importParameterDataTypeItems() parameterDataTypeOptions {
-	return append(parameterDataTypeOptions{{label: "none", value: ""}}, parameterDataTypeItems()...)
+	return append(parameterDataTypeOptions{{label: "", value: ""}}, parameterDataTypeItems()...)
 }
 
 // overwriteItems returns the choices for AWS SSM --overwrite.

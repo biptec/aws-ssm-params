@@ -151,7 +151,7 @@ func (component editorViewComponent) renderExpandableField(field editField, labe
 		return []string{m.editFieldLine(field, label, m.singleLineAreaView(field, area, labelWidth), labelWidth)}
 	}
 
-	lines := []string{m.label(m.editFieldLabel(field, label) + ":")}
+	lines := []string{m.formStandaloneLabel(m.editFieldLabel(field, label)+":", m.editField == field)}
 
 	lines = append(lines, m.renderMultilineFieldLines(field, area, maxRows)...)
 	if hasNext {
@@ -349,7 +349,7 @@ func (component editorViewComponent) textAreaBodyHeight() int {
 
 func (component editorViewComponent) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
 	m := component.model
-	return m.fieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth)
+	return m.formFieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth, m.editField == field)
 }
 
 func (component editorViewComponent) editTextInputFieldLine(field editField, name string, input *textinput.Model, labelWidth int) string {

@@ -59,6 +59,7 @@ const (
 const rawLeftLinePrefix = "\x00raw-left\x00"
 
 const encryptedPlaceholderText = "(encrypted)"
+const nonePlaceholderText = "none"
 
 const loadingSpinnerInterval = 120 * time.Millisecond
 
@@ -1064,6 +1065,11 @@ func (m model) popupActionLine(actions string) string {
 func (m model) renderPopupBox(title string, lines []string) string {
 	component := newPopupRenderer(m)
 	return component.renderPopupBox(title, lines)
+}
+
+func (m model) renderPopupBoxMinWidth(title string, lines []string, minInnerWidth int) string {
+	component := newPopupRenderer(m)
+	return component.renderPopupBoxMinWidth(title, lines, minInnerWidth)
 }
 
 func (m model) renderPopupStack(body string) string {

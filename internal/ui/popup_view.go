@@ -222,6 +222,12 @@ func (component popupViewComponent) renderRegionSelectScreen() string {
 
 func (component popupViewComponent) renderRegionSelectPopup() string {
 	m := component.model
+	if m.importSelectorActive() {
+		lines := append(m.regionSelectLines(), "", m.importActionButtonsLine("Select"))
+
+		return m.renderPopupBox("Region", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Region", m.regionSelectLines(), "Enter select   Esc cancel")
 }
 
@@ -238,11 +244,14 @@ func (component popupViewComponent) regionSelectLines() []string {
 
 	for i, region := range regions {
 		label := region
-		if label == "" {
+		if label == "" && m.importSelectorActive() {
+			label = m.muted(nonePlaceholderText)
+		} else if label == "" {
 			label = "none"
 		}
 
-		lines = append(lines, m.singleSelectLine(label, i == m.regionCursor, i == m.regionCursor))
+		focused := i == m.regionCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		lines = append(lines, m.singleSelectLine(label, i == m.regionCursor, focused))
 	}
 
 	return lines
@@ -271,16 +280,34 @@ func (component popupViewComponent) renderTypeSelectScreen() string {
 
 func (component popupViewComponent) renderTypeSelectPopup() string {
 	m := component.model
+	if m.importSelectorActive() {
+		lines := append(m.typeSelectLines(), "", m.importActionButtonsLine("Select"))
+
+		return m.renderPopupBox("Parameter Type", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Parameter Type", m.typeSelectLines(), "Enter select   Esc cancel")
 }
 
 func (component popupViewComponent) renderTierSelectPopup() string {
 	m := component.model
+	if m.importSelectorActive() {
+		lines := append(m.tierSelectLines(), "", m.importActionButtonsLine("Select"))
+
+		return m.renderPopupBox("Parameter Tier", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Parameter Tier", m.tierSelectLines(), "Enter select   Esc cancel")
 }
 
 func (component popupViewComponent) renderDataTypeSelectPopup() string {
 	m := component.model
+	if m.importSelectorActive() {
+		lines := append(m.dataTypeSelectLines(), "", m.importActionButtonsLine("Select"))
+
+		return m.renderPopupBox("Data Type", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Data Type", m.dataTypeSelectLines(), "Enter select   Esc cancel")
 }
 
@@ -301,8 +328,9 @@ func (component popupViewComponent) typeSelectLines() []string {
 	lines = append(lines, m.muted("Choose how this value should be stored in AWS SSM Parameter Store:"), "")
 
 	for i, it := range typeItems {
-		row := optionLabelWithDescription(it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.typeCursor, i == m.typeCursor))
+		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
+		focused := i == m.typeCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		lines = append(lines, m.singleSelectLine(row, i == m.typeCursor, focused))
 	}
 
 	return lines
@@ -320,8 +348,9 @@ func (component popupViewComponent) tierSelectLines() []string {
 	lines = append(lines, m.muted("Choose the AWS SSM storage tier for this parameter:"), "")
 
 	for i, it := range tierItems {
-		row := optionLabelWithDescription(it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.tierCursor, i == m.tierCursor))
+		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
+		focused := i == m.tierCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		lines = append(lines, m.singleSelectLine(row, i == m.tierCursor, focused))
 	}
 
 	return lines
@@ -339,8 +368,9 @@ func (component popupViewComponent) dataTypeSelectLines() []string {
 	lines = append(lines, m.muted("Choose AWS SSM value validation data type:"), "")
 
 	for i, it := range dataTypeItems {
-		row := optionLabelWithDescription(it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.dataTypeCursor, i == m.dataTypeCursor))
+		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
+		focused := i == m.dataTypeCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		lines = append(lines, m.singleSelectLine(row, i == m.dataTypeCursor, focused))
 	}
 
 	return lines
@@ -352,6 +382,14 @@ func optionLabelWithDescription(label, description string) string {
 	}
 
 	return fmt.Sprintf("%s — %s", label, description)
+}
+
+func (m model) importOptionalSelectorLabel(label string) string {
+	if label == "" && m.importSelectorActive() {
+		return m.muted(nonePlaceholderText)
+	}
+
+	return label
 }
 
 func (component popupViewComponent) overwriteSelectLines() []string {

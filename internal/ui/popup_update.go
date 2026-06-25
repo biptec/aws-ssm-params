@@ -272,6 +272,26 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 	}
 
 	key := msg.String()
+	if importSelector && importPrimaryActionKey(key) {
+		m.importDefaultRegion = regions[min(m.regionCursor, len(regions)-1)]
+		m = m.finishImportSelector()
+
+		return m, nil
+	}
+
+	if importSelector && m.importButtonsFocused && importEnterKey(key) {
+		if m.importButtonCursor == importActionPrimary {
+			m.importDefaultRegion = regions[min(m.regionCursor, len(regions)-1)]
+		}
+
+		m = m.finishImportSelector()
+		return m, nil
+	}
+
+	if importSelector && (&m).navigateImportSelectorButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.regionCursor, len(regions)) {
 		return m, nil
 	}
@@ -315,6 +335,26 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 	}
 
 	key := msg.String()
+	if importSelector && importPrimaryActionKey(key) {
+		m.importDefaultType = items[min(m.typeCursor, len(items)-1)].value
+		m = m.finishImportSelector()
+
+		return m, nil
+	}
+
+	if importSelector && m.importButtonsFocused && importEnterKey(key) {
+		if m.importButtonCursor == importActionPrimary {
+			m.importDefaultType = items[min(m.typeCursor, len(items)-1)].value
+		}
+
+		m = m.finishImportSelector()
+		return m, nil
+	}
+
+	if importSelector && (&m).navigateImportSelectorButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.typeCursor, len(items)) {
 		return m, nil
 	}
@@ -380,6 +420,26 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 	}
 
 	key := msg.String()
+	if importSelector && importPrimaryActionKey(key) {
+		m.importDefaultTier = items[min(m.tierCursor, len(items)-1)].value
+		m = m.finishImportSelector()
+
+		return m, nil
+	}
+
+	if importSelector && m.importButtonsFocused && importEnterKey(key) {
+		if m.importButtonCursor == importActionPrimary {
+			m.importDefaultTier = items[min(m.tierCursor, len(items)-1)].value
+		}
+
+		m = m.finishImportSelector()
+		return m, nil
+	}
+
+	if importSelector && (&m).navigateImportSelectorButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.tierCursor, len(items)) {
 		return m, nil
 	}
@@ -436,6 +496,26 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 	}
 
 	key := msg.String()
+	if importSelector && importPrimaryActionKey(key) {
+		m.importDefaultDataType = items[min(m.dataTypeCursor, len(items)-1)].value
+		m = m.finishImportSelector()
+
+		return m, nil
+	}
+
+	if importSelector && m.importButtonsFocused && importEnterKey(key) {
+		if m.importButtonCursor == importActionPrimary {
+			m.importDefaultDataType = items[min(m.dataTypeCursor, len(items)-1)].value
+		}
+
+		m = m.finishImportSelector()
+		return m, nil
+	}
+
+	if importSelector && (&m).navigateImportSelectorButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.dataTypeCursor, len(items)) {
 		return m, nil
 	}

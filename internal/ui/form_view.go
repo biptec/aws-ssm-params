@@ -15,28 +15,51 @@ import (
 // cursor behavior stay consistent across the TUI.
 func (m model) formTextInputFieldLine(name string, input *textinput.Model, labelWidth, innerWidth int) string {
 	labelText := padMin(name+":", labelWidth+1)
+	focused := input.Focused()
 	// Bubbles textinput renders the focused cursor as one visible cell in addition to
 	// its configured width. Reserve that extra cell so the final styled line does not
 	// overflow the box and lose ANSI styling during truncation.
-	available := innerWidth - lipgloss.Width(labelText) - 2
+	available := innerWidth - lipgloss.Width(m.formFocusPrefix(focused)) - lipgloss.Width(labelText) - 2
 	input.Width = max(1, available)
 	// Width changes affect the textinput horizontal viewport. Re-run the
 	// component's overflow calculation so a long focused value expands to the new
 	// available width instead of keeping the previous, narrower viewport.
 	input.SetCursor(input.Position())
 
-	return m.fieldLine(name, input.View(), labelWidth)
+	renderedValue := input.View()
+	if !focused && input.Value() == "" {
+		renderedValue = m.muted(nonePlaceholderText)
+	}
+
+	return m.formFieldLine(name, renderedValue, labelWidth, focused)
+}
+
+// formFieldLine renders a normal labelled form line with a leading focus marker.
+func (m model) formFieldLine(name, renderedValue string, labelWidth int, focused bool) string {
+	return m.formFocusPrefix(focused) + m.fieldLine(name, renderedValue, labelWidth)
+}
+
+// formStandaloneLabel renders a multiline form label with the same leading focus
+// marker that one-line fields use.
+func (m model) formStandaloneLabel(label string, focused bool) string {
+	return m.formFocusPrefix(focused) + m.label(label)
+}
+
+func (m model) formFocusPrefix(focused bool) string {
+	if focused {
+		return m.focusMarker("> ")
+	}
+
+	return "  "
 }
 
 // formOptionValue renders the value side of a selector row.
-// The trailing chevron is the same focus affordance used by editor selector fields.
-func (m model) formOptionValue(focused bool, value string) string {
-	renderedValue := m.value(value)
-	if !focused {
-		return renderedValue
+func (m model) formOptionValue(_ bool, value string) string {
+	if value == "" {
+		return m.muted(nonePlaceholderText)
 	}
 
-	return renderedValue + " " + m.focusMarker("<")
+	return m.value(value)
 }
 
 // formSingleLineAreaView renders a multiline textarea as a compact one-line field.
@@ -46,6 +69,10 @@ func (m model) formSingleLineAreaView(area *textarea.Model, focused bool, labelW
 	labelText := padMin("", labelWidth+1)
 	width := max(1, innerWidth-lipgloss.Width(labelText)-3)
 	value := strings.ReplaceAll(area.Value(), "\n", " ")
+
+	if !focused && strings.TrimSpace(value) == "" {
+		return m.muted(nonePlaceholderText)
+	}
 
 	if !focused {
 		return m.value(truncateStyled(value, width))
@@ -312,6 +339,10 @@ func (m model) withCursorMarker(line string, offset int) string {
 // formInputValue renders an unlabelled text input value, for compact input pairs
 // such as the import map-path rows.
 func (m model) formInputValue(input *textinput.Model, width int) string {
+	return m.formInputValueWithPlaceholder(input, width, true)
+}
+
+func (m model) formInputValueWithPlaceholder(input *textinput.Model, width int, showPlaceholder bool) string {
 	width = max(1, width)
 	if input.Focused() {
 		return padVisible(m.inputValueWithCursor(input.Value(), input.Position(), width), width)
@@ -319,7 +350,11 @@ func (m model) formInputValue(input *textinput.Model, width int) string {
 
 	value := input.Value()
 	if value == "" {
-		return strings.Repeat(" ", width)
+		if !showPlaceholder {
+			return strings.Repeat(" ", width)
+		}
+
+		return padVisible(m.muted(nonePlaceholderText), width)
 	}
 
 	return padVisible(m.value(truncateInline(value, width)), width)
