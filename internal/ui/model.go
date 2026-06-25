@@ -725,6 +725,36 @@ func (m model) handlePendingNavigationSequence(key string) (navigationAction, bo
 	return newKeymap(m).resolvePendingNavigationSequence(pending, key)
 }
 
+func (m *model) interpretNavigationKey(key string, allowTab bool) (navigationAction, bool) {
+	if !allowTab && (key == "tab" || key == "shift+tab") {
+		return navNone, false
+	}
+
+	if m.pendingKeySequence != "" {
+		pending := m.pendingKeySequence
+		m.pendingKeySequence = ""
+		action, ok, consumed := newKeymap(*m).resolvePendingNavigationSequence(pending, key)
+		if consumed {
+			return action, ok
+		}
+	}
+
+	if action, ok := newKeymap(*m).navigationAction(key); ok {
+		if !allowTab && (key == "tab" || key == "shift+tab") {
+			return navNone, false
+		}
+
+		return action, true
+	}
+
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return navNone, true
+	}
+
+	return navNone, false
+}
+
 func (m model) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	component := mainScreenComponent{model: m}
 	return component.updateMain(msg)
@@ -837,6 +867,11 @@ func (m model) updateImportFormatPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return component.updateImportFormatPopup(msg)
 }
 
+func (m model) updateImportFilePickerPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateImportFilePickerPopup(msg)
+}
+
 func (m model) updateImportMapFieldsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	component := popupUpdateComponent{model: m}
 	return component.updateImportMapFieldsPopup(msg)
@@ -905,6 +940,11 @@ func (m model) renderImportKeyFieldPopup() string {
 func (m model) renderImportFormatPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderImportFormatPopup()
+}
+
+func (m model) renderImportFilePickerPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderImportFilePickerPopup()
 }
 
 func (m model) renderImportMapFieldsPopup() string {
@@ -1547,6 +1587,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateImportKeyFieldPopup(msg)
 			case popupImportFormat:
 				return m.updateImportFormatPopup(msg)
+			case popupImportFilePicker:
+				return m.updateImportFilePickerPopup(msg)
 			case popupImportMapFields:
 				return m.updateImportMapFieldsPopup(msg)
 			case popupImportMapPaths:
@@ -1574,6 +1616,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case screenLoading:
 			return m.updateLoading(msg)
 		}
+	}
+
+	if m.activePopup == popupImportFilePicker {
+		var cmd tea.Cmd
+		m.importFilePicker.Height = m.importFilePickerHeight()
+		m.importFilePicker, cmd = m.importFilePicker.Update(msg)
+		m.focusImportFilePickerTarget()
+
+		return m, cmd
 	}
 
 	if m.screen == screenTextArea {

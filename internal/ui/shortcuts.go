@@ -140,6 +140,8 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
 	case popupImportFormat:
 		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
+	case popupImportFilePicker:
+		return "ctrl+/ help • enter select/open • tab buttons • " + m.filePickerParentFooterShortcut() + " parent • esc cancel"
 	case popupImportDefaults:
 		enterAction := "apply"
 		if m.importButtonsFocused {
@@ -182,7 +184,7 @@ func (m *shortcuts) importFileEnterAction() string {
 	}
 
 	if importMainField(m.importMainCursor) == importMainFieldFilePath {
-		return "load"
+		return "browse"
 	}
 
 	return "open"
@@ -202,6 +204,14 @@ func (m *shortcuts) importFocusedButtonAction(primary string) string {
 	}
 
 	return primary
+}
+
+func (m *shortcuts) filePickerParentFooterShortcut() string {
+	if m.keymapStyle() == keymapVi {
+		return "h/←/backspace"
+	}
+
+	return "←/backspace"
 }
 
 func (m *shortcuts) sortPopupScreenFooter() string {
@@ -373,6 +383,11 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
   y           YAML
   tab         move between options and buttons
   esc / q / ctrl+g  cancel`, m.importSelectorEnterAction("select")))
+	case popupImportFilePicker:
+		return strings.TrimSpace(`Actions
+  enter       select focused file or open focused directory
+  tab         move between list and buttons
+  esc / q / ctrl+g  cancel`)
 	case popupImportMapFields, popupImportMapPaths, popupImportDefaults:
 		return m.importChildActionsShortcuts(kind)
 	default:
@@ -468,6 +483,8 @@ func (m *shortcuts) popupNavigationShortcuts(kind popupKind) string {
 		popupImportKeyField,
 		popupImportFormat:
 		return m.navigationShortcuts(screenColumns)
+	case popupImportFilePicker:
+		return m.filePickerNavigationShortcuts()
 	case popupImportFile, popupImportMapFields, popupImportMapPaths, popupImportDefaults:
 		return m.fieldNavigationShortcuts()
 	default:
@@ -621,6 +638,30 @@ Editing
 	}
 
 	return ""
+}
+
+func (m *shortcuts) filePickerNavigationShortcuts() string {
+	if m.keymapStyle() == keymapVi {
+		return strings.TrimSpace(`Navigation
+  ↑ / k                  previous item
+  ↓ / j                  next item
+  PgUp                   page up
+  PgDn                   page down
+  Home / gg              first item
+  End / G                last item
+  h / ← / backspace      parent directory
+  l / →                  open directory`)
+	}
+
+	return strings.TrimSpace(`Navigation
+  ↑ / ctrl+p             previous item
+  ↓ / ctrl+n             next item
+  PgUp / alt+v           page up
+  PgDn / ctrl+v          page down
+  Home / alt+<           first item
+  End / alt+>            last item
+  ← / backspace          parent directory
+  →                      open directory`)
 }
 
 func (m *shortcuts) fieldNavigationShortcuts() string {

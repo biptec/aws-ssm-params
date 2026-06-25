@@ -1,12 +1,17 @@
 package ui
 
 import (
+	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
+	"github.com/charmbracelet/bubbles/filepicker"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -14,7 +19,12 @@ import (
 )
 
 type importState struct {
-	importFilePathInput textinput.Model
+	importFilePathInput            textinput.Model
+	importFilePicker               filepicker.Model
+	importFilePickerParentFocused  bool
+	importFilePickerButtonsFocused bool
+	importFilePickerTargetName     string
+	importFilePickerMinInnerWidth  int
 
 	importMainCursor      int
 	importKeyFieldCursor  int
@@ -106,6 +116,8 @@ const (
 	importActionCount
 )
 
+const importFilePickerParentEntry = ".."
+
 var importFormatOptions = []string{importFormatDotenv, importFormatJSON, importFormatYAML}
 
 var importKeyFieldOptions = []string{
@@ -158,6 +170,7 @@ var importMapFieldKeys = []string{
 func newImportState(opts *Options) importState {
 	state := importState{
 		importFilePathInput:      newImportTextInput(opts),
+		importFilePicker:         newImportFilePicker(opts),
 		importFormat:             importFormatDotenv,
 		importDefaultRegion:      "",
 		importDefaultType:        "",
@@ -187,6 +200,74 @@ func newImportTextInput(opts *Options) textinput.Model {
 	configureTextInputStyles(&input, opts)
 
 	return input
+}
+
+func newImportFilePicker(opts *Options) filepicker.Model {
+	picker := filepicker.New()
+	picker.ShowHidden = true
+	picker.AutoHeight = false
+	picker.Height = 12
+	picker.Cursor = ">"
+	picker.KeyMap.Back = key.NewBinding(key.WithKeys("left", "backspace"), key.WithHelp("left", "parent"))
+	picker.KeyMap.GoToTop = key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "first"))
+	picker.KeyMap.GoToLast = key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "last"))
+	picker.KeyMap.Down = key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "next"))
+	picker.KeyMap.Up = key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous"))
+	picker.KeyMap.PageUp = key.NewBinding(key.WithKeys("pgup", "pageup"), key.WithHelp("pgup", "page up"))
+	picker.KeyMap.PageDown = key.NewBinding(key.WithKeys("pgdown", "pagedown"), key.WithHelp("pgdown", "page down"))
+	picker.KeyMap.Open = key.NewBinding(key.WithKeys("right", "enter"), key.WithHelp("right", "open"))
+	picker.KeyMap.Select = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
+
+	if opts != nil && !opts.NoColor {
+		picker.Styles.Cursor = lipgloss.NewStyle().Foreground(selectedFg)
+		picker.Styles.Selected = selectedRowStyle
+		picker.Styles.Directory = labelStyle
+		picker.Styles.File = valueStyle
+		picker.Styles.Symlink = valueStyle
+		picker.Styles.Permission = mutedStyle
+		picker.Styles.FileSize = mutedStyle.Width(7).Align(lipgloss.Right)
+		picker.Styles.DisabledFile = mutedStyle
+		picker.Styles.DisabledSelected = mutedStyle
+		picker.Styles.DisabledCursor = mutedStyle
+		picker.Styles.EmptyDirectory = mutedStyle.PaddingLeft(2).SetString("No files found.")
+	}
+
+	return picker
+}
+
+func importDefaultDirectory() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+
+	path, err := filepath.Abs(wd)
+	if err != nil {
+		return wd
+	}
+
+	return path
+}
+
+func importCompactDirectoryPath(path string, segments int) string {
+	path = strings.TrimRight(path, string(os.PathSeparator))
+	if path == "" || path == string(os.PathSeparator) {
+		return path
+	}
+
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+
+	if len(kept) <= segments {
+		return path
+	}
+
+	return "../" + strings.Join(kept[len(kept)-segments:], "/")
 }
 
 func newImportTextArea(opts *Options) textarea.Model {
@@ -459,6 +540,86 @@ func (component popupViewComponent) renderImportDefaultsPopup() string {
 	lines = append(lines, "", m.importActionButtonsLine("Apply"))
 
 	return m.renderPopupBoxWithActionsMinWidth("Defaults", lines, "", max(importPopupMinInnerWidth(importDefaultsLabelWidth), m.importDefaultsMinInnerWidth()))
+}
+
+func (component popupViewComponent) renderImportFilePickerPopup() string {
+	m := component.model
+	picker := m.importFilePicker
+	picker.Height = m.importFilePickerHeight()
+	if m.importFilePickerParentFocused || m.importFilePickerButtonsFocused {
+		picker.Cursor = " "
+		picker.Styles.Selected = valueStyle
+		picker.Styles.DisabledSelected = mutedStyle
+	}
+
+	directory := m.value(importCompactDirectoryPath(picker.CurrentDirectory, 3))
+	lines := []string{m.label("Directory: ") + directory, ""}
+	lines = append(lines, m.importFilePickerParentLine())
+	lines = append(lines, strings.Split(strings.TrimRight(picker.View(), "\n"), "\n")...)
+	lines = append(lines, "", m.importFilePickerActionButtonsLine())
+
+	minInnerWidth := m.importFilePickerMinInnerWidth
+	if minInnerWidth == 0 {
+		minInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	}
+
+	return m.renderPopupBoxMinWidth("File picker", lines, minInnerWidth)
+}
+
+func (m model) importFilePickerParentLine() string {
+	if m.importFilePickerParentFocused && !m.importFilePickerButtonsFocused {
+		return m.focusMarker("> ") + m.value(importFilePickerParentEntry)
+	}
+
+	return "  " + m.value(importFilePickerParentEntry)
+}
+
+func (m model) importFilePickerActionButtonsLine() string {
+	return m.importActionButton("Choose File", m.importFilePickerButtonsFocused && m.importButtonCursor == importActionPrimary) +
+		m.muted("   ") +
+		m.importActionButton("Cancel", m.importFilePickerButtonsFocused && m.importButtonCursor == importActionCancel)
+}
+
+func importFilePickerStableMinInnerWidth(picker filepicker.Model) int {
+	const popupHorizontalPadding = 4
+
+	directoryWidth := lipgloss.Width("Directory: " + importCompactDirectoryPath(picker.CurrentDirectory, 3))
+	parentWidth := lipgloss.Width("  " + importFilePickerParentEntry)
+	actionsWidth := lipgloss.Width("Choose File   Cancel")
+
+	return max(directoryWidth, parentWidth, actionsWidth, importFilePickerMaxEntryLineWidth(picker)) + popupHorizontalPadding
+}
+
+func importFilePickerMaxEntryLineWidth(picker filepicker.Model) int {
+	entries := importFilePickerSortedEntries(picker.CurrentDirectory, picker.ShowHidden)
+	maxWidth := 0
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		name := entry.Name()
+		if info.Mode()&os.ModeSymlink != 0 {
+			if path, err := filepath.EvalSymlinks(filepath.Join(picker.CurrentDirectory, name)); err == nil {
+				name += " → " + path
+			}
+		}
+
+		width := lipgloss.Width(picker.Cursor)
+		if picker.ShowPermissions {
+			width += lipgloss.Width(" " + info.Mode().String())
+		}
+
+		if picker.ShowSize {
+			width += max(7, picker.Styles.FileSize.GetWidth())
+		}
+
+		width += lipgloss.Width(" " + name)
+		maxWidth = max(maxWidth, width)
+	}
+
+	return maxWidth
 }
 
 func (m model) importChoiceLine(label, value string, cursor int) string {
@@ -1010,6 +1171,10 @@ func (m model) importDefaultTextareaContentWidth(area *textarea.Model) int {
 	return formTextareaLogicalContentWidth(area, importMinimumValueWidth(importDefaultsLabelWidth), maxWidth)
 }
 
+func (m model) importFilePickerHeight() int {
+	return max(6, min(18, m.popupContentLineBudget()-4))
+}
+
 func importMinimumValueWidth(labelWidth int) int {
 	return importFieldValueStart(labelWidth)
 }
@@ -1236,6 +1401,23 @@ func (m *model) closeImportChildPopup() {
 	}
 }
 
+func (m *model) openImportFilePickerPopup() tea.Cmd {
+	picker := newImportFilePicker(&m.opts)
+	path := m.importFilePathInput.Value()
+	picker.CurrentDirectory = importFilePickerStartDirectory(path)
+	picker.Height = m.importFilePickerHeight()
+
+	m.importFilePicker = picker
+	m.importFilePickerParentFocused = false
+	m.importFilePickerButtonsFocused = false
+	m.importFilePickerTargetName = importFilePickerTargetName(path)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.importButtonsFocused = false
+	m.pushNestedPopup(popupImportFilePicker)
+
+	return m.importFilePicker.Init()
+}
+
 func (m *model) cancelImportMapFieldsPopup() {
 	m.restoreImportMapFields(m.importMapFieldBackup)
 	m.closeImportChildPopup()
@@ -1262,6 +1444,99 @@ func detectedImportFormatFromPath(path string) string {
 	default:
 		return ""
 	}
+}
+
+func importFilePickerStartDirectory(path string) string {
+	path = importExpandUserPath(strings.TrimSpace(path))
+	if path == "" {
+		return importDefaultDirectory()
+	}
+
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return importAbsolutePath(path)
+	}
+
+	dir := filepath.Dir(path)
+	if dir == "" {
+		return importDefaultDirectory()
+	}
+
+	return importAbsolutePath(dir)
+}
+
+func importFilePickerTargetName(path string) string {
+	path = importExpandUserPath(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+
+	absolute := importAbsolutePath(path)
+	if info, err := os.Stat(absolute); err == nil && info.IsDir() {
+		return ""
+	}
+
+	name := filepath.Base(absolute)
+	if name == "." || name == string(os.PathSeparator) {
+		return ""
+	}
+
+	return name
+}
+
+func importExpandUserPath(path string) string {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+
+		if path == "~" {
+			return home
+		}
+
+		return filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+
+	return path
+}
+
+func importAbsolutePath(path string) string {
+	path = importExpandUserPath(path)
+	if path == "" {
+		return importDefaultDirectory()
+	}
+
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+
+	return abs
+}
+
+func importShortestDisplayPath(path string) string {
+	absolute := importAbsolutePath(path)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return absolute
+	}
+
+	relative, err := filepath.Rel(cwd, absolute)
+	if err != nil || relative == "." {
+		return absolute
+	}
+
+	parentPrefix := ".." + string(os.PathSeparator)
+	currentPrefix := "." + string(os.PathSeparator)
+	if relative != ".." && !strings.HasPrefix(relative, parentPrefix) && !strings.HasPrefix(relative, currentPrefix) {
+		relative = "." + string(os.PathSeparator) + relative
+	}
+
+	if len([]rune(relative)) <= len([]rune(absolute)) {
+		return relative
+	}
+
+	return absolute
 }
 
 func importFormatHotkeyIndex(key string) (int, bool) {
@@ -1344,13 +1619,393 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 			m.focusImportDefaults()
 			m.pushNestedPopup(popupImportDefaults)
 		case importMainFieldFilePath, importMainFieldsCount:
-			m.message = "Import loading is not implemented yet"
+			cmd := (&m).openImportFilePickerPopup()
+			return m, cmd
 		}
 	default:
 		return m.updateImportMainInput(msg)
 	}
 
 	return m, nil
+}
+
+func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
+	key := msg.String()
+
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openPopupShortcuts(screenMain, popupImportFilePicker)
+		return m, nil
+	case "q", "esc", "ctrl+g":
+		m.closeImportChildPopup()
+		return m, nil
+	}
+
+	m.importFilePicker.Height = m.importFilePickerHeight()
+
+	if cmd, handled := (&m).updateImportFilePickerFocus(key); handled {
+		return m, cmd
+	}
+
+	if importPrimaryActionKey(key) {
+		return (&m).chooseImportFilePickerSelection(msg)
+	}
+
+	var cmd tea.Cmd
+	previousDirectory := m.importFilePicker.CurrentDirectory
+	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
+	m.updateImportFilePickerWidthOnDirectoryChange(previousDirectory)
+	if selected, path := m.importFilePicker.DidSelectFile(msg); selected {
+		m.applyImportFilePickerPath(path)
+		return m, nil
+	}
+
+	if disabled, path := m.importFilePicker.DidSelectDisabledFile(msg); disabled {
+		m.warningMessage = "Cannot select " + path
+	}
+
+	return m, cmd
+}
+
+func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
+	if m.importFilePickerButtonsFocused {
+		switch key {
+		case "tab":
+			if m.importButtonCursor == importActionPrimary {
+				m.importButtonCursor = importActionCancel
+			} else {
+				m.importFilePickerButtonsFocused = false
+				m.importButtonCursor = importActionPrimary
+			}
+
+			return nil, true
+		case "shift+tab":
+			if m.importButtonCursor == importActionCancel {
+				m.importButtonCursor = importActionPrimary
+			} else {
+				m.importFilePickerButtonsFocused = false
+				m.importFilePickerParentFocused = false
+			}
+
+			return nil, true
+		case "left":
+			m.importButtonCursor = importActionPrimary
+			return nil, true
+		case "right":
+			m.importButtonCursor = importActionCancel
+			return nil, true
+		case "enter", "ctrl+j":
+			if m.importButtonCursor == importActionCancel {
+				m.closeImportChildPopup()
+				return nil, true
+			}
+
+			updated, cmd := m.chooseImportFilePickerSelection(tea.KeyMsg{Type: tea.KeyEnter})
+			if next, ok := updated.(model); ok {
+				*m = next
+			}
+			return cmd, true
+		}
+
+		if action, ok := m.interpretNavigationKey(key, false); ok {
+			return m.applyImportFilePickerButtonNavigation(action), true
+		}
+
+		return nil, true
+	}
+
+	switch key {
+	case "tab":
+		m.importFilePickerButtonsFocused = true
+		m.importButtonCursor = importActionPrimary
+		return nil, true
+	case "shift+tab":
+		m.importFilePickerButtonsFocused = true
+		m.importButtonCursor = importActionCancel
+		return nil, true
+	}
+
+	if sideAction, ok := m.importFilePickerSideAction(key); ok {
+		switch sideAction {
+		case importFilePickerSideParent:
+			return m.changeImportFilePickerDirectory(filepath.Dir(m.importFilePicker.CurrentDirectory)), true
+		case importFilePickerSideOpen:
+			updated, cmd := m.chooseImportFilePickerSelection(tea.KeyMsg{Type: tea.KeyRight})
+			if next, ok := updated.(model); ok {
+				*m = next
+			}
+			return cmd, true
+		}
+	}
+
+	if m.importFilePickerParentFocused {
+		if importEnterKey(key) {
+			return m.changeImportFilePickerDirectory(filepath.Dir(m.importFilePicker.CurrentDirectory)), true
+		}
+
+		if action, ok := m.interpretNavigationKey(key, false); ok {
+			return m.applyImportFilePickerParentNavigation(action), true
+		}
+
+		return nil, false
+	}
+
+	if action, ok := m.interpretNavigationKey(key, false); ok {
+		return m.applyImportFilePickerListNavigation(action), true
+	}
+
+	return nil, false
+}
+
+func (m *model) applyImportFilePickerButtonNavigation(action navigationAction) tea.Cmd {
+	switch action {
+	case navPrevious:
+		m.importFilePickerButtonsFocused = false
+		m.importFilePickerParentFocused = false
+	case navFirst:
+		return m.focusImportFilePickerFirst()
+	case navLast:
+		m.importFilePickerButtonsFocused = false
+		m.importFilePickerParentFocused = false
+		return m.updateImportFilePickerNavigation(navLast)
+	}
+
+	return nil
+}
+
+func (m *model) applyImportFilePickerParentNavigation(action navigationAction) tea.Cmd {
+	switch action {
+	case navNext:
+		return m.focusImportFilePickerFirst()
+	case navFirst:
+		return m.focusImportFilePickerFirst()
+	case navLast:
+		m.importFilePickerParentFocused = false
+		return m.updateImportFilePickerNavigation(navLast)
+	case navPageDown:
+		m.importFilePickerParentFocused = false
+		return m.updateImportFilePickerNavigation(navPageDown)
+	}
+
+	return nil
+}
+
+func (m *model) applyImportFilePickerListNavigation(action navigationAction) tea.Cmd {
+	switch action {
+	case navPrevious:
+		if importFilePickerSelectedIndex(m.importFilePicker) == 0 {
+			m.importFilePickerParentFocused = true
+			return nil
+		}
+
+		return m.updateImportFilePickerNavigation(navPrevious)
+	case navNext, navPageUp, navPageDown, navLast:
+		m.importFilePickerParentFocused = false
+		return m.updateImportFilePickerNavigation(action)
+	case navFirst:
+		return m.focusImportFilePickerFirst()
+	}
+
+	return nil
+}
+
+func (m *model) focusImportFilePickerFirst() tea.Cmd {
+	m.importFilePickerButtonsFocused = false
+	m.importFilePickerParentFocused = false
+
+	return m.updateImportFilePickerNavigation(navFirst)
+}
+
+func (m *model) updateImportFilePickerNavigation(action navigationAction) tea.Cmd {
+	if !importFilePickerFilesLoaded(m.importFilePicker) {
+		return nil
+	}
+
+	msg, ok := importFilePickerNavigationMsg(action)
+	if !ok {
+		return nil
+	}
+
+	var cmd tea.Cmd
+	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
+
+	return cmd
+}
+
+func importFilePickerNavigationMsg(action navigationAction) (tea.KeyMsg, bool) {
+	switch action {
+	case navPrevious:
+		return tea.KeyMsg{Type: tea.KeyUp}, true
+	case navNext:
+		return tea.KeyMsg{Type: tea.KeyDown}, true
+	case navPageUp:
+		return tea.KeyMsg{Type: tea.KeyPgUp}, true
+	case navPageDown:
+		return tea.KeyMsg{Type: tea.KeyPgDown}, true
+	case navFirst:
+		return tea.KeyMsg{Type: tea.KeyHome}, true
+	case navLast:
+		return tea.KeyMsg{Type: tea.KeyEnd}, true
+	default:
+		return tea.KeyMsg{}, false
+	}
+}
+
+type importFilePickerSideAction int
+
+const (
+	importFilePickerSideParent importFilePickerSideAction = iota
+	importFilePickerSideOpen
+)
+
+func (m model) importFilePickerSideAction(key string) (importFilePickerSideAction, bool) {
+	switch key {
+	case "left", "backspace":
+		return importFilePickerSideParent, true
+	case "right":
+		return importFilePickerSideOpen, true
+	}
+
+	if m.keymapStyle() == keymapVi {
+		switch key {
+		case "h":
+			return importFilePickerSideParent, true
+		case "l":
+			return importFilePickerSideOpen, true
+		}
+	}
+
+	return 0, false
+}
+
+func (m *model) chooseImportFilePickerSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.importFilePickerParentFocused {
+		cmd := m.changeImportFilePickerDirectory(filepath.Dir(m.importFilePicker.CurrentDirectory))
+		return *m, cmd
+	}
+
+	m.importFilePickerButtonsFocused = false
+	m.importFilePicker.Height = m.importFilePickerHeight()
+
+	var cmd tea.Cmd
+	previousDirectory := m.importFilePicker.CurrentDirectory
+	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
+	m.updateImportFilePickerWidthOnDirectoryChange(previousDirectory)
+	if selected, path := m.importFilePicker.DidSelectFile(msg); selected {
+		m.applyImportFilePickerPath(path)
+		return *m, nil
+	}
+
+	return *m, cmd
+}
+
+func (m *model) updateImportFilePickerWidthOnDirectoryChange(previousDirectory string) {
+	if m.importFilePicker.CurrentDirectory == previousDirectory {
+		return
+	}
+
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(m.importFilePicker)
+}
+
+func (m *model) applyImportFilePickerPath(path string) {
+	path = importShortestDisplayPath(path)
+	m.importFilePathInput.SetValue(path)
+	m.importFilePathInput.SetCursor(len([]rune(path)))
+	if detected := detectedImportFormatFromPath(path); detected != "" {
+		m.importFormat = detected
+	}
+
+	m.closeImportChildPopup()
+}
+
+func (m *model) changeImportFilePickerDirectory(path string) tea.Cmd {
+	picker := newImportFilePicker(&m.opts)
+	picker.CurrentDirectory = importAbsolutePath(path)
+	picker.Height = m.importFilePickerHeight()
+
+	m.importFilePicker = picker
+	m.importFilePickerParentFocused = false
+	m.importFilePickerButtonsFocused = false
+	m.importFilePickerTargetName = ""
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+
+	return m.importFilePicker.Init()
+}
+
+func (m *model) focusImportFilePickerTarget() {
+	if m.importFilePickerTargetName == "" || !importFilePickerFilesLoaded(m.importFilePicker) {
+		return
+	}
+
+	index := importFilePickerFileIndex(m.importFilePicker.CurrentDirectory, m.importFilePickerTargetName, m.importFilePicker.ShowHidden)
+	m.importFilePickerTargetName = ""
+	if index < 0 {
+		return
+	}
+
+	var cmd tea.Cmd
+	m.importFilePicker, cmd = m.importFilePicker.Update(tea.KeyMsg{Type: tea.KeyHome})
+	_ = cmd
+	for i := 0; i < index; i++ {
+		m.importFilePicker, cmd = m.importFilePicker.Update(tea.KeyMsg{Type: tea.KeyDown})
+		_ = cmd
+	}
+}
+
+func importFilePickerFilesLoaded(picker filepicker.Model) bool {
+	value := reflect.ValueOf(picker)
+	field := value.FieldByName("files")
+	return field.IsValid() && field.Kind() == reflect.Slice && field.Len() > 0
+}
+
+func importFilePickerFileIndex(directory, name string, showHidden bool) int {
+	entries := importFilePickerSortedEntries(directory, showHidden)
+	for i, entry := range entries {
+		if entry.Name() == name {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func importFilePickerSortedEntries(directory string, showHidden bool) []os.DirEntry {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil
+	}
+
+	if !showHidden {
+		filtered := entries[:0]
+		for _, entry := range entries {
+			hidden, _ := filepicker.IsHidden(entry.Name())
+			if !hidden {
+				filtered = append(filtered, entry)
+			}
+		}
+		entries = filtered
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir() == entries[j].IsDir() {
+			return entries[i].Name() < entries[j].Name()
+		}
+
+		return entries[i].IsDir()
+	})
+
+	return entries
+}
+
+func importFilePickerSelectedIndex(picker filepicker.Model) int {
+	value := reflect.ValueOf(picker)
+	field := value.FieldByName("selected")
+	if !field.IsValid() || field.Kind() != reflect.Int {
+		return -1
+	}
+
+	return int(field.Int())
 }
 
 func (component popupUpdateComponent) updateImportFormatPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

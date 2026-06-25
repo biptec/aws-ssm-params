@@ -46,6 +46,7 @@ const (
 	popupImportFile
 	popupImportKeyField
 	popupImportFormat
+	popupImportFilePicker
 	popupImportMapFields
 	popupImportMapPaths
 	popupImportDefaults
@@ -60,7 +61,7 @@ func (m *popupState) openShortcuts(from screen) {
 func (m *popupState) openPopupShortcuts(from screen, popup popupKind) {
 	m.shortcutsFor = from
 	m.shortcutsPopupFor = popup
-	m.pushPopup(popupShortcuts)
+	m.pushNestedPopup(popupShortcuts)
 }
 
 func (m *popupState) pushPopup(kind popupKind) {

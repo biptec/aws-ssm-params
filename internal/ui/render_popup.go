@@ -65,6 +65,8 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderImportKeyFieldPopup()
 			case popupImportFormat:
 				return m.renderImportFormatPopup()
+			case popupImportFilePicker:
+				return m.renderImportFilePickerPopup()
 			case popupImportMapFields:
 				return m.renderImportMapFieldsPopup()
 			case popupImportMapPaths:
