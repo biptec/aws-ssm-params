@@ -8,6 +8,109 @@ type editorUpdateComponent struct {
 	model model
 }
 
+func (component editorUpdateComponent) updateEditorPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
+	key := msg.String()
+
+	if m.editorButtonsFocused {
+		switch key {
+		case "ctrl+_", "ctrl+/":
+			m.openPopupShortcuts(screenTextArea, popupEditor)
+			return m, nil
+		case "q", "esc", "ctrl+g":
+			return m.requestEditorBack()
+		case "ctrl+s":
+			return m.saveValue(m.textArea.Value())
+		case "enter", "ctrl+j":
+			if m.editorButtonCursor == importActionCancel {
+				return m.requestEditorBack()
+			}
+
+			return m.saveValue(m.textArea.Value())
+		case "tab":
+			if m.editorButtonCursor == importActionPrimary {
+				m.editorButtonCursor = importActionCancel
+			} else {
+				m.clearEditorButtonFocus()
+				m = m.focusEditField(m.editFieldOrder()[0])
+			}
+
+			return m, nil
+		case "shift+tab":
+			if m.editorButtonCursor == importActionCancel {
+				m.editorButtonCursor = importActionPrimary
+			} else {
+				m.clearEditorButtonFocus()
+				fields := m.editFieldOrder()
+				m = m.focusEditField(fields[len(fields)-1])
+			}
+
+			return m, nil
+		case "left":
+			m.editorButtonCursor = importActionPrimary
+			return m, nil
+		case "right":
+			m.editorButtonCursor = importActionCancel
+			return m, nil
+		}
+
+		if action, ok := m.interpretNavigationKey(key, false); ok {
+			switch action {
+			case navPrevious:
+				m.clearEditorButtonFocus()
+			case navFirst:
+				m.clearEditorButtonFocus()
+				m = m.focusEditField(m.editFieldOrder()[0])
+			case navLast:
+				m.editorButtonCursor = importActionCancel
+			}
+
+			return m, nil
+		}
+
+		return m, nil
+	}
+
+	switch key {
+	case "tab":
+		if m.moveEditorPopupTabFocus(false) {
+			return m, nil
+		}
+	case "shift+tab":
+		if m.moveEditorPopupTabFocus(true) {
+			return m, nil
+		}
+	}
+
+	return component.updateTextArea(msg)
+}
+
+func (m *model) moveEditorPopupTabFocus(reverse bool) bool {
+	fields := m.editFieldOrder()
+	idx := indexOfEditField(fields, m.editField)
+	if idx < 0 {
+		idx = 0
+	}
+
+	if reverse {
+		if idx == 0 {
+			m.focusEditorButton(importActionCancel)
+			return true
+		}
+
+		*m = m.focusEditField(fields[idx-1])
+		return true
+	}
+
+	if idx >= len(fields)-1 {
+		m.focusEditorButton(importActionPrimary)
+		return true
+	}
+
+	*m = m.focusEditField(fields[idx+1])
+	return true
+}
+
 // updateTextArea handles the unified edit form: editable SSM name, region/type selectors, file path, multiline value, and save/file operations.
 func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
@@ -56,7 +159,7 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 
 	if m.keymapStyle() == keymapVi && isEditableTextField(m.editField) {
 		if isHelpKey(key) {
-			m.openShortcuts(screenTextArea)
+			m.openEditorPopupShortcuts()
 			return m, nil
 		}
 
@@ -126,7 +229,7 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 
 	switch key {
 	case "ctrl+_", "ctrl+/":
-		m.openShortcuts(screenTextArea)
+		m.openEditorPopupShortcuts()
 		return m, nil
 	case "q", "esc", "ctrl+g":
 		if key == "q" && m.shouldTypePrintableQInEditField() {

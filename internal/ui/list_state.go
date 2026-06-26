@@ -28,6 +28,15 @@ func (m *listState) currentStatus() Status {
 	return m.statuses[vis[m.selected]]
 }
 
+func (m *listState) currentStatusIndex() int {
+	vis := m.visible()
+	if len(vis) == 0 || m.selected < 0 || m.selected >= len(vis) {
+		return -1
+	}
+
+	return vis[m.selected]
+}
+
 func (m *listState) currentItem() inventory.Item {
 	return m.currentStatus().Item
 }
@@ -164,6 +173,150 @@ func (m *listState) replaceStatus(path string, st *Status) {
 
 	m.statuses = append(m.statuses, *st)
 	m.selected = len(m.statuses) - 1
+}
+
+func (m *listState) replaceStatusByKey(key string, st *Status) {
+	for i := range m.statuses {
+		if itemKey(m.statuses[i].Item.Region, m.statuses[i].Item.Path) == key {
+			m.statuses[i] = *st
+			return
+		}
+	}
+
+	m.statuses = append(m.statuses, *st)
+}
+
+func (m *listState) selectItem(item inventory.Item) {
+	for selected, idx := range m.visible() {
+		if m.statuses[idx].Item.SameIdentity(&item) {
+			m.selected = selected
+			return
+		}
+	}
+
+	m.ensureSelection()
+}
+
+func (m *listState) hasLocalChanges() bool {
+	for i := range m.statuses {
+		if m.statuses[i].HasLocalChanges() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *listState) dirtyStatusIndexes() []int {
+	out := []int{}
+	for i := range m.statuses {
+		if m.statuses[i].HasLocalChanges() {
+			out = append(out, i)
+		}
+	}
+
+	return out
+}
+
+func (m *listState) currentDirtyStatusIndexes() []int {
+	idx := m.currentStatusIndex()
+	if idx < 0 || !m.statuses[idx].HasLocalChanges() {
+		return nil
+	}
+
+	return []int{idx}
+}
+
+func (m *listState) dirtyStatuses(indexes []int) []Status {
+	out := make([]Status, 0, len(indexes))
+	for _, idx := range indexes {
+		if idx < 0 || idx >= len(m.statuses) || !m.statuses[idx].HasLocalChanges() {
+			continue
+		}
+
+		out = append(out, m.statuses[idx])
+	}
+
+	return out
+}
+
+func (m *listState) applyLocalDeleteItems(items inventory.Items) int {
+	if len(items) == 0 {
+		return 0
+	}
+
+	targets := map[string]bool{}
+	for _, item := range items {
+		targets[itemKey(item.Region, item.Path)] = true
+	}
+
+	changed := 0
+	kept := m.statuses[:0]
+	for i := range m.statuses {
+		status := m.statuses[i]
+		key := itemKey(status.Item.Region, status.Item.Path)
+		if !targets[key] {
+			kept = append(kept, status)
+			continue
+		}
+
+		if status.PendingOperation() == parameterStateNew {
+			changed++
+			continue
+		}
+
+		if status.PendingOperation() != parameterStateDeleted {
+			status.applyLocalDelete()
+			changed++
+		}
+
+		kept = append(kept, status)
+	}
+
+	m.statuses = kept
+	m.ensureSelection()
+
+	return changed
+}
+
+func (m *listState) revertCurrentLocalChange() (parameterState, bool) {
+	idx := m.currentStatusIndex()
+	if idx < 0 || !m.statuses[idx].HasLocalChanges() {
+		return parameterStateClean, false
+	}
+
+	status := m.statuses[idx]
+	operation := status.PendingOperation()
+	if operation == parameterStateNew {
+		m.statuses = append(m.statuses[:idx], m.statuses[idx+1:]...)
+		m.ensureSelection()
+		return operation, true
+	}
+
+	if !status.Cloud.isZero() {
+		reverted := status.Cloud.status()
+		m.statuses[idx] = reverted
+		m.ensureSelection()
+		return operation, true
+	}
+
+	status.clearLocalState()
+	m.statuses[idx] = status
+	m.ensureSelection()
+
+	return operation, true
+}
+
+func (m *listState) markPushError(localKey, cloudKey string, operation parameterState, err error) {
+	for i := range m.statuses {
+		key := itemKey(m.statuses[i].Item.Region, m.statuses[i].Item.Path)
+		if key != localKey && key != cloudKey {
+			continue
+		}
+
+		m.statuses[i].applyPushError(operation, err)
+		return
+	}
 }
 
 func (m *listState) removeItemRows(items inventory.Items) {

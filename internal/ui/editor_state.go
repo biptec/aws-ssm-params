@@ -14,6 +14,14 @@ type editorStateComponent struct {
 // startMultiline opens the selected parameter value in the multiline editor.
 func (component editorStateComponent) startMultiline() (tea.Model, tea.Cmd) {
 	m := component.model
+	if m.currentStatus().PendingOperation() == parameterStateDeleted {
+		m.errMessage = "Revert deleted parameter before editing it."
+		m.message = ""
+		m.warningMessage = ""
+
+		return m, nil
+	}
+
 	m.returnScreen = screenMain
 	m.editRegion = m.initialEditRegion()
 	m.editType = m.initialEditType()
@@ -36,14 +44,17 @@ func (component editorStateComponent) startMultiline() (tea.Model, tea.Cmd) {
 	m.editFileInput.Placeholder = ""
 	m.editFileInput.Blur()
 	m.editField = editFieldSSMPath
+	m.editorButtonsFocused = false
+	m.editorButtonCursor = importActionPrimary
 	m.viInsertMode = m.keymapStyle() != keymapVi
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
 	m.editInitialSnapshot = m.currentEditSnapshot()
-	m.screen = screenTextArea
+	m.screen = screenMain
 	m = m.focusEditField(editFieldSSMPath)
+	m.pushPopup(popupEditor)
 
 	return m, nil
 }
@@ -71,14 +82,17 @@ func (component editorStateComponent) startNewParameter(ret screen) (tea.Model, 
 	m.editFileInput.SetValue("")
 	m.editFileInput.Placeholder = ""
 	m.editField = editFieldSSMPath
+	m.editorButtonsFocused = false
+	m.editorButtonCursor = importActionPrimary
 	m.viInsertMode = m.keymapStyle() != keymapVi
 	m.pendingFileWrite = fileWriteConfirmationNone
 	m.warningMessage = ""
 	m.message = ""
 	m.errMessage = ""
-	m.screen = screenTextArea
+	m.screen = ret
 	m = m.focusEditField(editFieldSSMPath)
 	m.editInitialSnapshot = m.currentEditSnapshot()
+	m.pushPopup(popupEditor)
 
 	return m, nil
 }
@@ -96,6 +110,7 @@ func (component editorStateComponent) focusEditField(field editField) model {
 	}
 
 	m.blurEditFields()
+	m.editorButtonsFocused = false
 
 	m.editField = field
 	switch field {
@@ -137,7 +152,7 @@ func (component editorStateComponent) requestEditorBack() (tea.Model, tea.Cmd) {
 
 	m.warningMessage = ""
 	if m.editorHasUnsavedChanges() {
-		m.pushPopup(popupUnsavedChanges)
+		m.pushEditorChildPopup(popupUnsavedChanges)
 		return m, nil
 	}
 
@@ -276,7 +291,7 @@ func (component editorStateComponent) openRegionSelect() (tea.Model, tea.Cmd) {
 	}
 
 	m.regionCursor = indexOf(regions, m.editRegion)
-	m.pushPopup(popupRegionSelect)
+	m.pushEditorChildPopup(popupRegionSelect)
 
 	return m, nil
 }
@@ -321,7 +336,7 @@ func (component editorStateComponent) startTypeSelect(ret screen) (tea.Model, te
 	m := component.model
 	m.typeReturnScreen = ret
 	m.typeCursor = parameterTypeItems().index(m.normalizedEditType())
-	m.pushPopup(popupTypeSelect)
+	m.pushEditorChildPopup(popupTypeSelect)
 
 	return m, nil
 }
@@ -330,7 +345,7 @@ func (component editorStateComponent) startTierSelect(ret screen) (tea.Model, te
 	m := component.model
 	m.typeReturnScreen = ret
 	m.tierCursor = parameterTierItems().index(m.normalizedEditTier())
-	m.pushPopup(popupTierSelect)
+	m.pushEditorChildPopup(popupTierSelect)
 
 	return m, nil
 }
@@ -339,7 +354,7 @@ func (component editorStateComponent) startDataTypeSelect(ret screen) (tea.Model
 	m := component.model
 	m.typeReturnScreen = ret
 	m.dataTypeCursor = parameterDataTypeItems().index(m.normalizedEditDataType())
-	m.pushPopup(popupDataTypeSelect)
+	m.pushEditorChildPopup(popupDataTypeSelect)
 
 	return m, nil
 }
@@ -352,7 +367,128 @@ func (component editorStateComponent) startOverwriteSelect(ret screen) (tea.Mode
 
 	m.typeReturnScreen = ret
 	m.overwriteCursor = overwriteItems().index(m.editOverwrite)
-	m.pushPopup(popupOverwriteSelect)
+	m.pushEditorChildPopup(popupOverwriteSelect)
 
 	return m, nil
+}
+
+func (m model) editorPopupActiveOrStack() bool {
+	return m.popupActiveOrStack(popupEditor)
+}
+
+func (m model) editorChildPopupActive() bool {
+	return m.activePopup != popupEditor && m.editorPopupActiveOrStack()
+}
+
+func (m model) popupActiveOrStack(kind popupKind) bool {
+	if m.activePopup == kind {
+		return true
+	}
+
+	for _, candidate := range m.popupStack {
+		if candidate == kind {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m *model) pushEditorChildPopup(kind popupKind) {
+	m.editorButtonsFocused = false
+	if m.editorPopupActiveOrStack() {
+		m.pushNestedPopup(kind)
+		return
+	}
+
+	m.pushPopup(kind)
+}
+
+func (m *model) returnToEditorPopup() {
+	for m.activePopup != popupNone && m.activePopup != popupEditor {
+		m.popPopup()
+	}
+
+	if m.activePopup == popupEditor {
+		m.editorButtonsFocused = false
+		*m = m.focusEditField(m.editField)
+	}
+}
+
+func (m *model) focusEditorButton(cursor int) {
+	m.blurEditFields()
+	m.editorButtonsFocused = true
+	m.editorButtonCursor = min(max(0, cursor), importActionCount-1)
+}
+
+func (m *model) clearEditorButtonFocus() {
+	m.editorButtonsFocused = false
+	*m = m.focusEditField(m.editField)
+}
+
+func (m *model) openEditorPopupShortcuts() {
+	if m.editorPopupActiveOrStack() {
+		m.openPopupShortcuts(screenTextArea, popupEditor)
+		return
+	}
+
+	m.openShortcuts(screenTextArea)
+}
+
+func (m model) editorSelectorActive() bool {
+	return len(m.popupStack) > 0 && m.popupStack[len(m.popupStack)-1] == popupEditor
+}
+
+func (m model) finishEditorSelector() model {
+	m.popPopup()
+
+	if m.activePopup == popupEditor {
+		m.editorButtonsFocused = false
+		m = m.focusEditField(m.editField)
+	}
+
+	return m
+}
+
+func (m *model) navigateEditorPopupButtons(key string) bool {
+	switch key {
+	case "tab":
+		if m.editorButtonsFocused {
+			if m.editorButtonCursor == importActionPrimary {
+				m.editorButtonCursor = importActionCancel
+			} else {
+				m.editorButtonsFocused = false
+			}
+
+			return true
+		}
+
+		m.focusEditorButton(importActionPrimary)
+		return true
+	case "shift+tab":
+		if m.editorButtonsFocused {
+			if m.editorButtonCursor == importActionCancel {
+				m.editorButtonCursor = importActionPrimary
+			} else {
+				m.editorButtonsFocused = false
+			}
+
+			return true
+		}
+
+		m.focusEditorButton(importActionCancel)
+		return true
+	case "left":
+		if m.editorButtonsFocused {
+			m.editorButtonCursor = importActionPrimary
+			return true
+		}
+	case "right":
+		if m.editorButtonsFocused {
+			m.editorButtonCursor = importActionCancel
+			return true
+		}
+	}
+
+	return false
 }

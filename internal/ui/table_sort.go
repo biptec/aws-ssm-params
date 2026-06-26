@@ -141,6 +141,10 @@ func parseInitialSortOptions(values []string) sortRules {
 
 func columnByFieldName(name string) (columnName, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "state" {
+		return columnState, true
+	}
+
 	if name == "name" || name == "path" {
 		return columnPath, true
 	}
@@ -160,6 +164,7 @@ func columnByFieldName(name string) (columnName, bool) {
 
 func sortItems() []sortItem {
 	return []sortItem{
+		{hotkey: "m", column: columnState, label: "State"},
 		{hotkey: "n", column: columnPath, label: "Name"},
 		{hotkey: "v", column: columnValue, label: "Value"},
 		{hotkey: "t", column: columnType, label: "Type"},
@@ -177,6 +182,9 @@ func sortItems() []sortItem {
 func (component tableSorter) popupSortItems() []sortItem {
 	m := component
 	visible := map[columnName]bool{columnPath: true}
+	if m.hasLocalChanges() {
+		visible[columnState] = true
+	}
 
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -208,6 +216,9 @@ func (component tableSorter) popupSortColumnByLetterHotkey(key string) (columnNa
 func (component tableSorter) visibleSortItems() []sortItem {
 	m := component
 	cols := []columnName{columnPath}
+	if m.hasLocalChanges() {
+		cols = []columnName{columnState, columnPath}
+	}
 
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {

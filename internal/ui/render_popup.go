@@ -59,6 +59,8 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderUnsavedChangesPopup()
 			case popupRandomValue:
 				return m.renderRandomValuePopup()
+			case popupEditor:
+				return m.renderEditorPopup()
 			case popupImportFile:
 				return m.renderImportFilePopup()
 			case popupImportKeyField:

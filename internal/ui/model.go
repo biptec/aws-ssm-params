@@ -128,6 +128,21 @@ type deleteDoneMsg struct {
 	err        error
 }
 
+type pushDoneMsg struct {
+	results []pushResult
+}
+
+type pushResult struct {
+	localKey  string
+	cloudKey  string
+	operation parameterState
+	status    Status
+	item      inventory.Item
+	removeRow bool
+	warning   string
+	err       error
+}
+
 var (
 	frameColor       = lipgloss.Color("24")
 	labelFg          = lipgloss.Color("214")
@@ -137,6 +152,12 @@ var (
 	missFg           = lipgloss.Color("245")
 	emptyFg          = lipgloss.Color("45")
 	errFg            = lipgloss.Color("203")
+	stateModifiedFg  = lipgloss.Color("39")
+	stateNewFg       = lipgloss.Color("42")
+	stateDeletedFg   = lipgloss.Color("160")
+	stateErrorFg     = lipgloss.Color("88")
+	diffCloudFg      = lipgloss.Color("203")
+	diffLocalFg      = lipgloss.Color("42")
 	tableHeaderFg    = lipgloss.Color("250")
 	searchPromptFg   = lipgloss.Color("81")
 	statusLineFg     = lipgloss.Color("244")
@@ -377,6 +398,13 @@ func (m *model) startConfirm(prompt, expected string, items inventory.Items, ret
 	component.startConfirm(prompt, expected, items, ret)
 }
 
+func (m *model) startPushAllConfirm(prompt string, ret screen) {
+	component := editorIOComponent{model: *m}
+	defer func() { *m = component.model }()
+
+	component.startPushAllConfirm(prompt, ret)
+}
+
 func (m model) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
 	component := editorIOComponent{model: m}
 	return component.startRandomFromPopup(kind)
@@ -593,9 +621,24 @@ func (m model) updateTextArea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return component.updateTextArea(msg)
 }
 
+func (m model) updateEditorPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := editorUpdateComponent{model: m}
+	return component.updateEditorPopup(msg)
+}
+
 func (m model) renderTextAreaScreen() string {
 	component := editorViewComponent{model: m}
 	return component.renderTextAreaScreen()
+}
+
+func (m model) renderEditorPopup() string {
+	component := editorViewComponent{model: m}
+	return component.renderEditorPopup()
+}
+
+func (m model) editorLineWidth() int {
+	component := editorViewComponent{model: m}
+	return component.editorLineWidth()
 }
 
 func (m model) renderTextAreaValueLines(maxRows int) []string {
@@ -1052,6 +1095,26 @@ func (m model) renderBox(title string, lines []string, preferredHeight int) stri
 	return component.renderBox(title, lines, preferredHeight)
 }
 
+func (m model) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
+	component := newBoxRenderer(m)
+	return component.renderBoxWithInnerWidth(title, lines, innerWidth, preferredHeight)
+}
+
+func (m model) stateValue(state parameterState) string {
+	component := newStyleRenderer(m)
+	return component.stateValue(state)
+}
+
+func (m model) diffCloudValue(value string) string {
+	component := newStyleRenderer(m)
+	return component.diffCloudValue(value)
+}
+
+func (m model) diffLocalValue(value string) string {
+	component := newStyleRenderer(m)
+	return component.diffLocalValue(value)
+}
+
 func (m model) singleSelectLine(label string, selected, focused bool) string {
 	component := newBoxRenderer(m)
 	return component.singleSelectLine(label, selected, focused)
@@ -1167,6 +1230,10 @@ func (m model) renderFooterWithStatus(text string) string {
 
 	status := m.renderStatusMessage()
 	if status == "" {
+		if m.activePopup != popupNone {
+			return strings.Join([]string{" ", "", " ", footer, " "}, "\n")
+		}
+
 		return strings.Join([]string{" ", footer, " "}, "\n")
 	}
 
@@ -1378,6 +1445,11 @@ func (m model) renderListCell(col tableColumn, index int, st *Status) string {
 	return component.renderListCell(col, index, st)
 }
 
+func (m model) selectedListCell(col tableColumn, index int, st *Status) string {
+	component := tableViewComponent{model: m}
+	return component.selectedListCell(col, index, st)
+}
+
 func (m model) rowText(st *Status, row string, selected bool) string {
 	component := tableViewComponent{model: m}
 	return component.rowText(st, row, selected)
@@ -1481,6 +1553,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.errMessage = msg.err.Error()
 			m.screen = m.returnScreen
+			m.clearPopupStack()
 
 			return m, nil
 		}
@@ -1496,6 +1569,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.warningMessage = msg.warning
 		m.errMessage = ""
 		m.screen = m.returnScreen
+		m.clearPopupStack()
 
 		return m, nil
 
@@ -1521,6 +1595,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errMessage = ""
 		m.screen = m.returnScreen
 		m.ensureSelection()
+
+		return m, nil
+
+	case pushDoneMsg:
+		m.busyMessage = ""
+		pushed := 0
+		failed := 0
+		warnings := []string{}
+
+		for _, result := range msg.results {
+			if result.warning != "" {
+				warnings = append(warnings, result.warning)
+			}
+
+			if result.err != nil {
+				failed++
+				m.markPushError(result.localKey, result.cloudKey, result.operation, result.err)
+				continue
+			}
+
+			pushed++
+			switch result.operation {
+			case parameterStateDeleted:
+				if result.removeRow {
+					m.removeItemRows(inventory.Items{result.item})
+				} else {
+					m.markMissingItem(&result.item)
+				}
+			case parameterStateNew, parameterStateModified:
+				m.replaceStatusByKey(result.localKey, &result.status)
+			}
+		}
+
+		m.applySortWithRules(m.sortRulesOrDefault())
+		m.ensureSelection()
+		m.message = fmt.Sprintf("Pushed %d local change(s).", pushed)
+		if failed > 0 {
+			m.errMessage = fmt.Sprintf("Failed to push %d local change(s). See ERR state.", failed)
+		} else {
+			m.errMessage = ""
+		}
+		m.warningMessage = strings.Join(warnings, "; ")
 
 		return m, nil
 
@@ -1581,6 +1697,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateUnsavedChangesPopup(msg)
 			case popupRandomValue:
 				return m.updateRandomValuePopup(msg)
+			case popupEditor:
+				return m.updateEditorPopup(msg)
 			case popupImportFile:
 				return m.updateImportFilePopup(msg)
 			case popupImportKeyField:
@@ -1627,7 +1745,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if m.screen == screenTextArea {
+	if m.screen == screenTextArea || m.editorPopupActiveOrStack() {
 		var cmd tea.Cmd
 		if m.editField == editFieldPolicies {
 			m.editPoliciesArea, cmd = m.editPoliciesArea.Update(msg)

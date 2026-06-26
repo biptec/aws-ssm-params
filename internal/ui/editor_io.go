@@ -237,10 +237,27 @@ func (component *editorIOComponent) startConfirm(prompt, expected string, items 
 	m.confirmPrompt = prompt
 	m.confirmExpected = expected
 	m.confirmItems = items
+	m.confirmAction = confirmActionDelete
+	m.confirmButtonCursor = importActionPrimary
 	m.returnScreen = ret
 	m.input.SetValue("")
 	m.input.Placeholder = ""
-	m.input.Focus()
+	m.input.Blur()
+	m.errMessage = ""
+	m.pushPopup(popupConfirm)
+}
+
+func (component *editorIOComponent) startPushAllConfirm(prompt string, ret screen) {
+	m := &component.model
+	m.confirmPrompt = prompt
+	m.confirmExpected = ""
+	m.confirmItems = nil
+	m.confirmAction = confirmActionPushAll
+	m.confirmButtonCursor = importActionPrimary
+	m.returnScreen = ret
+	m.input.SetValue("")
+	m.input.Placeholder = ""
+	m.input.Blur()
 	m.errMessage = ""
 	m.pushPopup(popupConfirm)
 }
@@ -252,7 +269,7 @@ func (component editorIOComponent) startRandomFromPopup(kind string) (tea.Model,
 		m.input.SetValue("32")
 		m.input.Placeholder = ""
 		m.input.Focus()
-		m.pushPopup(popupFileAction)
+		m.pushEditorChildPopup(popupFileAction)
 
 		return m, nil
 	}
@@ -270,12 +287,16 @@ func (component editorIOComponent) generateRandomValueIntoEditor(kind string) (t
 	}
 
 	m.textArea.SetValue(value)
-	m.screen = screenTextArea
 	m = m.focusEditField(editFieldValue)
 	m.message = "Random value inserted. Press Ctrl-s to save."
 	m.errMessage = ""
 	m.warningMessage = ""
-	m.clearPopupStack()
+	if m.editorPopupActiveOrStack() {
+		m.returnToEditorPopup()
+	} else {
+		m.screen = screenTextArea
+		m.clearPopupStack()
+	}
 
 	return m, nil
 }
@@ -289,9 +310,8 @@ func (component editorIOComponent) randomValue(kind string) (string, error) {
 func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) {
 	m := component.model
 	item := m.currentItem()
-	oldPath := item.Path
 
-	if m.screen == screenTextArea {
+	if m.screen == screenTextArea || m.editorPopupActiveOrStack() {
 		newPath := strings.TrimSpace(m.editPathInput.Value())
 		if newPath == "" {
 			m.errMessage = "Name is required."
@@ -353,19 +373,23 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 
 	item.Region = m.editRegion
 	policies := ""
+	localPolicies := ""
 	policiesSet := false
 
 	if m.shouldShowPoliciesField() {
 		rawPolicies := strings.TrimSpace(m.editPoliciesArea.Value())
 
 		policies = normalizePoliciesForAWS(rawPolicies)
+		localPolicies = policies
 		if strings.TrimSpace(policies) == "[{}]" {
 			policiesSet = true
+			localPolicies = ""
 		}
 
 		if rawPolicies == "" && strings.TrimSpace(m.currentStatus().Policies) != "" {
 			policies = "[{}]"
 			policiesSet = true
+			localPolicies = ""
 		}
 	}
 
@@ -374,15 +398,76 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		overwrite = m.editOverwrite
 	}
 
-	m.busyMessage = "Saving parameter..."
-	m.loadingTitle = ""
-
 	description := strings.TrimSpace(m.editDescriptionArea.Value())
 	if description == "" {
 		description = strings.TrimSpace(m.editDescriptionInput.Value())
 	}
 
-	return m, saveValueCmdWithBackend(m.contextProvider(), backendFor(m), &item, oldPath, value, m.normalizedEditType(), ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	opts := ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}
+	local := Status{Item: item, Exists: true, Type: m.normalizedEditType().String(), Tier: m.normalizedEditTier().String(), DataType: m.normalizedEditDataType().String(), Policies: localPolicies, Description: description, Value: value}
+
+	if m.editNewParameter {
+		local.applyLocalCreate(m.normalizedEditType(), opts)
+		m.replaceStatusByKey(itemKey(item.Region, item.Path), &local)
+		m.applySortWithRules(m.sortRulesOrDefault())
+		m.selectItem(item)
+		m.message = "Created local change for " + item.Path + ". Press p to push."
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.discardEditorChanges()
+
+		return m, nil
+	}
+
+	idx := m.currentStatusIndex()
+	if idx < 0 {
+		m.errMessage = "No parameter selected."
+		m.message = ""
+		m.warningMessage = ""
+
+		return m, nil
+	}
+
+	current := m.statuses[idx]
+	if current.PendingOperation() == parameterStateDeleted {
+		m.errMessage = "Revert deleted parameter before editing it."
+		m.message = ""
+		m.warningMessage = ""
+
+		return m, nil
+	}
+
+	if current.PendingOperation() == parameterStateNew {
+		local.applyLocalCreate(m.normalizedEditType(), opts)
+	} else {
+		base := current.cloudStatus()
+		local.Version = base.Version
+		local.Modified = base.Modified
+		local.User = base.User
+
+		cloud := current.Cloud
+		if cloud.isZero() {
+			cloud = current.snapshot()
+		}
+
+		local.applyLocalModification(cloud, m.normalizedEditType(), opts)
+	}
+
+	m.statuses[idx] = local
+	m.applySortWithRules(m.sortRulesOrDefault())
+	m.selectItem(item)
+
+	if local.State == parameterStateClean {
+		m.message = "No local changes."
+	} else {
+		m.message = "Saved local change for " + item.Path + ". Press p to push."
+	}
+
+	m.errMessage = ""
+	m.warningMessage = ""
+	m.discardEditorChanges()
+
+	return m, nil
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.
@@ -406,6 +491,90 @@ func deleteCmd(ctx context.Context, client ssmclient.Client, items inventory.Ite
 func deleteCmdWithBackend(ctx context.Context, backend uiBackend, items inventory.Items, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
 	return func() tea.Msg {
 		return backend.deleteParameters(ctx, items, pathsFile, allowNamesFileUpdate)
+	}
+}
+
+func pushLocalChangesCmdWithBackend(ctx context.Context, backend uiBackend, statuses []Status, pathsFile string, allowNamesFileUpdate bool) tea.Cmd {
+	return func() tea.Msg {
+		results := make([]pushResult, 0, len(statuses))
+		for i := range statuses {
+			results = append(results, pushOneLocalChange(ctx, backend, &statuses[i], pathsFile, allowNamesFileUpdate))
+		}
+
+		return pushDoneMsg{results: results}
+	}
+}
+
+func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, pathsFile string, allowNamesFileUpdate bool) pushResult {
+	localKey := itemKey(status.Item.Region, status.Item.Path)
+	cloud := status.cloudStatus()
+	cloudKey := itemKey(cloud.Item.Region, cloud.Item.Path)
+	operation := status.PendingOperation()
+
+	result := pushResult{localKey: localKey, cloudKey: cloudKey, operation: operation, item: status.Item}
+	switch operation {
+	case parameterStateNew:
+		msg := backend.saveParameter(ctx, &status.Item, "", status.Value, status.pushType(), status.pushOptions(), pathsFile, allowNamesFileUpdate)
+		if msg.err != nil {
+			result.err = msg.err
+			return result
+		}
+
+		result.status = msg.status
+		result.warning = msg.warning
+		return result
+	case parameterStateModified:
+		msg := backend.saveParameter(ctx, &status.Item, cloud.Item.Path, status.Value, status.pushType(), status.pushOptions(), pathsFile, allowNamesFileUpdate)
+		if msg.err != nil {
+			result.err = msg.err
+			return result
+		}
+
+		if !cloud.Item.SameIdentity(&status.Item) {
+			deleteMsg := backend.deleteParameters(ctx, inventory.Items{cloud.Item}, pathsFile, allowNamesFileUpdate)
+			if deleteMsg.err != nil {
+				result.err = deleteMsg.err
+				result.warning = joinWarnings(msg.warning, deleteMsg.warning)
+				return result
+			}
+
+			result.warning = joinWarnings(msg.warning, deleteMsg.warning)
+		} else {
+			result.warning = msg.warning
+		}
+
+		result.status = msg.status
+		return result
+	case parameterStateDeleted:
+		deleteItem := cloud.Item
+		if deleteItem.Path == "" {
+			deleteItem = status.Item
+		}
+
+		msg := backend.deleteParameters(ctx, inventory.Items{deleteItem}, pathsFile, allowNamesFileUpdate)
+		if msg.err != nil {
+			result.err = msg.err
+			return result
+		}
+
+		result.item = deleteItem
+		result.removeRow = msg.removeRows
+		result.warning = msg.warning
+		return result
+	default:
+		result.err = errors.New("no local change to push")
+		return result
+	}
+}
+
+func joinWarnings(left, right string) string {
+	switch {
+	case left == "":
+		return right
+	case right == "":
+		return left
+	default:
+		return left + "; " + right
 	}
 }
 

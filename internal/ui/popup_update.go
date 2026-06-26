@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -111,11 +110,8 @@ func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, 
 			return m, nil
 		}
 
-		items := append(inventory.Items(nil), m.confirmItems...)
-		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
-		m.loadingTitle = ""
-
-		return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		component.model = m
+		return component.finishConfirmAction()
 	}
 
 	var cmd tea.Cmd
@@ -225,35 +221,108 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	case "q", "esc", "ctrl+g":
 		m.popPopup()
 		return m, nil
-	case "enter":
-		if m.confirmExpected != "" && m.input.Value() != m.confirmExpected {
-			m.errMessage = "confirmation phrase does not match"
-			return m, nil
-		}
-
-		items := append(inventory.Items(nil), m.confirmItems...)
-		m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
-		m.loadingTitle = ""
-		m.activePopup = popupNone
-		m.popupStack = nil
-
-		return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	case "ctrl+m":
+		component.model = m
+		return component.finishConfirmAction()
 	}
 
-	if m.confirmExpected == "" {
+	if (&m).navigateConfirmButtons(key) {
 		return m, nil
 	}
 
-	var cmd tea.Cmd
+	if importEnterKey(key) {
+		if m.confirmButtonCursor == importActionCancel {
+			m.popPopup()
+			return m, nil
+		}
 
-	m.input, cmd = m.input.Update(msg)
+		component.model = m
+		return component.finishConfirmAction()
+	}
 
-	return m, cmd
+	return m, nil
+}
+
+func (m *model) navigateConfirmButtons(key string) bool {
+	if action, ok, consumed := m.handlePendingNavigationSequence(key); consumed {
+		if ok {
+			m.applyConfirmButtonNavigation(action)
+		}
+
+		return true
+	}
+
+	if action, ok := m.navigationAction(key); ok {
+		m.applyConfirmButtonNavigation(action)
+		return true
+	}
+
+	if m.keymapStyle() == keymapVi && key == "g" {
+		m.pendingKeySequence = "g"
+		return true
+	}
+
+	return false
+}
+
+func (m *model) applyConfirmButtonNavigation(action navigationAction) {
+	switch action {
+	case navPrevious, navNext, navPageUp, navPageDown:
+		if m.confirmButtonCursor == importActionPrimary {
+			m.confirmButtonCursor = importActionCancel
+		} else {
+			m.confirmButtonCursor = importActionPrimary
+		}
+	case navFirst:
+		m.confirmButtonCursor = importActionPrimary
+	case navLast:
+		m.confirmButtonCursor = importActionCancel
+	default:
+	}
+}
+
+func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd) {
+	m := component.model
+
+	switch m.confirmAction {
+	case confirmActionPushAll:
+		indexes := m.dirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No local changes to push."
+			m.errMessage = ""
+			m.warningMessage = ""
+			m.clearPopupStack()
+			m.screen = m.returnScreen
+
+			return m, nil
+		}
+
+		statuses := m.dirtyStatuses(indexes)
+		m.busyMessage = fmt.Sprintf("Pushing %d local change(s)...", len(statuses))
+		m.loadingTitle = ""
+		m.clearPopupStack()
+
+		return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	default:
+		changed := m.applyLocalDeleteItems(m.confirmItems)
+		m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
+		if changed == 0 {
+			m.message = "No parameters marked for deletion."
+		}
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.clearPopupStack()
+		m.screen = m.returnScreen
+		m.ensureSelection()
+
+		return m, nil
+	}
 }
 
 func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	importSelector := m.importSelectorActive()
+	editorSelector := m.editorSelectorActive()
 
 	regions := m.regionSelectOptions()
 	if importSelector {
@@ -263,6 +332,8 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 	if len(regions) == 0 {
 		if importSelector {
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m = m.finishEditorSelector()
 		} else {
 			m.popPopup()
 			m = m.focusEditField(editFieldRegion)
@@ -288,7 +359,27 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		return m, nil
 	}
 
+	if editorSelector && importPrimaryActionKey(key) {
+		m.editRegion = regions[min(m.regionCursor, len(regions)-1)]
+		m = m.finishEditorSelector()
+
+		return m, nil
+	}
+
+	if editorSelector && m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.editRegion = regions[min(m.regionCursor, len(regions)-1)]
+		}
+
+		m = m.finishEditorSelector()
+		return m, nil
+	}
+
 	if importSelector && (&m).navigateImportSelectorButtons(key) {
+		return m, nil
+	}
+
+	if editorSelector && (&m).navigateEditorPopupButtons(key) {
 		return m, nil
 	}
 
@@ -302,6 +393,8 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 	case "q", "esc", "ctrl+g":
 		if importSelector {
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m = m.finishEditorSelector()
 		} else {
 			m.popPopup()
 			m = m.focusEditField(editFieldRegion)
@@ -310,6 +403,9 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		if importSelector {
 			m.importDefaultRegion = regions[m.regionCursor]
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editRegion = regions[m.regionCursor]
+			m = m.finishEditorSelector()
 		} else {
 			m.editRegion = regions[m.regionCursor]
 			m.popPopup()
@@ -323,6 +419,7 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	importSelector := m.importSelectorActive()
+	editorSelector := m.editorSelectorActive()
 
 	items := parameterTypeItems()
 	if importSelector {
@@ -355,6 +452,26 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
+	if editorSelector && importPrimaryActionKey(key) {
+		m.editType = items[min(m.typeCursor, len(items)-1)].value
+		m = m.finishEditorSelector()
+
+		return m, nil
+	}
+
+	if editorSelector && m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.editType = items[min(m.typeCursor, len(items)-1)].value
+		}
+
+		m = m.finishEditorSelector()
+		return m, nil
+	}
+
+	if editorSelector && (&m).navigateEditorPopupButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.typeCursor, len(items)) {
 		return m, nil
 	}
@@ -363,6 +480,9 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		if importSelector {
 			m.importDefaultType = items[idx].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editType = items[idx].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editType = items[idx].value
 			m.popPopup()
@@ -381,6 +501,8 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 	case "q", "esc", "ctrl+g":
 		if importSelector {
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m = m.finishEditorSelector()
 		} else {
 			m.popPopup()
 
@@ -392,6 +514,9 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		if importSelector {
 			m.importDefaultType = items[m.typeCursor].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editType = items[m.typeCursor].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editType = items[m.typeCursor].value
 			m.popPopup()
@@ -408,6 +533,7 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	importSelector := m.importSelectorActive()
+	editorSelector := m.editorSelectorActive()
 
 	items := parameterTierItems()
 	if importSelector {
@@ -440,6 +566,26 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
+	if editorSelector && importPrimaryActionKey(key) {
+		m.editTier = items[min(m.tierCursor, len(items)-1)].value
+		m = m.finishEditorSelector()
+
+		return m, nil
+	}
+
+	if editorSelector && m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.editTier = items[min(m.tierCursor, len(items)-1)].value
+		}
+
+		m = m.finishEditorSelector()
+		return m, nil
+	}
+
+	if editorSelector && (&m).navigateEditorPopupButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.tierCursor, len(items)) {
 		return m, nil
 	}
@@ -448,6 +594,9 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		if importSelector {
 			m.importDefaultTier = items[idx].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editTier = items[idx].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editTier = items[idx].value
 			m.popPopup()
@@ -463,6 +612,8 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 	case "q", "esc", "ctrl+g":
 		if importSelector {
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m = m.finishEditorSelector()
 		} else {
 			m.popPopup()
 			m = m.focusEditField(editFieldTier)
@@ -471,6 +622,9 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		if importSelector {
 			m.importDefaultTier = items[m.tierCursor].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editTier = items[m.tierCursor].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editTier = items[m.tierCursor].value
 			m.popPopup()
@@ -484,6 +638,7 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	importSelector := m.importSelectorActive()
+	editorSelector := m.editorSelectorActive()
 
 	items := parameterDataTypeItems()
 	if importSelector {
@@ -516,6 +671,26 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
+	if editorSelector && importPrimaryActionKey(key) {
+		m.editDataType = items[min(m.dataTypeCursor, len(items)-1)].value
+		m = m.finishEditorSelector()
+
+		return m, nil
+	}
+
+	if editorSelector && m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.editDataType = items[min(m.dataTypeCursor, len(items)-1)].value
+		}
+
+		m = m.finishEditorSelector()
+		return m, nil
+	}
+
+	if editorSelector && (&m).navigateEditorPopupButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.dataTypeCursor, len(items)) {
 		return m, nil
 	}
@@ -524,6 +699,9 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		if importSelector {
 			m.importDefaultDataType = items[idx].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editDataType = items[idx].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editDataType = items[idx].value
 			m.popPopup()
@@ -539,6 +717,8 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 	case "q", "esc", "ctrl+g":
 		if importSelector {
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m = m.finishEditorSelector()
 		} else {
 			m.popPopup()
 			m = m.focusEditField(editFieldDataType)
@@ -547,6 +727,9 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		if importSelector {
 			m.importDefaultDataType = items[m.dataTypeCursor].value
 			m = m.finishImportSelector()
+		} else if editorSelector {
+			m.editDataType = items[m.dataTypeCursor].value
+			m = m.finishEditorSelector()
 		} else {
 			m.editDataType = items[m.dataTypeCursor].value
 			m.popPopup()
@@ -559,6 +742,7 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 
 func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+	editorSelector := m.editorSelectorActive()
 
 	items := overwriteItems()
 	if len(items) == 0 {
@@ -567,14 +751,38 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 	}
 
 	key := msg.String()
+	if editorSelector && importPrimaryActionKey(key) {
+		m.editOverwrite = items[min(m.overwriteCursor, len(items)-1)].value
+		m = m.finishEditorSelector()
+
+		return m, nil
+	}
+
+	if editorSelector && m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.editOverwrite = items[min(m.overwriteCursor, len(items)-1)].value
+		}
+
+		m = m.finishEditorSelector()
+		return m, nil
+	}
+
+	if editorSelector && (&m).navigateEditorPopupButtons(key) {
+		return m, nil
+	}
+
 	if (&m).handleSelectorNavigation(key, &m.overwriteCursor, len(items)) {
 		return m, nil
 	}
 
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editOverwrite = items[idx].value
-		m.popPopup()
-		m = m.focusEditField(editFieldOverwrite)
+		if editorSelector {
+			m = m.finishEditorSelector()
+		} else {
+			m.popPopup()
+			m = m.focusEditField(editFieldOverwrite)
+		}
 
 		return m, nil
 	}
@@ -583,12 +791,20 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenTextArea, popupOverwriteSelect)
 	case "q", "esc", "ctrl+g":
-		m.popPopup()
-		m = m.focusEditField(editFieldOverwrite)
+		if editorSelector {
+			m = m.finishEditorSelector()
+		} else {
+			m.popPopup()
+			m = m.focusEditField(editFieldOverwrite)
+		}
 	case "enter", "ctrl+j":
 		m.editOverwrite = items[m.overwriteCursor].value
-		m.popPopup()
-		m = m.focusEditField(editFieldOverwrite)
+		if editorSelector {
+			m = m.finishEditorSelector()
+		} else {
+			m.popPopup()
+			m = m.focusEditField(editFieldOverwrite)
+		}
 	}
 
 	return m, nil

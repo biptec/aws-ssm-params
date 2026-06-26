@@ -16,6 +16,8 @@ type editorState struct {
 	editFileInput        textinput.Model
 
 	editField           editField
+	editorButtonsFocused bool
+	editorButtonCursor   int
 	viInsertMode        bool
 	editRegionOptions   []string
 	pendingFileWrite    fileWriteConfirmation

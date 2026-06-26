@@ -21,6 +21,7 @@ import (
 type importState struct {
 	importFilePathInput            textinput.Model
 	importFilePicker               filepicker.Model
+	importFilePickerTarget         filePickerTarget
 	importFilePickerParentFocused  bool
 	importFilePickerButtonsFocused bool
 	importFilePickerTargetName     string
@@ -53,6 +54,13 @@ type importState struct {
 	importMapPathBackup  [][2]string
 	importDefaultsBackup importDefaultsSnapshot
 }
+
+type filePickerTarget int
+
+const (
+	filePickerTargetImportFile filePickerTarget = iota
+	filePickerTargetPopupFileAction
+)
 
 type importMapPathRow struct {
 	awsPath  textinput.Model
@@ -904,18 +912,11 @@ func (m model) importActionButtonsLine(primary string) string {
 }
 
 func (m model) importActionButtonsLineFocused(primary string, focused bool) string {
-	return m.importActionButton(primary, focused && m.importButtonCursor == importActionPrimary) +
-		m.muted("   ") +
-		m.importActionButton("Cancel", focused && m.importButtonCursor == importActionCancel)
+	return m.formActionButtonsLine(primary, focused, m.importButtonCursor)
 }
 
 func (m model) importActionButton(label string, focused bool) string {
-	prefix := "  "
-	if focused {
-		prefix = m.focusMarker("> ")
-	}
-
-	return prefix + m.muted(label)
+	return m.formActionButton(label, focused)
 }
 
 func (m model) importFileActions() string {
@@ -1323,6 +1324,197 @@ func (m *model) navigateImportSelectorButtons(key string) bool {
 	return false
 }
 
+func (m *model) moveImportMainTabFocus(reverse bool) {
+	count := int(importMainFieldsCount)
+	if count == 0 {
+		return
+	}
+
+	if m.importButtonsFocused {
+		if reverse {
+			if m.importButtonCursor == importActionCancel {
+				m.importButtonCursor = importActionPrimary
+				return
+			}
+
+			m.importMainCursor = count - 1
+			m.focusImportMain()
+			return
+		}
+
+		if m.importButtonCursor == importActionPrimary {
+			m.importButtonCursor = importActionCancel
+			return
+		}
+
+		m.importMainCursor = 0
+		m.focusImportMain()
+		return
+	}
+
+	if reverse {
+		if m.importMainCursor <= 0 {
+			m.focusImportButton(importActionCancel)
+			return
+		}
+
+		m.importMainCursor--
+		m.focusImportMain()
+		return
+	}
+
+	if m.importMainCursor >= count-1 {
+		m.focusImportButton(importActionPrimary)
+		return
+	}
+
+	m.importMainCursor++
+	m.focusImportMain()
+}
+
+func (m *model) moveImportMapFieldsTabFocus(reverse bool) {
+	count := len(m.importMapFieldInputs)
+	if count == 0 {
+		return
+	}
+
+	if m.importButtonsFocused {
+		if reverse {
+			if m.importButtonCursor == importActionCancel {
+				m.importButtonCursor = importActionPrimary
+				return
+			}
+
+			m.importMapFieldsCursor = count - 1
+			m.focusImportMapField()
+			return
+		}
+
+		if m.importButtonCursor == importActionPrimary {
+			m.importButtonCursor = importActionCancel
+			return
+		}
+
+		m.importMapFieldsCursor = 0
+		m.focusImportMapField()
+		return
+	}
+
+	if reverse {
+		if m.importMapFieldsCursor <= 0 {
+			m.focusImportButton(importActionCancel)
+			return
+		}
+
+		m.importMapFieldsCursor--
+		m.focusImportMapField()
+		return
+	}
+
+	if m.importMapFieldsCursor >= count-1 {
+		m.focusImportButton(importActionPrimary)
+		return
+	}
+
+	m.importMapFieldsCursor++
+	m.focusImportMapField()
+}
+
+func (m *model) moveImportMapPathsTabFocus(reverse bool) {
+	m.normalizeMapPathRows(&m.opts)
+	count := len(m.importMapPathRows)
+	if count == 0 {
+		return
+	}
+
+	if m.importButtonsFocused {
+		if reverse {
+			if m.importButtonCursor == importActionCancel {
+				m.importButtonCursor = importActionPrimary
+				return
+			}
+
+			m.importMapPathsCursor = (count - 1) * 2
+			m.focusImportMapPath()
+			return
+		}
+
+		if m.importButtonCursor == importActionPrimary {
+			m.importButtonCursor = importActionCancel
+			return
+		}
+
+		m.importMapPathsCursor = 0
+		m.focusImportMapPath()
+		return
+	}
+
+	row, _ := m.importMapPathCursorPosition()
+	if reverse {
+		if row <= 0 {
+			m.focusImportButton(importActionCancel)
+			return
+		}
+
+		m.importMapPathsCursor = (row - 1) * 2
+		m.focusImportMapPath()
+		return
+	}
+
+	if row >= count-1 {
+		m.focusImportButton(importActionPrimary)
+		return
+	}
+
+	m.importMapPathsCursor = (row + 1) * 2
+	m.focusImportMapPath()
+}
+
+func (m *model) moveImportDefaultsTabFocus(reverse bool) {
+	const count = 6
+
+	if m.importButtonsFocused {
+		if reverse {
+			if m.importButtonCursor == importActionCancel {
+				m.importButtonCursor = importActionPrimary
+				return
+			}
+
+			m.importDefaultsCursor = count - 1
+			m.focusImportDefaults()
+			return
+		}
+
+		if m.importButtonCursor == importActionPrimary {
+			m.importButtonCursor = importActionCancel
+			return
+		}
+
+		m.importDefaultsCursor = 0
+		m.focusImportDefaults()
+		return
+	}
+
+	if reverse {
+		if m.importDefaultsCursor <= 0 {
+			m.focusImportButton(importActionCancel)
+			return
+		}
+
+		m.importDefaultsCursor--
+		m.focusImportDefaults()
+		return
+	}
+
+	if m.importDefaultsCursor >= count-1 {
+		m.focusImportButton(importActionPrimary)
+		return
+	}
+
+	m.importDefaultsCursor++
+	m.focusImportDefaults()
+}
+
 func (m *model) clearImportButtonFocus() {
 	m.importButtonsFocused = false
 }
@@ -1401,6 +1593,18 @@ func (m *model) closeImportChildPopup() {
 	}
 }
 
+func (m *model) closeFilePickerPopup() {
+	m.popPopup()
+
+	switch m.activePopup {
+	case popupImportFile:
+		m.focusImportMain()
+	case popupFileAction:
+		m.editorButtonsFocused = false
+		m.input.Focus()
+	}
+}
+
 func (m *model) openImportFilePickerPopup() tea.Cmd {
 	picker := newImportFilePicker(&m.opts)
 	path := m.importFilePathInput.Value()
@@ -1408,11 +1612,31 @@ func (m *model) openImportFilePickerPopup() tea.Cmd {
 	picker.Height = m.importFilePickerHeight()
 
 	m.importFilePicker = picker
+	m.importFilePickerTarget = filePickerTargetImportFile
 	m.importFilePickerParentFocused = false
 	m.importFilePickerButtonsFocused = false
 	m.importFilePickerTargetName = importFilePickerTargetName(path)
 	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
 	m.importButtonsFocused = false
+	m.pushNestedPopup(popupImportFilePicker)
+
+	return m.importFilePicker.Init()
+}
+
+func (m *model) openPopupFileActionPicker() tea.Cmd {
+	picker := newImportFilePicker(&m.opts)
+	path := m.input.Value()
+	picker.CurrentDirectory = importFilePickerStartDirectory(path)
+	picker.Height = m.importFilePickerHeight()
+
+	m.importFilePicker = picker
+	m.importFilePickerTarget = filePickerTargetPopupFileAction
+	m.importFilePickerParentFocused = false
+	m.importFilePickerButtonsFocused = false
+	m.importFilePickerTargetName = importFilePickerTargetName(path)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.editorButtonsFocused = false
+	m.input.Blur()
 	m.pushNestedPopup(popupImportFilePicker)
 
 	return m.importFilePicker.Init()
@@ -1571,6 +1795,11 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
+	if key == "tab" || key == "shift+tab" {
+		m.moveImportMainTabFocus(key == "shift+tab")
+		return m, nil
+	}
+
 	if (&m).navigateImportSelectorButtons(key) {
 		if !m.importButtonsFocused {
 			m.focusImportMain()
@@ -1635,10 +1864,10 @@ func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg
 
 	switch key {
 	case "ctrl+_", "ctrl+/":
-		m.openPopupShortcuts(screenMain, popupImportFilePicker)
+		m.openPopupShortcuts(m.filePickerShortcutScreen(), popupImportFilePicker)
 		return m, nil
 	case "q", "esc", "ctrl+g":
-		m.closeImportChildPopup()
+		m.closeFilePickerPopup()
 		return m, nil
 	}
 
@@ -1697,7 +1926,7 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			return nil, true
 		case "enter", "ctrl+j":
 			if m.importButtonCursor == importActionCancel {
-				m.closeImportChildPopup()
+				m.closeFilePickerPopup()
 				return nil, true
 			}
 
@@ -1910,13 +2139,28 @@ func (m *model) updateImportFilePickerWidthOnDirectoryChange(previousDirectory s
 
 func (m *model) applyImportFilePickerPath(path string) {
 	path = importShortestDisplayPath(path)
-	m.importFilePathInput.SetValue(path)
-	m.importFilePathInput.SetCursor(len([]rune(path)))
-	if detected := detectedImportFormatFromPath(path); detected != "" {
-		m.importFormat = detected
+
+	switch m.importFilePickerTarget {
+	case filePickerTargetPopupFileAction:
+		m.input.SetValue(path)
+		m.input.SetCursor(len([]rune(path)))
+	default:
+		m.importFilePathInput.SetValue(path)
+		m.importFilePathInput.SetCursor(len([]rune(path)))
+		if detected := detectedImportFormatFromPath(path); detected != "" {
+			m.importFormat = detected
+		}
 	}
 
-	m.closeImportChildPopup()
+	m.closeFilePickerPopup()
+}
+
+func (m model) filePickerShortcutScreen() screen {
+	if m.importFilePickerTarget == filePickerTargetPopupFileAction {
+		return screenTextArea
+	}
+
+	return screenMain
 }
 
 func (m *model) changeImportFilePickerDirectory(path string) tea.Cmd {
@@ -2137,6 +2381,11 @@ func (component popupUpdateComponent) updateImportMapFieldsPopup(msg tea.KeyMsg)
 		return m, nil
 	}
 
+	if key == "tab" || key == "shift+tab" {
+		m.moveImportMapFieldsTabFocus(key == "shift+tab")
+		return m, nil
+	}
+
 	if (&m).navigateImportSelectorButtons(key) {
 		if !m.importButtonsFocused {
 			m.focusImportMapField()
@@ -2204,6 +2453,11 @@ func (component popupUpdateComponent) updateImportMapPathsPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+		return m, nil
+	}
+
+	if key == "tab" || key == "shift+tab" {
+		m.moveImportMapPathsTabFocus(key == "shift+tab")
 		return m, nil
 	}
 
@@ -2329,6 +2583,11 @@ func (component popupUpdateComponent) updateImportDefaultsPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+		return m, nil
+	}
+
+	if key == "tab" || key == "shift+tab" {
+		m.moveImportDefaultsTabFocus(key == "shift+tab")
 		return m, nil
 	}
 

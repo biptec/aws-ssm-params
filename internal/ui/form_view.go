@@ -53,6 +53,21 @@ func (m model) formFocusPrefix(focused bool) string {
 	return "  "
 }
 
+func (m model) formActionButtonsLine(primary string, focused bool, cursor int) string {
+	return m.formActionButton(primary, focused && cursor == importActionPrimary) +
+		m.muted("   ") +
+		m.formActionButton("Cancel", focused && cursor == importActionCancel)
+}
+
+func (m model) formActionButton(label string, focused bool) string {
+	prefix := "  "
+	if focused {
+		prefix = m.focusMarker("> ")
+	}
+
+	return prefix + m.muted(label)
+}
+
 // formOptionValue renders the value side of a selector row.
 func (m model) formOptionValue(_ bool, value string) string {
 	if value == "" {

@@ -24,6 +24,7 @@ type columnName string
 
 const (
 	columnIndex       columnName = "index"
+	columnState       columnName = "state"
 	columnRegion      columnName = "region"
 	columnDate        columnName = "date"
 	columnType        columnName = "type"
@@ -189,6 +190,8 @@ func (column columnName) Field() string {
 	switch column {
 	case columnIndex:
 		return string(column)
+	case columnState:
+		return "state"
 	case columnPath:
 		return "name"
 	case columnRegion:
@@ -234,6 +237,8 @@ func (column columnName) Label() string {
 	switch column {
 	case columnIndex:
 		return "Index"
+	case columnState:
+		return "State"
 	case columnPath:
 		return "Name"
 	case columnRegion:

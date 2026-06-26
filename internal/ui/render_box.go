@@ -31,6 +31,9 @@ func (renderer *boxRenderer) renderFieldPairs(fields [][2]string, labelWidth int
 		}
 
 		renderedValue := renderer.value(value)
+		if value == "" || value == "-" {
+			renderedValue = renderer.muted("(none)")
+		}
 		if f[0] == "Value" && value == encryptedPlaceholderText {
 			renderedValue = renderer.encryptedPlaceholder()
 		}

@@ -13,6 +13,17 @@ type tableViewComponent struct {
 	model model
 }
 
+const (
+	cleanSelectedParameterDetailsHeight = 13
+	dirtySelectedParameterDetailsHeight = 18
+)
+
+type editableDetailField struct {
+	label string
+	cloud string
+	local string
+}
+
 // renderSelectedParameterBlock renders the compact or expanded selected-parameter summary shown above the main table.
 // Missing parameters only have an expected name, so every field except Name is displayed as a dash.
 func (component tableViewComponent) renderSelectedParameterBlock(full bool) string {
@@ -21,6 +32,13 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 	st := m.currentStatus()
 	if st.Item.Path == "" {
 		return m.renderBox("Selected Parameter", []string{"No parameters found."}, 8)
+	}
+
+	if full && m.hasLocalChanges() {
+		title := component.selectedParameterDetailsTitle(&st)
+		lines := component.editableSelectedParameterLines(&st)
+
+		return m.renderBox(title, lines, dirtySelectedParameterDetailsHeight)
 	}
 
 	fields := m.selectedParameterFields(&st, full)
@@ -32,7 +50,12 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 
 	lines := m.renderFieldPairs(fields, labelWidth)
 
-	return m.renderBox("Selected Parameter", lines, len(lines)+2)
+	height := len(lines) + 2
+	if full {
+		height = cleanSelectedParameterDetailsHeight
+	}
+
+	return m.renderBox("Selected Parameter", lines, height)
 }
 
 func (component tableViewComponent) selectedParameterFields(st *Status, full bool) [][2]string {
@@ -50,13 +73,134 @@ func (component tableViewComponent) selectedParameterFields(st *Status, full boo
 
 	fields := [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 	if full {
-		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, max(20, m.boxInnerWidth()-18))}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", valueOrDash(st.Description)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
+		detailWidth := max(20, m.boxInnerWidth()-18)
+		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, detailWidth)}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", oneLineValuePreview(st.Description, detailWidth)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 		if st.Error != "" {
 			fields = append(fields, [2]string{"Error", st.Error})
+		}
+		if st.PushError != "" {
+			fields = append(fields, [2]string{"Push error", st.PushError})
 		}
 	}
 
 	return m.filterSelectedParameterFields(fields)
+}
+
+func (component tableViewComponent) selectedParameterDetailsTitle(st *Status) string {
+	switch st.PendingOperation() {
+	case parameterStateNew:
+		return "New Parameter"
+	case parameterStateModified:
+		return "Modified Parameter"
+	case parameterStateDeleted:
+		return "Deleted Parameter"
+	default:
+		return "Selected Parameter"
+	}
+}
+
+func (component tableViewComponent) editableSelectedParameterLines(st *Status) []string {
+	m := component.model
+	fields := component.editableDetailFields(st)
+	lines := make([]string, 0, len(fields)*2)
+
+	valueWidth := max(4, m.boxInnerWidth()-15)
+	for _, field := range fields {
+		localOnly := st.PendingOperation() == parameterStateNew
+		changed := field.cloud != field.local && st.HasLocalChanges()
+		cloudValue := component.renderEditableDetailValue(field.cloud, valueWidth, changed || localOnly, !localOnly)
+		lines = append(lines, "  "+m.fieldLine(field.label, cloudValue, 11))
+
+		if changed {
+			localValue := component.renderEditableLocalDetailValue(field, valueWidth)
+			lines = append(lines, "  "+strings.Repeat(" ", 13)+localValue)
+			continue
+		}
+
+		lines = append(lines, "")
+	}
+
+	return lines
+}
+
+func (component tableViewComponent) editableDetailFields(st *Status) []editableDetailField {
+	m := component.model
+	cloud := st.cloudStatus()
+	local := st.localStatus()
+	if st.PendingOperation() == parameterStateDeleted {
+		local = Status{}
+	}
+
+	if st.PendingOperation() == parameterStateNew || !st.HasLocalChanges() {
+		cloud = *st
+		local = *st
+	}
+
+	fields := []editableDetailField{
+		{label: "Name", cloud: cloud.Item.Path, local: local.Item.Path},
+		{label: "Region", cloud: cloud.Item.Region, local: local.Item.Region},
+		{label: "Type", cloud: cloud.Type, local: local.Type},
+		{label: "Tier", cloud: cloud.Tier, local: local.Tier},
+		{label: "DataType", cloud: cloud.DataType, local: local.DataType},
+		{label: "Policies", cloud: cloud.Policies, local: local.Policies},
+		{label: "Description", cloud: cloud.Description, local: local.Description},
+		{label: "Value", cloud: component.editableDetailValue(&cloud), local: component.editableDetailValue(&local)},
+	}
+
+	filtered := make([]editableDetailField, 0, len(fields))
+	for _, field := range fields {
+		if m.detailFieldAllowed(field.label) {
+			filtered = append(filtered, field)
+		}
+	}
+
+	return filtered
+}
+
+func (component tableViewComponent) editableDetailValue(st *Status) string {
+	if !st.Exists {
+		return st.Value
+	}
+
+	if component.model.shouldDisplayEncryptedValue(st) {
+		return encryptedPlaceholderText
+	}
+
+	return st.Value
+}
+
+func (component tableViewComponent) renderEditableLocalDetailValue(field editableDetailField, width int) string {
+	if !editableDetailValuePresent(field.local) && editableDetailValuePresent(field.cloud) {
+		return component.model.muted("(deleted)")
+	}
+
+	return component.renderEditableDetailValue(field.local, width, true, false)
+}
+
+func (component tableViewComponent) renderEditableDetailValue(value string, width int, changed, cloud bool) string {
+	m := component.model
+	if value == "" || value == "-" {
+		return m.muted("(none)")
+	}
+
+	if value == encryptedPlaceholderText {
+		return m.encryptedPlaceholder()
+	}
+
+	value = detailOneLinePreview(value, width)
+	if changed {
+		if cloud {
+			return m.diffCloudValue(value)
+		}
+
+		return m.diffLocalValue(value)
+	}
+
+	return m.value(value)
+}
+
+func editableDetailValuePresent(value string) bool {
+	return value != "" && value != "-"
 }
 
 func (component tableViewComponent) filterSelectedParameterFields(fields [][2]string) [][2]string {
@@ -167,6 +311,14 @@ func oneLineValuePreview(value string, width int) string {
 	return preview + suffix
 }
 
+func detailOneLinePreview(value string, width int) string {
+	if value == "" {
+		return ""
+	}
+
+	return oneLineValuePreview(value, width)
+}
+
 func (component tableViewComponent) shouldDisplayEncryptedValue(st *Status) bool {
 	m := component.model
 	return !st.Pending && st.HasSensitiveValue() && st.Value == "" && !m.opts.ShowSecureValues
@@ -233,6 +385,9 @@ type tableColumn struct {
 func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 	m := component.model
 	keys := []columnName{columnIndex, columnPath}
+	if m.hasLocalChanges() {
+		keys = []columnName{columnIndex, columnState, columnPath}
+	}
 
 	visibleColumns := m.columnsForRendering()
 	for _, key := range columnItems() {
@@ -309,7 +464,7 @@ func widestShrinkableColumn(cols []tableColumn) int {
 // columnMinWidth protects important columns from becoming unreadably narrow during terminal-width fitting.
 func columnMinWidth(key columnName, header string) int {
 	switch key {
-	case columnIndex, columnRegion, columnType, columnTier, columnVersion, columnLength, columnHash:
+	case columnIndex, columnState, columnRegion, columnType, columnTier, columnVersion, columnLength, columnHash:
 		return lipgloss.Width(header)
 	case columnPath:
 		return max(lipgloss.Width(header), 20)
@@ -343,6 +498,19 @@ func (component tableViewComponent) renderListHeader(cols []tableColumn) string 
 func (component tableViewComponent) renderListRow(index int, st *Status, selected bool, cols []tableColumn) string {
 	m := component.model
 
+	if selected {
+		parts := make([]string, 0, len(cols))
+		for _, col := range cols {
+			if col.key == columnState {
+				parts = append(parts, m.renderListCell(col, index, st))
+			} else {
+				parts = append(parts, m.selectedListCell(col, index, st))
+			}
+		}
+
+		return m.selectedMarker() + strings.Join(parts, "  ")
+	}
+
 	parts := make([]string, 0, len(cols))
 	for _, col := range cols {
 		parts = append(parts, m.renderListCell(col, index, st))
@@ -351,15 +519,22 @@ func (component tableViewComponent) renderListRow(index int, st *Status, selecte
 	row := strings.Join(parts, "  ")
 
 	plain := stripANSI(row)
-	if selected {
-		return m.selectedMarker() + m.rowText(st, plain, true)
-	}
-
 	if styled := m.rowText(st, plain, false); styled != plain {
 		return "  " + styled
 	}
 
 	return "  " + row
+}
+
+func (component tableViewComponent) selectedListCell(col tableColumn, index int, st *Status) string {
+	m := component.model
+
+	value := truncateInline(m.tableCellValue(col.key, index, st), col.width)
+	if col.key == columnValue && m.shouldDisplayEncryptedValue(st) {
+		value = encryptedPlaceholderText
+	}
+
+	return m.selectedRow(pad(value, col.width))
 }
 
 func (component tableViewComponent) renderListCell(col tableColumn, index int, st *Status) string {
@@ -368,6 +543,10 @@ func (component tableViewComponent) renderListCell(col tableColumn, index int, s
 	value := truncateInline(m.tableCellValue(col.key, index, st), col.width)
 	if col.key == columnValue && m.shouldDisplayEncryptedValue(st) {
 		value = m.encryptedPlaceholder()
+	}
+
+	if col.key == columnState {
+		return pad(m.stateValue(st.State), col.width)
 	}
 
 	return pad(value, col.width)
@@ -415,6 +594,8 @@ func (component tableViewComponent) tableCellValue(key columnName, index int, st
 	switch key {
 	case columnIndex:
 		return strconv.Itoa(index)
+	case columnState:
+		return st.StateLabel()
 	case columnRegion:
 		return st.RegionLabel(m.opts.Region)
 	case columnDate:
@@ -464,7 +645,11 @@ func (component tableViewComponent) selectedParameterBlockHeight() int {
 		return 0
 	}
 
-	return len(m.renderFieldPairs(m.selectedParameterFields(&st, true), 11)) + 2
+	if m.hasLocalChanges() {
+		return dirtySelectedParameterDetailsHeight
+	}
+
+	return cleanSelectedParameterDetailsHeight
 }
 
 func (component tableViewComponent) listBodyHeight() int {

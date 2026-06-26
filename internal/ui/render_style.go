@@ -127,6 +127,42 @@ func (renderer *styleRenderer) applyErr(s string) string {
 	return errorStyle.Render(s)
 }
 
+func (renderer *styleRenderer) stateValue(state parameterState) string {
+	value := string(state)
+	if renderer.noColor || value == "" {
+		return value
+	}
+
+	switch state {
+	case parameterStateModified:
+		return lipgloss.NewStyle().Foreground(stateModifiedFg).Render(value)
+	case parameterStateNew:
+		return lipgloss.NewStyle().Foreground(stateNewFg).Render(value)
+	case parameterStateDeleted:
+		return lipgloss.NewStyle().Foreground(stateDeletedFg).Render(value)
+	case parameterStateError:
+		return lipgloss.NewStyle().Foreground(stateErrorFg).Render(value)
+	default:
+		return value
+	}
+}
+
+func (renderer *styleRenderer) diffCloudValue(s string) string {
+	if renderer.noColor {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(diffCloudFg).Render(s)
+}
+
+func (renderer *styleRenderer) diffLocalValue(s string) string {
+	if renderer.noColor {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(diffLocalFg).Render(s)
+}
+
 func (renderer *styleRenderer) applyWarning(s string) string {
 	if renderer.noColor {
 		return s

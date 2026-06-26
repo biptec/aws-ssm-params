@@ -3,6 +3,8 @@ package ui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type popupViewComponent struct {
@@ -20,7 +22,14 @@ func (component popupViewComponent) renderValueActionsPopup() string {
 
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
+		focused := i == m.valueActionCursor && (!m.editorPopupActiveOrStack() || !m.editorButtonsFocused)
+		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, focused))
+	}
+
+	if m.editorPopupActiveOrStack() {
+		lines = append(lines, "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Value Actions", lines)
 	}
 
 	return m.renderPopupBoxWithActions("Value Actions", lines, "Enter select   Esc cancel")
@@ -32,7 +41,14 @@ func (component popupViewComponent) renderPoliciesActionsPopup() string {
 
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
+		focused := i == m.valueActionCursor && (!m.editorPopupActiveOrStack() || !m.editorButtonsFocused)
+		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, focused))
+	}
+
+	if m.editorPopupActiveOrStack() {
+		lines = append(lines, "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Policies Actions", lines)
 	}
 
 	return m.renderPopupBoxWithActions("Policies Actions", lines, "Enter select   Esc cancel")
@@ -44,7 +60,14 @@ func (component popupViewComponent) renderDescriptionActionsPopup() string {
 
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, i == m.valueActionCursor))
+		focused := i == m.valueActionCursor && (!m.editorPopupActiveOrStack() || !m.editorButtonsFocused)
+		lines = append(lines, m.singleSelectLine(item.label, i == m.valueActionCursor, focused))
+	}
+
+	if m.editorPopupActiveOrStack() {
+		lines = append(lines, "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Description Actions", lines)
 	}
 
 	return m.renderPopupBoxWithActions("Description Actions", lines, "Enter select   Esc cancel")
@@ -106,9 +129,20 @@ func (component popupViewComponent) renderFileActionPopup() string {
 		button = "generate"
 	}
 
-	lines := []string{m.popupInputLine(label, &m.input, inputWidth)}
+	if m.fileActionUsesButtons() {
+		fieldLabel := strings.TrimSuffix(label, ":")
+		labelWidth := lipgloss.Width(fieldLabel)
+		lineWidth := importInputLineWidth(labelWidth, inputWidth)
+		lines := []string{m.formTextInputFieldLine(fieldLabel, &m.input, labelWidth, lineWidth)}
+		lines = append(lines, "", m.formActionButtonsLine(titleCaseAction(button), m.editorButtonsFocused, m.editorButtonCursor))
 
-	return m.renderPopupBoxWithActions(title, lines, "Enter "+button+"   Esc cancel")
+		return m.renderPopupBoxMinWidth(title, lines, lineWidth+4)
+	}
+
+	lines := []string{m.popupInputLine(label, &m.input, inputWidth)}
+	minInnerWidth := len(label) + 1 + inputWidth + 4
+
+	return m.renderPopupBoxWithActionsMinWidth(title, lines, "Enter "+button+"   Esc cancel", minInnerWidth)
 }
 
 func (component popupViewComponent) renderFileWriteConfirmPopup() string {
@@ -125,12 +159,24 @@ func (component popupViewComponent) renderFileWriteConfirmPopup() string {
 	default:
 	}
 
+	if m.editorPopupActiveOrStack() {
+		lines := []string{message, "", m.formActionButtonsLine("Yes", m.editorButtonsFocused, m.editorButtonCursor)}
+
+		return m.renderPopupBox("Confirm", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Confirm", []string{message}, "Enter yes   Esc cancel")
 }
 
 func (component popupViewComponent) renderUnsavedChangesPopup() string {
 	m := component.model
-	return m.renderPopupBoxWithActions("Confirm", []string{"Unsaved changes. Discard unsaved changes?"}, "Enter discard   Esc cancel")
+	lines := []string{
+		"Unsaved changes. Discard unsaved changes?",
+		"",
+		m.formActionButtonsLine("Discard", m.editorButtonsFocused, m.editorButtonCursor),
+	}
+
+	return m.renderPopupBox("Confirm", lines)
 }
 
 func (component popupViewComponent) renderRandomValuePopup() string {
@@ -139,10 +185,30 @@ func (component popupViewComponent) renderRandomValuePopup() string {
 
 	lines := make([]string, 0, len(items))
 	for i, item := range items {
-		lines = append(lines, m.singleSelectLine(item.label, i == m.randomCursor, i == m.randomCursor))
+		focused := i == m.randomCursor && (!m.editorPopupActiveOrStack() || !m.editorButtonsFocused)
+		lines = append(lines, m.singleSelectLine(item.label, i == m.randomCursor, focused))
+	}
+
+	if m.editorPopupActiveOrStack() {
+		lines = append(lines, "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Random Value", lines)
 	}
 
 	return m.renderPopupBoxWithActions("Random Value", lines, "Enter select   Esc cancel")
+}
+
+func titleCaseAction(action string) string {
+	switch action {
+	case "load":
+		return "Load"
+	case "write":
+		return "Write"
+	case "generate":
+		return "Generate"
+	default:
+		return action
+	}
 }
 
 func (component popupViewComponent) sortOptionLines() []string {
@@ -191,12 +257,9 @@ func (component popupViewComponent) renderConfirmPopup() string {
 		lines = append(lines, line)
 	}
 
-	if m.confirmExpected != "" {
-		prefix := "Type " + m.value(m.confirmExpected) + " to confirm: "
-		lines = append(lines, "", m.popupInputLinePlainPrefix(prefix, &m.input, max(len(m.confirmExpected)+1, 18)))
-	}
+	lines = append(lines, "", m.formActionButtonsLine("Confirm", true, m.confirmButtonCursor))
 
-	return m.renderPopupBoxWithActions("Confirm", lines, "Enter confirm   Esc cancel")
+	return m.renderPopupBox("Confirm", lines)
 }
 
 // renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.
@@ -228,6 +291,12 @@ func (component popupViewComponent) renderRegionSelectPopup() string {
 		return m.renderPopupBox("Region", lines)
 	}
 
+	if m.editorSelectorActive() {
+		lines := append(m.regionSelectLines(), "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Region", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Region", m.regionSelectLines(), "Enter select   Esc cancel")
 }
 
@@ -250,7 +319,9 @@ func (component popupViewComponent) regionSelectLines() []string {
 			label = "none"
 		}
 
-		focused := i == m.regionCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		focused := i == m.regionCursor &&
+			(!m.importSelectorActive() || !m.importButtonsFocused) &&
+			(!m.editorSelectorActive() || !m.editorButtonsFocused)
 		lines = append(lines, m.singleSelectLine(label, i == m.regionCursor, focused))
 	}
 
@@ -286,6 +357,12 @@ func (component popupViewComponent) renderTypeSelectPopup() string {
 		return m.renderPopupBox("Parameter Type", lines)
 	}
 
+	if m.editorSelectorActive() {
+		lines := append(m.typeSelectLines(), "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Parameter Type", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Parameter Type", m.typeSelectLines(), "Enter select   Esc cancel")
 }
 
@@ -293,6 +370,12 @@ func (component popupViewComponent) renderTierSelectPopup() string {
 	m := component.model
 	if m.importSelectorActive() {
 		lines := append(m.tierSelectLines(), "", m.importActionButtonsLine("Select"))
+
+		return m.renderPopupBox("Parameter Tier", lines)
+	}
+
+	if m.editorSelectorActive() {
+		lines := append(m.tierSelectLines(), "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
 
 		return m.renderPopupBox("Parameter Tier", lines)
 	}
@@ -308,11 +391,23 @@ func (component popupViewComponent) renderDataTypeSelectPopup() string {
 		return m.renderPopupBox("Data Type", lines)
 	}
 
+	if m.editorSelectorActive() {
+		lines := append(m.dataTypeSelectLines(), "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Data Type", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Data Type", m.dataTypeSelectLines(), "Enter select   Esc cancel")
 }
 
 func (component popupViewComponent) renderOverwriteSelectPopup() string {
 	m := component.model
+	if m.editorSelectorActive() {
+		lines := append(m.overwriteSelectLines(), "", m.formActionButtonsLine("Select", m.editorButtonsFocused, m.editorButtonCursor))
+
+		return m.renderPopupBox("Overwrite", lines)
+	}
+
 	return m.renderPopupBoxWithActions("Overwrite", m.overwriteSelectLines(), "Enter select   Esc cancel")
 }
 
@@ -329,7 +424,9 @@ func (component popupViewComponent) typeSelectLines() []string {
 
 	for i, it := range typeItems {
 		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
-		focused := i == m.typeCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		focused := i == m.typeCursor &&
+			(!m.importSelectorActive() || !m.importButtonsFocused) &&
+			(!m.editorSelectorActive() || !m.editorButtonsFocused)
 		lines = append(lines, m.singleSelectLine(row, i == m.typeCursor, focused))
 	}
 
@@ -349,7 +446,9 @@ func (component popupViewComponent) tierSelectLines() []string {
 
 	for i, it := range tierItems {
 		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
-		focused := i == m.tierCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		focused := i == m.tierCursor &&
+			(!m.importSelectorActive() || !m.importButtonsFocused) &&
+			(!m.editorSelectorActive() || !m.editorButtonsFocused)
 		lines = append(lines, m.singleSelectLine(row, i == m.tierCursor, focused))
 	}
 
@@ -369,7 +468,9 @@ func (component popupViewComponent) dataTypeSelectLines() []string {
 
 	for i, it := range dataTypeItems {
 		row := optionLabelWithDescription(m.importOptionalSelectorLabel(it.label), it.description)
-		focused := i == m.dataTypeCursor && (!m.importSelectorActive() || !m.importButtonsFocused)
+		focused := i == m.dataTypeCursor &&
+			(!m.importSelectorActive() || !m.importButtonsFocused) &&
+			(!m.editorSelectorActive() || !m.editorButtonsFocused)
 		lines = append(lines, m.singleSelectLine(row, i == m.dataTypeCursor, focused))
 	}
 
@@ -400,7 +501,8 @@ func (component popupViewComponent) overwriteSelectLines() []string {
 
 	for i, it := range overwriteItems {
 		row := fmt.Sprintf("%s — %s", it.label, it.description)
-		lines = append(lines, m.singleSelectLine(row, i == m.overwriteCursor, i == m.overwriteCursor))
+		focused := i == m.overwriteCursor && (!m.editorSelectorActive() || !m.editorButtonsFocused)
+		lines = append(lines, m.singleSelectLine(row, i == m.overwriteCursor, focused))
 	}
 
 	return lines

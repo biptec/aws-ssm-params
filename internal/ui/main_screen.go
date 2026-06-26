@@ -109,7 +109,11 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		if len(m.visible()) > 0 {
 			items := inventory.Items{m.currentItem()}
 			if m.opts.NoConfirmDeleteOne {
-				return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				changed := m.applyLocalDeleteItems(items)
+				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
+				m.ensureSelection()
+
+				return m, nil
 			}
 
 			m.startConfirm("Delete selected parameter?", "", items, screenMain)
@@ -118,11 +122,52 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		items := m.visibleItems()
 		if len(items) > 0 {
 			if m.opts.NoConfirmDeleteAll {
-				return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+				changed := m.applyLocalDeleteItems(items)
+				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press P to push all.", changed)
+				m.ensureSelection()
+
+				return m, nil
 			}
 
-			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "DELETE ALL", items, screenMain)
+			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "", items, screenMain)
 		}
+	case "r":
+		operation, ok := m.revertCurrentLocalChange()
+		if !ok {
+			m.message = "No local change to revert."
+			m.errMessage = ""
+			m.warningMessage = ""
+			return m, nil
+		}
+
+		m.message = fmt.Sprintf("Reverted %s local change.", operation)
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.applySortWithRules(m.sortRulesOrDefault())
+	case "p":
+		indexes := m.currentDirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No local change to push."
+			m.errMessage = ""
+			m.warningMessage = ""
+			return m, nil
+		}
+
+		statuses := m.dirtyStatuses(indexes)
+		m.busyMessage = "Pushing local change..."
+		m.loadingTitle = ""
+
+		return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+	case "P":
+		indexes := m.dirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No local changes to push."
+			m.errMessage = ""
+			m.warningMessage = ""
+			return m, nil
+		}
+
+		m.startPushAllConfirm(fmt.Sprintf("Push %d local change(s)?", len(indexes)), screenMain)
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenMain)
 	}

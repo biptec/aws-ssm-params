@@ -37,10 +37,46 @@ type Status struct {
 	User         string
 	Value        string
 	Error        string
+
+	State         parameterState
+	PendingState  parameterState
+	Cloud         parameterSnapshot
+	PushError     string
+	DraftType     ssm.ParameterType
+	DraftOptions  ssm.PutParameterOptions
 }
 
 // Statuses is an ordered collection of parameter statuses.
 type Statuses []Status
+
+type parameterState string
+
+const (
+	parameterStateClean    parameterState = ""
+	parameterStateModified parameterState = "MOD"
+	parameterStateNew      parameterState = "NEW"
+	parameterStateDeleted  parameterState = "DEL"
+	parameterStateError    parameterState = "ERR"
+)
+
+type parameterSnapshot struct {
+	Item         inventory.Item
+	Pending      bool
+	Exists       bool
+	Empty        bool
+	Type         string
+	Tier         string
+	DataType     string
+	Policies     string
+	Version      int64
+	Length       int
+	SHA256Prefix string
+	Modified     string
+	Description  string
+	User         string
+	Value        string
+	Error        string
+}
 
 type statusSortRule struct {
 	field      string
@@ -157,6 +193,8 @@ func (rules StatusSort) with(field string, descending bool) StatusSort {
 
 func (rule statusSortRule) value(status *Status) string {
 	switch rule.field {
+	case "state":
+		return status.StateLabel()
 	case textio.FieldName:
 		return status.Item.Path
 	case textio.FieldRegion:
@@ -192,6 +230,8 @@ func normalizeStatusSortField(field string) (string, bool) {
 	field = strings.ToLower(strings.TrimSpace(field))
 
 	switch field {
+	case "state":
+		return "state", true
 	case textio.FieldName, "path":
 		return textio.FieldName, true
 	case textio.FieldRegion,
@@ -262,6 +302,245 @@ func (status *Status) Label() string {
 	}
 
 	return "OK"
+}
+
+func (status Status) StateLabel() string {
+	return string(status.State)
+}
+
+func (status Status) HasLocalChanges() bool {
+	return status.State != parameterStateClean
+}
+
+func (status Status) IsNewLocal() bool {
+	return status.PendingOperation() == parameterStateNew
+}
+
+func (status Status) PendingOperation() parameterState {
+	if status.State == parameterStateError && status.PendingState != parameterStateClean {
+		return status.PendingState
+	}
+
+	return status.State
+}
+
+func (status Status) snapshot() parameterSnapshot {
+	return parameterSnapshot{
+		Item:         status.Item,
+		Pending:      status.Pending,
+		Exists:       status.Exists,
+		Empty:        status.Empty,
+		Type:         status.Type,
+		Tier:         status.Tier,
+		DataType:     status.DataType,
+		Policies:     status.Policies,
+		Version:      status.Version,
+		Length:       status.Length,
+		SHA256Prefix: status.SHA256Prefix,
+		Modified:     status.Modified,
+		Description:  status.Description,
+		User:         status.User,
+		Value:        status.Value,
+		Error:        status.Error,
+	}
+}
+
+func (snapshot parameterSnapshot) status() Status {
+	return Status{
+		Item:         snapshot.Item,
+		Pending:      snapshot.Pending,
+		Exists:       snapshot.Exists,
+		Empty:        snapshot.Empty,
+		Type:         snapshot.Type,
+		Tier:         snapshot.Tier,
+		DataType:     snapshot.DataType,
+		Policies:     snapshot.Policies,
+		Version:      snapshot.Version,
+		Length:       snapshot.Length,
+		SHA256Prefix: snapshot.SHA256Prefix,
+		Modified:     snapshot.Modified,
+		Description:  snapshot.Description,
+		User:         snapshot.User,
+		Value:        snapshot.Value,
+		Error:        snapshot.Error,
+	}
+}
+
+func (snapshot parameterSnapshot) isZero() bool {
+	return snapshot.Item.Path == "" &&
+		snapshot.Item.Region == "" &&
+		!snapshot.Pending &&
+		!snapshot.Exists &&
+		!snapshot.Empty &&
+		snapshot.Type == "" &&
+		snapshot.Tier == "" &&
+		snapshot.DataType == "" &&
+		snapshot.Policies == "" &&
+		snapshot.Version == 0 &&
+		snapshot.Length == 0 &&
+		snapshot.SHA256Prefix == "" &&
+		snapshot.Modified == "" &&
+		snapshot.Description == "" &&
+		snapshot.User == "" &&
+		snapshot.Value == "" &&
+		snapshot.Error == ""
+}
+
+func (snapshot parameterSnapshot) sameLocalValue(status *Status) bool {
+	if status == nil {
+		return false
+	}
+
+	return snapshot.Item.Path == status.Item.Path &&
+		snapshot.Item.Region == status.Item.Region &&
+		snapshot.Exists == status.Exists &&
+		snapshot.Type == status.Type &&
+		snapshot.Tier == status.Tier &&
+		snapshot.DataType == status.DataType &&
+		snapshot.Policies == status.Policies &&
+		snapshot.Description == status.Description &&
+		snapshot.Value == status.Value
+}
+
+func (status *Status) ensureCloudSnapshot() {
+	if status.Cloud.isZero() {
+		status.Cloud = status.snapshot()
+	}
+}
+
+func (status *Status) clearLocalState() {
+	status.State = parameterStateClean
+	status.PendingState = parameterStateClean
+	status.Cloud = parameterSnapshot{}
+	status.PushError = ""
+	status.DraftType = ""
+	status.DraftOptions = ssm.PutParameterOptions{}
+}
+
+func (status *Status) refreshDerivedFields() {
+	status.Length = len(status.Value)
+	status.Empty = status.Exists && status.Value == ""
+	if status.Value == "" {
+		status.SHA256Prefix = ""
+		return
+	}
+
+	status.SHA256Prefix = hashPrefix(status.Value)
+}
+
+func (status *Status) applyLocalModification(cloud parameterSnapshot, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) {
+	status.Cloud = cloud
+	status.PendingState = parameterStateModified
+	status.State = parameterStateModified
+	status.PushError = ""
+	status.DraftType = parameterType
+	status.DraftOptions = opts
+	status.refreshDerivedFields()
+
+	if cloud.sameLocalValue(status) {
+		status.clearLocalState()
+	}
+}
+
+func (status *Status) applyLocalCreate(parameterType ssm.ParameterType, opts ssm.PutParameterOptions) {
+	status.State = parameterStateNew
+	status.PendingState = parameterStateNew
+	status.Cloud = parameterSnapshot{}
+	status.PushError = ""
+	status.DraftType = parameterType
+	status.DraftOptions = opts
+	status.refreshDerivedFields()
+}
+
+func (status *Status) applyLocalDelete() {
+	status.ensureCloudSnapshot()
+	cloud := status.Cloud
+	if !cloud.isZero() {
+		*status = cloud.status()
+		status.Cloud = cloud
+	}
+
+	status.State = parameterStateDeleted
+	status.PendingState = parameterStateDeleted
+	status.PushError = ""
+}
+
+func (status *Status) applyPushError(operation parameterState, err error) {
+	if operation == parameterStateClean {
+		operation = status.PendingOperation()
+	}
+
+	status.State = parameterStateError
+	status.PendingState = operation
+	if err != nil {
+		status.PushError = err.Error()
+	}
+}
+
+func (status Status) pushType() ssm.ParameterType {
+	if status.DraftType.IsValid() {
+		return status.DraftType
+	}
+
+	if parameterType, err := ssm.ParseParameterType(status.Type); err == nil {
+		return parameterType
+	}
+
+	return ssm.DefaultParameterType
+}
+
+func (status Status) pushOptions() ssm.PutParameterOptions {
+	opts := status.DraftOptions
+	if !opts.Tier.IsValid() {
+		if tier, err := ssm.ParseParameterTier(status.Tier); err == nil {
+			opts.Tier = tier
+		}
+	}
+
+	if !opts.Tier.IsValid() {
+		opts.Tier = ssm.DefaultParameterTier
+	}
+
+	if !opts.DataType.IsValid() {
+		if dataType, err := ssm.ParseParameterDataType(status.DataType); err == nil {
+			opts.DataType = dataType
+		}
+	}
+
+	if !opts.DataType.IsValid() {
+		opts.DataType = ssm.DefaultParameterDataType
+	}
+
+	if opts.Description == "" {
+		opts.Description = status.Description
+	}
+
+	if opts.Policies == "" && status.Policies != "" {
+		opts.Policies = status.Policies
+	}
+
+	return opts
+}
+
+func (status Status) cloudStatus() Status {
+	if status.Cloud.isZero() {
+		return status
+	}
+
+	return status.Cloud.status()
+}
+
+func (status Status) localStatus() Status {
+	if status.PendingOperation() != parameterStateDeleted {
+		return status
+	}
+
+	item := status.Item
+	if !status.Cloud.isZero() {
+		item = status.Cloud.Item
+	}
+
+	return Status{Item: item, Type: ssm.DefaultParameterType.String()}
 }
 
 // DisplayLabel converts a Status into the longer labels used in the interactive table.

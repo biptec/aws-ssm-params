@@ -17,6 +17,8 @@ type popupState struct {
 	confirmPrompt   string
 	confirmExpected string
 	confirmItems    inventory.Items
+	confirmAction   confirmAction
+	confirmButtonCursor int
 
 	shortcutsFor       screen
 	shortcutsPopupFor  popupKind
@@ -43,6 +45,7 @@ const (
 	popupFileWriteConfirm
 	popupUnsavedChanges
 	popupRandomValue
+	popupEditor
 	popupImportFile
 	popupImportKeyField
 	popupImportFormat
@@ -50,6 +53,13 @@ const (
 	popupImportMapFields
 	popupImportMapPaths
 	popupImportDefaults
+)
+
+type confirmAction int
+
+const (
+	confirmActionDelete confirmAction = iota
+	confirmActionPushAll
 )
 
 func (m *popupState) openShortcuts(from screen) {
