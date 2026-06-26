@@ -321,6 +321,16 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 	case "ctrl+s":
 		resetFileConfirmation()
 		return m.saveValue(m.textArea.Value())
+	case "backspace", "ctrl+h":
+		if isEditableTextField(m.editField) && m.activeTextDeleteBackward() {
+			m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
+			m.pendingFileWrite = fileWriteConfirmationNone
+			m.warningMessage = ""
+			m.message = ""
+			m.errMessage = ""
+
+			return m, nil
+		}
 	}
 
 	if updated, handled := m.updateEmacsTextFieldKey(key); handled {

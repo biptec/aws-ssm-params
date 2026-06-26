@@ -58,8 +58,10 @@ const (
 
 const rawLeftLinePrefix = "\x00raw-left\x00"
 
-const encryptedPlaceholderText = "(encrypted)"
-const nonePlaceholderText = "none"
+const (
+	encryptedPlaceholderText = "(encrypted)"
+	nonePlaceholderText      = "none"
+)
 
 const loadingSpinnerInterval = 120 * time.Millisecond
 
@@ -153,11 +155,11 @@ var (
 	emptyFg          = lipgloss.Color("45")
 	errFg            = lipgloss.Color("203")
 	stateModifiedFg  = lipgloss.Color("39")
-	stateNewFg       = lipgloss.Color("42")
-	stateDeletedFg   = lipgloss.Color("160")
+	stateNewFg       = lipgloss.Color("35")
+	stateDeletedFg   = lipgloss.Color("166")
 	stateErrorFg     = lipgloss.Color("88")
-	diffCloudFg      = lipgloss.Color("203")
-	diffLocalFg      = lipgloss.Color("42")
+	diffCloudFg      = lipgloss.Color("166")
+	diffLocalFg      = lipgloss.Color("35")
 	tableHeaderFg    = lipgloss.Color("250")
 	searchPromptFg   = lipgloss.Color("81")
 	statusLineFg     = lipgloss.Color("244")
@@ -359,6 +361,16 @@ func (m *model) setActiveTextValueAndCursor(value string, pos int) {
 	component.setActiveTextValueAndCursor(value, pos)
 }
 
+func (m *model) setTextFieldValueAndCursor(field editField, value string, pos int) {
+	component := newEditorCursor(m)
+	component.setTextFieldValueAndCursor(field, value, pos)
+}
+
+func (m *model) activeTextDeleteBackward() bool {
+	component := newEditorCursor(m)
+	return component.activeTextDeleteBackward()
+}
+
 func (m *model) textAreaCursorAbs() int {
 	component := newEditorCursor(m)
 	return component.textAreaCursorAbs()
@@ -398,11 +410,11 @@ func (m *model) startConfirm(prompt, expected string, items inventory.Items, ret
 	component.startConfirm(prompt, expected, items, ret)
 }
 
-func (m *model) startPushAllConfirm(prompt string, ret screen) {
+func (m *model) startPushConfirm(prompt string, indexes []int, ret screen, withStateFilters bool) {
 	component := editorIOComponent{model: *m}
 	defer func() { *m = component.model }()
 
-	component.startPushAllConfirm(prompt, ret)
+	component.startPushConfirm(prompt, indexes, ret, withStateFilters)
 }
 
 func (m model) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
@@ -838,6 +850,12 @@ func (m model) renderLoadingPopup() string {
 func (m model) updateSortPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	component := popupUpdateComponent{model: m}
 	return component.updateSortPopup(msg)
+}
+
+func (m *model) openSortPopup() {
+	component := newTableSorter(m)
+	component.openSortPopup()
+	m.pushPopup(popupSort)
 }
 
 func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1765,7 +1783,7 @@ func (m model) View() string {
 	case screenLoading:
 		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
-		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "")
+		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "", m.mainListFiltered())
 		if m.searchMode {
 			footer = searchFooterText()
 		}
@@ -1786,6 +1804,10 @@ func (m model) View() string {
 	default:
 		return ""
 	}
+}
+
+func (m model) mainListFiltered() bool {
+	return len(m.opts.FilterGroups) > 0 || m.isFiltered()
 }
 
 func (m model) renderPage(footerText string, renderBody func(model) string) string {

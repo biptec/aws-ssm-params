@@ -14,11 +14,15 @@ type popupState struct {
 	randomCursor      int
 	valueActionCursor int
 
-	confirmPrompt   string
-	confirmExpected string
-	confirmItems    inventory.Items
-	confirmAction   confirmAction
-	confirmButtonCursor int
+	confirmPrompt              string
+	confirmExpected            string
+	confirmItems               inventory.Items
+	confirmAction              confirmAction
+	confirmButtonCursor        int
+	confirmFocus               int
+	confirmStatusIndexes       []int
+	confirmStateFilterOrder    []parameterState
+	confirmStateFilterSelected map[parameterState]bool
 
 	shortcutsFor       screen
 	shortcutsPopupFor  popupKind
@@ -59,7 +63,12 @@ type confirmAction int
 
 const (
 	confirmActionDelete confirmAction = iota
-	confirmActionPushAll
+	confirmActionPush
+)
+
+const (
+	confirmFocusPrimaryButton = -2
+	confirmFocusCancelButton  = -1
 )
 
 func (m *popupState) openShortcuts(from screen) {

@@ -21,6 +21,14 @@ func newTableSorter(m *model) tableSorter {
 	}
 }
 
+func (component *tableSorter) openSortPopup() {
+	m := component
+	m.sortCursor = m.sortCursorForCurrentSort()
+	m.sortButtonsFocused = false
+	m.sortButtonCursor = importActionPrimary
+	m.sortSnapshot = nil
+}
+
 func (component tableSorter) columnAllowed(column columnName) bool {
 	return component.columnAllowedFn(column)
 }
@@ -385,6 +393,15 @@ func (component tableSorter) columnHeader(c columnName) string {
 
 	if c == columnIndex {
 		return "#"
+	}
+
+	if c == columnState {
+		header := "STS"
+		if rule, ok := m.sortRules.find(c); ok {
+			header += " " + rule.directionArrow()
+		}
+
+		return header
 	}
 
 	header := strings.ToUpper(c.Label())

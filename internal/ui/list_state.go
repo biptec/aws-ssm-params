@@ -103,6 +103,10 @@ func (m *listState) visibleItems() inventory.Items {
 	return out
 }
 
+func (m *listState) isFiltered() bool {
+	return m.effectiveQuery != "" || len(m.visible()) < len(m.statuses)
+}
+
 // ensureSelection clamps the selected row so it always points at a visible item when possible.
 func (m *listState) ensureSelection() {
 	vis := m.visible()
@@ -218,6 +222,17 @@ func (m *listState) dirtyStatusIndexes() []int {
 	return out
 }
 
+func (m *listState) visibleDirtyStatusIndexes() []int {
+	out := []int{}
+	for _, idx := range m.visible() {
+		if idx >= 0 && idx < len(m.statuses) && m.statuses[idx].HasLocalChanges() {
+			out = append(out, idx)
+		}
+	}
+
+	return out
+}
+
 func (m *listState) currentDirtyStatusIndexes() []int {
 	idx := m.currentStatusIndex()
 	if idx < 0 || !m.statuses[idx].HasLocalChanges() {
@@ -235,6 +250,21 @@ func (m *listState) dirtyStatuses(indexes []int) []Status {
 		}
 
 		out = append(out, m.statuses[idx])
+	}
+
+	return out
+}
+
+func (m *listState) dirtyStatusIndexesByState(indexes []int, allowed map[parameterState]bool) []int {
+	out := make([]int, 0, len(indexes))
+	for _, idx := range indexes {
+		if idx < 0 || idx >= len(m.statuses) || !m.statuses[idx].HasLocalChanges() {
+			continue
+		}
+
+		if allowed[m.statuses[idx].PendingOperation()] {
+			out = append(out, idx)
+		}
 	}
 
 	return out
@@ -285,24 +315,44 @@ func (m *listState) revertCurrentLocalChange() (parameterState, bool) {
 		return parameterStateClean, false
 	}
 
+	operation, ok := m.revertLocalChangeAt(idx)
+	m.ensureSelection()
+
+	return operation, ok
+}
+
+func (m *listState) revertLocalChanges(indexes []int) int {
+	changed := 0
+	for i := len(indexes) - 1; i >= 0; i-- {
+		if _, ok := m.revertLocalChangeAt(indexes[i]); ok {
+			changed++
+		}
+	}
+
+	m.ensureSelection()
+
+	return changed
+}
+
+func (m *listState) revertLocalChangeAt(idx int) (parameterState, bool) {
+	if idx < 0 || idx >= len(m.statuses) || !m.statuses[idx].HasLocalChanges() {
+		return parameterStateClean, false
+	}
+
 	status := m.statuses[idx]
 	operation := status.PendingOperation()
 	if operation == parameterStateNew {
 		m.statuses = append(m.statuses[:idx], m.statuses[idx+1:]...)
-		m.ensureSelection()
 		return operation, true
 	}
 
 	if !status.Cloud.isZero() {
-		reverted := status.Cloud.status()
-		m.statuses[idx] = reverted
-		m.ensureSelection()
+		m.statuses[idx] = status.Cloud.status()
 		return operation, true
 	}
 
 	status.clearLocalState()
 	m.statuses[idx] = status
-	m.ensureSelection()
 
 	return operation, true
 }

@@ -239,6 +239,10 @@ func (component *editorIOComponent) startConfirm(prompt, expected string, items 
 	m.confirmItems = items
 	m.confirmAction = confirmActionDelete
 	m.confirmButtonCursor = importActionPrimary
+	m.confirmFocus = confirmFocusPrimaryButton
+	m.confirmStatusIndexes = nil
+	m.confirmStateFilterOrder = nil
+	m.confirmStateFilterSelected = nil
 	m.returnScreen = ret
 	m.input.SetValue("")
 	m.input.Placeholder = ""
@@ -247,19 +251,50 @@ func (component *editorIOComponent) startConfirm(prompt, expected string, items 
 	m.pushPopup(popupConfirm)
 }
 
-func (component *editorIOComponent) startPushAllConfirm(prompt string, ret screen) {
+func (component *editorIOComponent) startPushConfirm(prompt string, indexes []int, ret screen, withStateFilters bool) {
 	m := &component.model
 	m.confirmPrompt = prompt
 	m.confirmExpected = ""
 	m.confirmItems = nil
-	m.confirmAction = confirmActionPushAll
+	m.confirmAction = confirmActionPush
 	m.confirmButtonCursor = importActionPrimary
+	m.confirmFocus = confirmFocusPrimaryButton
+	m.confirmStatusIndexes = append([]int(nil), indexes...)
+	if withStateFilters {
+		m.confirmStateFilterOrder = component.confirmPushStateFilterOrder(indexes)
+	} else {
+		m.confirmStateFilterOrder = nil
+	}
+	m.confirmStateFilterSelected = map[parameterState]bool{}
+	for _, state := range m.confirmStateFilterOrder {
+		m.confirmStateFilterSelected[state] = true
+	}
 	m.returnScreen = ret
 	m.input.SetValue("")
 	m.input.Placeholder = ""
 	m.input.Blur()
 	m.errMessage = ""
 	m.pushPopup(popupConfirm)
+}
+
+func (component editorIOComponent) confirmPushStateFilterOrder(indexes []int) []parameterState {
+	m := component.model
+	seen := map[parameterState]bool{}
+	order := []parameterState{}
+	for _, state := range []parameterState{parameterStateNew, parameterStateModified, parameterStateDeleted} {
+		for _, idx := range indexes {
+			if idx < 0 || idx >= len(m.statuses) {
+				continue
+			}
+
+			if m.statuses[idx].PendingOperation() == state && !seen[state] {
+				seen[state] = true
+				order = append(order, state)
+			}
+		}
+	}
+
+	return order
 }
 
 func (component editorIOComponent) startRandomFromPopup(kind string) (tea.Model, tea.Cmd) {
@@ -399,9 +434,6 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 	}
 
 	description := strings.TrimSpace(m.editDescriptionArea.Value())
-	if description == "" {
-		description = strings.TrimSpace(m.editDescriptionInput.Value())
-	}
 
 	opts := ssm.PutParameterOptions{Description: description, Tier: m.normalizedEditTier(), DataType: m.normalizedEditDataType(), Policies: policies, PoliciesSet: policiesSet, Overwrite: overwrite}
 	local := Status{Item: item, Exists: true, Type: m.normalizedEditType().String(), Tier: m.normalizedEditTier().String(), DataType: m.normalizedEditDataType().String(), Policies: localPolicies, Description: description, Value: value}

@@ -66,6 +66,17 @@ type runner struct {
 	recordErrors    []string
 }
 
+// PlannedRecord is one validated import record after path mapping, filtering,
+// existing-parameter lookup, and put-option resolution.
+type PlannedRecord struct {
+	Record   textio.Record
+	Region   string
+	Existing ssm.Metadata
+	Exists   bool
+	Type     ssm.ParameterType
+	Options  ssm.PutParameterOptions
+}
+
 // Summary contains the final per-operation import counters.
 type Summary struct {
 	Created int
@@ -74,7 +85,39 @@ type Summary struct {
 	Failed  int
 }
 
+// Plan reads import input and resolves the exact local write plan without
+// sending any changes to Parameter Store.
+func Plan(ctx context.Context, opts *Options, input io.Reader, client ssmclient.Client) ([]PlannedRecord, error) {
+	r, err := newRunnerWithClient(ctx, opts, input, io.Discard, client)
+	if err != nil {
+		return nil, err
+	}
+
+	planned := make([]PlannedRecord, 0, len(r.records))
+	for i := range r.records {
+		record, err := r.planRecord(&r.records[i])
+		if err != nil {
+			return nil, err
+		}
+
+		planned = append(planned, record)
+	}
+
+	return planned, nil
+}
+
 func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer, deps dependencies) (*runner, error) {
+	client := deps.newClient(ssmclient.Config{
+		Profile:        opts.Profile,
+		Region:         opts.Region,
+		WithDecryption: opts.WithDecryption,
+		Logger:         opts.Logger,
+	})
+
+	return newRunnerWithClient(ctx, opts, input, summaryOutput, client)
+}
+
+func newRunnerWithClient(ctx context.Context, opts *Options, input io.Reader, summaryOutput io.Writer, client ssmclient.Client) (*runner, error) {
 	if summaryOutput == nil {
 		summaryOutput = io.Discard
 	}
@@ -120,12 +163,6 @@ func newRunner(ctx context.Context, opts *Options, input io.Reader, summaryOutpu
 		return nil, errors.New("import requires the value field")
 	}
 
-	client := deps.newClient(ssmclient.Config{
-		Profile:        opts.Profile,
-		Region:         opts.Region,
-		WithDecryption: opts.WithDecryption,
-		Logger:         opts.Logger,
-	})
 	recordResolver := newRecordResolver(ctx, client, records, opts)
 
 	return &runner{
@@ -164,46 +201,32 @@ func (r *runner) run(ctx context.Context) error {
 }
 
 func (r *runner) processRecord(ctx context.Context, record *textio.Record) error {
-	region, existing, exists, err := r.recordResolver.resolveExisting(record)
+	planned, err := r.planRecord(record)
 	if err != nil {
-		return r.handleRecordError(writeOperationUpdate, region, record.Path, err)
+		operation, _ := r.policy.operation(planned.Exists)
+
+		return r.handleRecordError(operation, planned.Region, record.Path, err)
 	}
 
-	operation, policyAction := r.policy.operation(exists)
-	if strings.TrimSpace(record.Value) == "" {
-		return r.handleRecordError(operation, region, record.Path, errors.New("import record value is required"))
-	}
-
-	shouldWrite, err := r.resolvePolicy(policyAction, operation, region, record.Path)
+	operation, policyAction := r.policy.operation(planned.Exists)
+	shouldWrite, err := r.resolvePolicy(policyAction, operation, planned.Region, record.Path)
 	if err != nil {
-		return r.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, planned.Region, record.Path, err)
 	}
 
 	if !shouldWrite {
-		logSkipped(r.opts.Logger, operation, policyAction, region, record.Path)
+		logSkipped(r.opts.Logger, operation, policyAction, planned.Region, record.Path)
 		r.summary.Skipped++
 
 		return nil
 	}
 
-	parameterType, err := r.recordResolver.parameterType(&existing, exists, record)
-	if err != nil {
-		return r.handleRecordError(operation, region, record.Path, err)
-	}
-
-	opts, err := r.recordResolver.putOptions(record, &existing, exists)
-	if err != nil {
-		return r.handleRecordError(operation, region, record.Path, err)
-	}
-
-	opts.Overwrite = exists
-
 	if r.dryRun {
-		if err := r.writeDryRun(operation, region, record.Path); err != nil {
-			return r.handleRecordError(operation, region, record.Path, err)
+		if err := r.writeDryRun(operation, planned.Region, record.Path); err != nil {
+			return r.handleRecordError(operation, planned.Region, record.Path, err)
 		}
 
-		if exists {
+		if planned.Exists {
 			r.summary.Updated++
 		} else {
 			r.summary.Created++
@@ -212,24 +235,52 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 		return nil
 	}
 
-	err = r.client.ForRegion(region).PutParameterWithOptions(
+	err = r.client.ForRegion(planned.Region).PutParameterWithOptions(
 		ctx,
 		record.Path,
 		record.Value,
-		parameterType,
-		opts,
+		planned.Type,
+		planned.Options,
 	)
 	if err != nil {
-		return r.handleRecordError(operation, region, record.Path, err)
+		return r.handleRecordError(operation, planned.Region, record.Path, err)
 	}
 
-	if exists {
+	if planned.Exists {
 		r.summary.Updated++
 	} else {
 		r.summary.Created++
 	}
 
 	return nil
+}
+
+func (r *runner) planRecord(record *textio.Record) (PlannedRecord, error) {
+	region, existing, exists, err := r.recordResolver.resolveExisting(record)
+	planned := PlannedRecord{Record: *record, Region: region, Existing: existing, Exists: exists}
+	if err != nil {
+		return planned, err
+	}
+
+	if strings.TrimSpace(record.Value) == "" {
+		return planned, errors.New("import record value is required")
+	}
+
+	parameterType, err := r.recordResolver.parameterType(&existing, exists, record)
+	if err != nil {
+		return planned, err
+	}
+
+	opts, err := r.recordResolver.putOptions(record, &existing, exists)
+	if err != nil {
+		return planned, err
+	}
+
+	opts.Overwrite = exists
+	planned.Type = parameterType
+	planned.Options = opts
+
+	return planned, nil
 }
 
 func (r *runner) resolvePolicy(action PolicyAction, operation writeOperation, region, name string) (bool, error) {

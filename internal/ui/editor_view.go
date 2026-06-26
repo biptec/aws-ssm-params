@@ -98,10 +98,6 @@ func (component editorViewComponent) editorExpandableFieldViews() []editorExpand
 
 	if m.editFieldAllowed(editFieldDescription) {
 		descriptionArea := m.editDescriptionArea
-		if descriptionArea.Value() == "" && m.editDescriptionInput.Value() != "" {
-			descriptionArea.SetValue(m.editDescriptionInput.Value())
-		}
-
 		fields = append(fields, editorExpandableFieldView{field: editFieldDescription, label: "Description", area: &descriptionArea})
 	}
 
@@ -401,16 +397,6 @@ func (component editorViewComponent) editorPopupLineWidth() int {
 	}
 	if m.shouldShowOverwriteField() {
 		valueWidth = max(valueWidth, lipgloss.Width(strconv.FormatBool(m.editOverwrite))+1)
-	}
-
-	for _, field := range component.editorExpandableFieldViews() {
-		if field.area == nil {
-			continue
-		}
-
-		for _, line := range strings.Split(strings.ReplaceAll(field.area.Value(), "\r", ""), "\n") {
-			valueWidth = max(valueWidth, lipgloss.Width(line)+1)
-		}
 	}
 
 	lineWidth := max(editorPopupMinContentLineWidth(), importInputLineWidth(labelWidth, valueWidth))

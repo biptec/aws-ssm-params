@@ -976,12 +976,12 @@ func TestMainContentListHeightUsesStatusSpaceOnlyWhenMessageExists(t *testing.T)
 	m.height = 40
 
 	withoutStatusContent := m
-	withoutStatusContent.height = m.height - countLines(m.renderFooterWithStatus(mainFooterText(false)))
+	withoutStatusContent.height = m.height - countLines(m.renderFooterWithStatus(mainFooterText(false, false)))
 	withoutStatus := withoutStatusContent.listBodyHeight()
 
 	m.message = "Updated /app/value"
 	withStatusContent := m
-	withStatusContent.height = m.height - countLines(m.renderFooterWithStatus(mainFooterText(false)))
+	withStatusContent.height = m.height - countLines(m.renderFooterWithStatus(mainFooterText(false, false)))
 	withStatus := withStatusContent.listBodyHeight()
 
 	assert.True(t, withoutStatus > withStatus)
@@ -1871,12 +1871,15 @@ func TestPopupTemplateAddsSharedPadding(t *testing.T) {
 }
 
 func TestMainFooterDetailsLabelIsDynamic(t *testing.T) {
-	assert.Contains(t, mainFooterText(false), "ctrl+/ help")
-	assert.Contains(t, mainFooterText(false), "d show details")
-	assert.Contains(t, mainFooterText(true), "d hide details")
-	assert.Contains(t, mainFooterText(false), "X delete visible")
-	assert.False(t, strings.Contains(mainFooterText(false), "r random"))
-	assert.False(t, strings.Contains(mainFooterText(false), "v values"))
+	assert.Contains(t, mainFooterText(false, false), "ctrl+/ help")
+	assert.Contains(t, mainFooterText(false, false), "d show details")
+	assert.Contains(t, mainFooterText(true, false), "d hide details")
+	assert.Contains(t, mainFooterText(false, false), "X delete all")
+	assert.Contains(t, mainFooterText(false, true), "X delete filtered")
+	assert.Contains(t, mainFooterText(false, false), "R revert all")
+	assert.Contains(t, mainFooterText(false, true), "R revert filtered")
+	assert.False(t, strings.Contains(mainFooterText(false, false), "r random"))
+	assert.False(t, strings.Contains(mainFooterText(false, false), "v values"))
 }
 
 func TestViKeymapNavigatesMainRowsAndSupportsGG(t *testing.T) {

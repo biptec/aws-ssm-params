@@ -99,8 +99,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 	case "c":
 		m.openColumnsPopup()
 	case "s":
-		m.sortCursor = m.sortCursorForCurrentSort()
-		m.pushPopup(popupSort)
+		m.openSortPopup()
 	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		if col, ok := m.visibleSortColumnByHotkey(key); ok {
 			m.applySort(col)
@@ -121,9 +120,10 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 	case "X":
 		items := m.visibleItems()
 		if len(items) > 0 {
+			scope := m.mainListScope()
 			if m.opts.NoConfirmDeleteAll {
 				changed := m.applyLocalDeleteItems(items)
-				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press P to push all.", changed)
+				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press P to push %s.", changed, scope)
 				m.ensureSelection()
 
 				return m, nil
@@ -144,6 +144,21 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		m.errMessage = ""
 		m.warningMessage = ""
 		m.applySortWithRules(m.sortRulesOrDefault())
+	case "R":
+		indexes := m.visibleDirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No visible local changes to revert."
+			m.errMessage = ""
+			m.warningMessage = ""
+			return m, nil
+		}
+
+		scope := m.mainListScope()
+		changed := m.revertLocalChanges(indexes)
+		m.message = fmt.Sprintf("Reverted %d %s local change(s).", changed, scope)
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.applySortWithRules(m.sortRulesOrDefault())
 	case "p":
 		indexes := m.currentDirtyStatusIndexes()
 		if len(indexes) == 0 {
@@ -153,21 +168,17 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 			return m, nil
 		}
 
-		statuses := m.dirtyStatuses(indexes)
-		m.busyMessage = "Pushing local change..."
-		m.loadingTitle = ""
-
-		return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		m.startPushConfirm("Push selected local change?", indexes, screenMain, false)
 	case "P":
-		indexes := m.dirtyStatusIndexes()
+		indexes := m.visibleDirtyStatusIndexes()
 		if len(indexes) == 0 {
-			m.message = "No local changes to push."
+			m.message = "No visible local changes to push."
 			m.errMessage = ""
 			m.warningMessage = ""
 			return m, nil
 		}
 
-		m.startPushAllConfirm(fmt.Sprintf("Push %d local change(s)?", len(indexes)), screenMain)
+		m.startPushConfirm(fmt.Sprintf("Push %d %s local change(s)?", len(indexes), m.mainListScope()), indexes, screenMain, true)
 	case "ctrl+_", "ctrl+/":
 		m.openShortcuts(screenMain)
 	}
@@ -175,6 +186,14 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 	m.ensureSelection()
 
 	return m, nil
+}
+
+func (m model) mainListScope() string {
+	if m.mainListFiltered() {
+		return "filtered"
+	}
+
+	return "all"
 }
 
 func (component *mainScreenComponent) applyMainNavigation(action navigationAction) {

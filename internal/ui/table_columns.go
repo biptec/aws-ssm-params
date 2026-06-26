@@ -8,12 +8,18 @@ import (
 )
 
 type tableState struct {
-	columns        map[columnName]bool
-	columnCursor   int
-	sortBy         columnName
-	sortDescending bool
-	sortRules      sortRules
-	sortCursor     int
+	columns               map[columnName]bool
+	columnCursor          int
+	columnButtonsFocused  bool
+	columnButtonCursor    int
+	columnSnapshot        map[columnName]bool
+	sortBy                columnName
+	sortDescending        bool
+	sortRules             sortRules
+	sortCursor            int
+	sortButtonsFocused    bool
+	sortButtonCursor      int
+	sortSnapshot          sortRules
 }
 
 type tableColumnsComponent struct {
@@ -41,6 +47,9 @@ const (
 func (component *tableColumnsComponent) openColumnsPopup() {
 	m := &component.model
 	m.columnCursor = 0
+	m.columnButtonsFocused = false
+	m.columnButtonCursor = importActionPrimary
+	m.columnSnapshot = nil
 	m.pushPopup(popupColumns)
 }
 
@@ -96,6 +105,23 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	cols := m.allowedColumnItems()
 
 	key := msg.String()
+	if (&m).navigateColumnPopupButtons(key) {
+		return m, nil
+	}
+
+	if m.columnButtonsFocused {
+		switch key {
+		case "ctrl+_", "ctrl+/":
+			m.openPopupShortcuts(screenColumns, popupColumns)
+		case "q", "esc", "ctrl+g":
+			m.closeColumnsPopup()
+		case "ctrl+m", "enter", "ctrl+j":
+			m.closeColumnsPopup()
+		}
+
+		return m, nil
+	}
+
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
@@ -117,8 +143,15 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenColumns, popupColumns)
-	case "q", "esc", "ctrl+g", "enter", "ctrl+j":
-		m.popPopup()
+	case "q", "esc", "ctrl+g":
+		m.closeColumnsPopup()
+	case "ctrl+m":
+		m.closeColumnsPopup()
+	case "enter", "ctrl+j":
+		if len(cols) > 0 {
+			key := cols[m.columnCursor]
+			m.columns[key] = !m.columns[key]
+		}
 	case " ":
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
@@ -137,6 +170,47 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	return m, nil
 }
 
+func (m *model) navigateColumnPopupButtons(key string) bool {
+	if key == "tab" {
+		m.columnButtonsFocused = !m.columnButtonsFocused
+		m.columnButtonCursor = importActionPrimary
+
+		return true
+	}
+
+	if key == "shift+tab" {
+		m.columnButtonsFocused = !m.columnButtonsFocused
+		m.columnButtonCursor = importActionPrimary
+
+		return true
+	}
+
+	if !m.columnButtonsFocused {
+		return false
+	}
+
+	switch key {
+	case "left", "right":
+		m.columnButtonCursor = importActionPrimary
+		return true
+	}
+
+	return false
+}
+
+func (m *model) applyColumnsPopup() {
+	m.closeColumnsPopup()
+}
+
+func (m *model) cancelColumnsPopup() {
+	m.closeColumnsPopup()
+}
+
+func (m *model) closeColumnsPopup() {
+	m.columnSnapshot = nil
+	m.popPopup()
+}
+
 // renderColumnsScreen renders the legacy full-screen table-column chooser.
 // The main UI now opens the same content as a popup, but keeping this renderer
 // makes the shortcuts context and focused tests straightforward.
@@ -147,7 +221,9 @@ func (component tableColumnsComponent) renderColumnsScreen() string {
 
 func (component tableColumnsComponent) renderColumnsPopup() string {
 	m := component.model
-	return m.renderPopupBoxWithActions("Columns", m.columnOptionLines(), "Esc close")
+	lines := append(m.columnOptionLines(), "", m.formSingleActionButtonLine("Close", m.columnButtonsFocused))
+
+	return m.renderPopupBox("Columns", lines)
 }
 
 func (component tableColumnsComponent) columnOptionLines() []string {
@@ -159,10 +235,19 @@ func (component tableColumnsComponent) columnOptionLines() []string {
 
 	for i, c := range cols {
 		checked := visible[c]
-		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor))
+		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor && !m.columnButtonsFocused))
 	}
 
 	return lines
+}
+
+func cloneColumnVisibility(columns map[columnName]bool) map[columnName]bool {
+	out := make(map[columnName]bool, len(columns))
+	for column, visible := range columns {
+		out[column] = visible
+	}
+
+	return out
 }
 
 // columnItems returns optional table columns in the order presented to the user.

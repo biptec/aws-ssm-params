@@ -15,6 +15,23 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 	items := m.popupSortItems()
 
 	key := msg.String()
+	if (&m).navigateSortPopupButtons(key) {
+		return m, nil
+	}
+
+	if m.sortButtonsFocused {
+		switch key {
+		case "ctrl+_", "ctrl+/":
+			m.openPopupShortcuts(screenMain, popupSort)
+		case "q", "esc", "ctrl+g":
+			m.closeSortPopup()
+		case "ctrl+m", "enter", "ctrl+j":
+			m.closeSortPopup()
+		}
+
+		return m, nil
+	}
+
 	if key != "d" {
 		if col, ok := m.popupSortColumnByLetterHotkey(key); ok {
 			m.toggleSortColumn(col)
@@ -30,7 +47,9 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenMain, popupSort)
 	case "q", "esc", "ctrl+g":
-		m.popPopup()
+		m.closeSortPopup()
+	case "ctrl+m":
+		m.closeSortPopup()
 	case " ", "enter", "ctrl+j":
 		if len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
@@ -44,6 +63,47 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 	}
 
 	return m, nil
+}
+
+func (m *model) navigateSortPopupButtons(key string) bool {
+	if key == "tab" {
+		m.sortButtonsFocused = !m.sortButtonsFocused
+		m.sortButtonCursor = importActionPrimary
+
+		return true
+	}
+
+	if key == "shift+tab" {
+		m.sortButtonsFocused = !m.sortButtonsFocused
+		m.sortButtonCursor = importActionPrimary
+
+		return true
+	}
+
+	if !m.sortButtonsFocused {
+		return false
+	}
+
+	switch key {
+	case "left", "right":
+		m.sortButtonCursor = importActionPrimary
+		return true
+	}
+
+	return false
+}
+
+func (m *model) applySortPopup() {
+	m.closeSortPopup()
+}
+
+func (m *model) cancelSortPopup() {
+	m.closeSortPopup()
+}
+
+func (m *model) closeSortPopup() {
+	m.sortSnapshot = nil
+	m.popPopup()
 }
 
 func cursorFromNavigation(cursor, length int, action navigationAction) int {
@@ -231,13 +291,23 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	}
 
 	if importEnterKey(key) {
-		if m.confirmButtonCursor == importActionCancel {
+		if m.confirmFocus == confirmFocusCancelButton {
 			m.popPopup()
+			return m, nil
+		}
+
+		if m.confirmFocus >= 0 {
+			m.toggleConfirmStateFilter(m.confirmFocus)
 			return m, nil
 		}
 
 		component.model = m
 		return component.finishConfirmAction()
+	}
+
+	if key == " " && m.confirmFocus >= 0 {
+		m.toggleConfirmStateFilter(m.confirmFocus)
+		return m, nil
 	}
 
 	return m, nil
@@ -266,29 +336,99 @@ func (m *model) navigateConfirmButtons(key string) bool {
 }
 
 func (m *model) applyConfirmButtonNavigation(action navigationAction) {
-	switch action {
-	case navPrevious, navNext, navPageUp, navPageDown:
-		if m.confirmButtonCursor == importActionPrimary {
-			m.confirmButtonCursor = importActionCancel
-		} else {
-			m.confirmButtonCursor = importActionPrimary
+	focusCount := len(m.confirmStateFilterOrder) + 2
+	if focusCount <= 2 {
+		switch action {
+		case navPrevious, navNext, navPageUp, navPageDown:
+			if m.confirmFocus == confirmFocusPrimaryButton {
+				m.confirmFocus = confirmFocusCancelButton
+			} else {
+				m.confirmFocus = confirmFocusPrimaryButton
+			}
+		case navFirst:
+			m.confirmFocus = confirmFocusPrimaryButton
+		case navLast:
+			m.confirmFocus = confirmFocusCancelButton
+		default:
 		}
+
+		m.syncConfirmButtonCursor()
+		return
+	}
+
+	current := m.confirmFocusIndex()
+	switch action {
+	case navPrevious, navPageUp:
+		current = (current - 1 + focusCount) % focusCount
+	case navNext, navPageDown:
+		current = (current + 1) % focusCount
 	case navFirst:
-		m.confirmButtonCursor = importActionPrimary
+		current = 0
 	case navLast:
-		m.confirmButtonCursor = importActionCancel
+		current = focusCount - 1
 	default:
 	}
+
+	m.confirmFocus = m.confirmFocusFromIndex(current)
+	m.syncConfirmButtonCursor()
+}
+
+func (m *model) confirmFocusIndex() int {
+	switch m.confirmFocus {
+	case confirmFocusPrimaryButton:
+		return 0
+	case confirmFocusCancelButton:
+		return 1
+	default:
+		if m.confirmFocus >= 0 {
+			return m.confirmFocus + 2
+		}
+	}
+
+	return 0
+}
+
+func (m *model) confirmFocusFromIndex(index int) int {
+	switch index {
+	case 0:
+		return confirmFocusPrimaryButton
+	case 1:
+		return confirmFocusCancelButton
+	default:
+		return index - 2
+	}
+}
+
+func (m *model) syncConfirmButtonCursor() {
+	if m.confirmFocus == confirmFocusCancelButton {
+		m.confirmButtonCursor = importActionCancel
+		return
+	}
+
+	m.confirmButtonCursor = importActionPrimary
+}
+
+func (m *model) toggleConfirmStateFilter(index int) {
+	if index < 0 || index >= len(m.confirmStateFilterOrder) {
+		return
+	}
+
+	state := m.confirmStateFilterOrder[index]
+	m.confirmStateFilterSelected[state] = !m.confirmStateFilterSelected[state]
 }
 
 func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd) {
 	m := component.model
 
 	switch m.confirmAction {
-	case confirmActionPushAll:
-		indexes := m.dirtyStatusIndexes()
+	case confirmActionPush:
+		indexes := m.confirmStatusIndexes
+		if len(m.confirmStateFilterOrder) > 0 {
+			indexes = m.dirtyStatusIndexesByState(indexes, m.confirmStateFilterSelected)
+		}
+
 		if len(indexes) == 0 {
-			m.message = "No local changes to push."
+			m.message = "No selected local changes to push."
 			m.errMessage = ""
 			m.warningMessage = ""
 			m.clearPopupStack()

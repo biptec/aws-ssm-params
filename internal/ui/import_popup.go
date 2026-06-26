@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/biptec/aws-ssm-params/internal/app"
+	importer "github.com/biptec/aws-ssm-params/internal/app/import"
+	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/charmbracelet/bubbles/filepicker"
@@ -1781,15 +1785,14 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 	key := msg.String()
 
 	if importPrimaryActionKey(key) {
-		m.message = "Import loading is not implemented yet"
-		return m, nil
+		return m.loadImportFileIntoList()
 	}
 
 	if m.importButtonsFocused && importEnterKey(key) {
 		if m.importButtonCursor == importActionCancel {
 			m.popPopup()
 		} else {
-			m.message = "Import loading is not implemented yet"
+			return m.loadImportFileIntoList()
 		}
 
 		return m, nil
@@ -1856,6 +1859,292 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 	}
 
 	return m, nil
+}
+
+func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
+	path := strings.TrimSpace(m.importFilePathInput.Value())
+	if path == "" {
+		m.errMessage = "Import file path is required."
+		m.message = ""
+		return m, nil
+	}
+
+	file, err := os.Open(importAbsolutePath(path))
+	if err != nil {
+		m.errMessage = fmt.Sprintf("Open import file: %v", err)
+		m.message = ""
+		return m, nil
+	}
+	defer file.Close()
+
+	options, err := m.importPlanOptions()
+	if err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		return m, nil
+	}
+
+	planned, err := importer.Plan(m.contextProvider(), options, file, m.client)
+	if err != nil {
+		m.errMessage = fmt.Sprintf("Import file: %v", err)
+		m.message = ""
+		return m, nil
+	}
+
+	created, modified, unchanged, err := (&m).applyImportPlan(planned)
+	if err != nil {
+		m.errMessage = err.Error()
+		m.message = ""
+		return m, nil
+	}
+
+	m.applySortWithRules(m.sortRulesOrDefault())
+	if len(planned) > 0 {
+		first := planned[0]
+		m.selectItem(inventory.Item{Path: first.Record.Path, Region: first.Region})
+	}
+
+	m.popPopup()
+	m.errMessage = ""
+	m.warningMessage = ""
+	m.message = m.importLoadedMessage(len(planned), created, modified, unchanged)
+
+	return m, nil
+}
+
+func (m model) importLoadedMessage(total, created, modified, unchanged int) string {
+	base := fmt.Sprintf("Imported %d record(s): %d new, %d modified.", total, created, modified)
+	if created == 0 && modified == 0 {
+		return base
+	}
+
+	if unchanged > 0 {
+		base = fmt.Sprintf("Imported %d record(s): %d new, %d modified, %d unchanged.", total, created, modified, unchanged)
+	}
+
+	return base + fmt.Sprintf(" Press P to push %s.", m.mainListScope())
+}
+
+func (m model) importPlanOptions() (*importer.Options, error) {
+	region, err := m.importDefaultPlanRegion()
+	if err != nil {
+		return nil, err
+	}
+
+	pathMappings, err := m.importPathMappingsForPlan()
+	if err != nil {
+		return nil, err
+	}
+
+	return &importer.Options{
+		Options: &app.Options{
+			FilterGroups:   m.opts.FilterGroups,
+			Region:         region,
+			Regions:        []string{region},
+			Profile:        m.opts.Profile,
+			WithDecryption: m.opts.ShowSecureValues,
+		},
+		Format:         textio.FormatType(m.importFormat),
+		FieldMappings:  m.importFieldMappingsForPlan(),
+		Fields:         textio.Fields{},
+		KeyField:       strings.TrimSpace(m.importKeyField),
+		PathMappings:   pathMappings,
+		DefaultRegion:  region,
+		DefaultType:    m.importDefaultType,
+		DefaultOptions: m.importDefaultOptionsForPlan(),
+		Policy: importer.Policy{
+			OnCreate: importer.PolicyNone,
+			OnUpdate: importer.PolicyNone,
+		},
+	}, nil
+}
+
+func (m model) importDefaultPlanRegion() (string, error) {
+	if region := strings.TrimSpace(m.importDefaultRegion); region != "" {
+		return region, nil
+	}
+
+	if len(m.opts.Regions) == 1 && strings.TrimSpace(m.opts.Regions[0]) != "" {
+		return strings.TrimSpace(m.opts.Regions[0]), nil
+	}
+
+	if region := strings.TrimSpace(m.opts.Region); region != "" && region != "all regions" {
+		return region, nil
+	}
+
+	return "", fmt.Errorf("select a default region before importing")
+}
+
+func (m model) importFieldMappingsForPlan() textio.FieldMappings {
+	mappings := make(textio.FieldMappings, 0, len(m.importMapFieldInputs))
+	for i := range m.importMapFieldInputs {
+		fileName := strings.TrimSpace(m.importMapFieldInputs[i].Value())
+		if fileName == "" || i >= len(importMapFieldKeys) {
+			continue
+		}
+
+		mappings = append(mappings, textio.FieldMapping{
+			AWSName:  importMapFieldKeys[i],
+			FileName: fileName,
+		})
+	}
+
+	return mappings
+}
+
+func (m model) importPathMappingsForPlan() (app.PathMappings, error) {
+	m.normalizeMapPathRows(&m.opts)
+
+	values := make([]string, 0, len(m.importMapPathRows))
+	for i := range m.importMapPathRows {
+		awsPath := strings.TrimSpace(m.importMapPathRows[i].awsPath.Value())
+		filePath := strings.TrimSpace(m.importMapPathRows[i].filePath.Value())
+		if awsPath == "" && filePath == "" {
+			continue
+		}
+
+		if awsPath == "" {
+			return nil, fmt.Errorf("map path row %d must include an AWS path", i+1)
+		}
+
+		values = append(values, awsPath+":"+filePath)
+	}
+
+	return app.ParsePathMappings(values)
+}
+
+func (m model) importDefaultOptionsForPlan() ssm.PutParameterOptions {
+	return ssm.PutParameterOptions{
+		Tier:        m.importDefaultTier,
+		DataType:    m.importDefaultDataType,
+		Description: strings.TrimSpace(m.importDefaultDescription.Value()),
+		Policies:    strings.TrimSpace(m.importDefaultPolicies.Value()),
+	}
+}
+
+func (m *model) applyImportPlan(planned []importer.PlannedRecord) (created, modified, unchanged int, err error) {
+	for i := range planned {
+		state, changed, err := m.importPlannedStatus(&planned[i])
+		if err != nil {
+			return created, modified, unchanged, err
+		}
+
+		switch {
+		case state.PendingOperation() == parameterStateNew:
+			created++
+		case state.PendingOperation() == parameterStateModified:
+			modified++
+		case !changed:
+			unchanged++
+		default:
+			unchanged++
+		}
+
+		m.replaceStatusByKey(itemKey(state.Item.Region, state.Item.Path), &state)
+	}
+
+	return created, modified, unchanged, nil
+}
+
+func (m model) importPlannedStatus(planned *importer.PlannedRecord) (Status, bool, error) {
+	item := inventory.Item{Path: planned.Record.Path, Region: planned.Region}
+	key := itemKey(item.Region, item.Path)
+
+	local := Status{
+		Item:        item,
+		Exists:      true,
+		Type:        planned.Type.String(),
+		Tier:        importPlanTier(planned).String(),
+		DataType:    importPlanDataType(planned).String(),
+		Policies:    importPlanPolicies(planned),
+		Description: planned.Options.Description,
+		Value:       planned.Record.Value,
+	}
+
+	if !planned.Exists {
+		local.applyLocalCreate(planned.Type, planned.Options)
+		return local, true, nil
+	}
+
+	current, found := m.importCurrentStatus(key)
+	if found && current.PendingOperation() == parameterStateDeleted {
+		return Status{}, false, fmt.Errorf("revert deleted parameter %s before importing over it", item.Path)
+	}
+
+	if found && current.PendingOperation() == parameterStateNew {
+		local.applyLocalCreate(planned.Type, planned.Options)
+		return local, true, nil
+	}
+
+	if found {
+		cloud := current.Cloud
+		if cloud.isZero() {
+			cloud = current.snapshot()
+		}
+
+		base := current.cloudStatus()
+		local.Version = base.Version
+		local.Modified = base.Modified
+		local.User = base.User
+		local.applyLocalModification(cloud, planned.Type, planned.Options)
+
+		return local, local.HasLocalChanges(), nil
+	}
+
+	cloudStatus := statusFromMetadata(&item, &planned.Existing)
+	cloud := cloudStatus.snapshot()
+	local.Version = cloudStatus.Version
+	local.Modified = cloudStatus.Modified
+	local.User = cloudStatus.User
+	local.applyLocalModification(cloud, planned.Type, planned.Options)
+
+	return local, local.HasLocalChanges(), nil
+}
+
+func (m model) importCurrentStatus(key string) (Status, bool) {
+	for i := range m.statuses {
+		if itemKey(m.statuses[i].Item.Region, m.statuses[i].Item.Path) == key {
+			return m.statuses[i], true
+		}
+	}
+
+	return Status{}, false
+}
+
+func importPlanTier(planned *importer.PlannedRecord) ssm.ParameterTier {
+	if planned.Options.Tier.IsValid() {
+		return planned.Options.Tier
+	}
+
+	if planned.Existing.Tier != "" {
+		if tier, err := ssm.ParseParameterTier(planned.Existing.Tier); err == nil {
+			return tier
+		}
+	}
+
+	return ssm.DefaultParameterTier
+}
+
+func importPlanDataType(planned *importer.PlannedRecord) ssm.ParameterDataType {
+	if planned.Options.DataType.IsValid() {
+		return planned.Options.DataType
+	}
+
+	if planned.Existing.DataType != "" {
+		if dataType, err := ssm.ParseParameterDataType(planned.Existing.DataType); err == nil {
+			return dataType
+		}
+	}
+
+	return ssm.DefaultParameterDataType
+}
+
+func importPlanPolicies(planned *importer.PlannedRecord) string {
+	if planned.Options.PoliciesSet && strings.TrimSpace(planned.Options.Policies) == "[{}]" {
+		return ""
+	}
+
+	return planned.Options.Policies
 }
 
 func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

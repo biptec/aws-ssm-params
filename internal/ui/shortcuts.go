@@ -72,13 +72,18 @@ func (m *shortcuts) visibleSortItems() []sortItem {
 }
 
 // mainFooterText returns shortcuts for the main table screen.
-func mainFooterText(detailsShown bool) string {
+func mainFooterText(detailsShown, filtered bool) string {
 	detailsAction := "d show details"
 	if detailsShown {
 		detailsAction = "d hide details"
 	}
 
-	return "ctrl+/ help • enter edit • n new • i import • " + detailsAction + " • / search • c columns • s sort • x delete • X delete visible • r revert • p push • P push all • esc quit"
+	scope := "all"
+	if filtered {
+		scope = "filtered"
+	}
+
+	return "ctrl+/ help • enter edit • n new • i import • " + detailsAction + " • / search • c columns • s sort • x delete • X delete " + scope + " • r revert • R revert " + scope + " • p push • P push " + scope + " • esc quit"
 }
 
 func searchFooterText() string {
@@ -94,7 +99,7 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 	case popupSort:
 		return m.sortPopupScreenFooter()
 	case popupColumns:
-		return "ctrl+/ help • space toggle • a all • x none • esc close"
+		return "ctrl+/ help • ctrl+m close • enter focused control • space toggle • a all • x none • esc close"
 	case popupValueActions:
 		if m.editorPopupActive {
 			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • c clear • r random • l load • w write • esc cancel"
@@ -152,7 +157,7 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 	case popupUnsavedChanges:
 		return "ctrl+/ help • ctrl+m discard • enter " + m.editorSelectorEnterAction("discard") + " • esc cancel"
 	case popupConfirm:
-		return "ctrl+/ help • ctrl+m confirm • enter focused button • esc cancel"
+		return "ctrl+/ help • ctrl+m confirm • enter focused control • space toggle • esc cancel"
 	case popupRegionSelect:
 		if m.importSelectorActive {
 			return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
@@ -342,7 +347,7 @@ func (m *shortcuts) sortPopupScreenFooter() string {
 	sortItems := m.popupSortItems()
 	parts := make([]string, 0, 2+len(sortItems)+1)
 
-	parts = append(parts, "ctrl+/ help", "d direction")
+	parts = append(parts, "ctrl+/ help", "ctrl+m close", "enter focused control", "d direction")
 	for _, item := range sortItems {
 		parts = append(parts, item.hotkey+" "+strings.ToLower(item.label))
 	}
@@ -409,18 +414,25 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	case popupConfirm:
 		return strings.TrimSpace(`Actions
   ctrl+m       confirm
-  enter        focused button
-  tab          move between buttons
+  enter        focused control
+  space        toggle focused checkbox
+  tab          move between controls
   esc / q / ctrl+g  cancel`)
 	case popupSort:
 		return strings.TrimSpace(`Actions
+  ctrl+m       close
+  enter        toggle focused column / focused button
   d            toggle selected direction
+  tab          move between list and buttons
   esc / q / ctrl+g  close`)
 	case popupColumns:
 		return strings.TrimSpace(`Actions
+  ctrl+m       close
+  enter        toggle focused column / focused button
   space        toggle focused column
   a            show all columns
   x            hide all optional columns
+  tab          move between list and buttons
   esc / q / ctrl+g  close`)
 	case popupValueActions:
 		if m.editorPopupActive {
@@ -825,10 +837,10 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
   c            columns
   s            sort popup
   x            mark selected value for deletion
-  X            mark visible/filtered values for deletion
+  X            mark filtered values for deletion
   r            revert current local change
   p            push current local change
-  P            push all local changes
+  P            push filtered local changes
   esc / q      quit`)
 	case screenTextArea:
 		if m.keymapStyle() == keymapVi {

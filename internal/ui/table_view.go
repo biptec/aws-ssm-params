@@ -14,8 +14,8 @@ type tableViewComponent struct {
 }
 
 const (
-	cleanSelectedParameterDetailsHeight = 13
-	dirtySelectedParameterDetailsHeight = 18
+	selectedParameterDetailsContentRows = 13
+	selectedParameterDetailsBoxPadding   = 2
 )
 
 type editableDetailField struct {
@@ -34,11 +34,11 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 		return m.renderBox("Selected Parameter", []string{"No parameters found."}, 8)
 	}
 
-	if full && m.hasLocalChanges() {
+	if full && st.HasLocalChanges() {
 		title := component.selectedParameterDetailsTitle(&st)
 		lines := component.editableSelectedParameterLines(&st)
 
-		return m.renderBox(title, lines, dirtySelectedParameterDetailsHeight)
+		return m.renderBox(title, lines, component.dirtySelectedParameterDetailsHeight(lines))
 	}
 
 	fields := m.selectedParameterFields(&st, full)
@@ -52,7 +52,7 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 
 	height := len(lines) + 2
 	if full {
-		height = cleanSelectedParameterDetailsHeight
+		height = component.cleanSelectedParameterDetailsHeight(lines)
 	}
 
 	return m.renderBox("Selected Parameter", lines, height)
@@ -103,24 +103,32 @@ func (component tableViewComponent) editableSelectedParameterLines(st *Status) [
 	m := component.model
 	fields := component.editableDetailFields(st)
 	lines := make([]string, 0, len(fields)*2)
+	deleted := st.PendingOperation() == parameterStateDeleted
 
-	valueWidth := max(4, m.boxInnerWidth()-15)
+	valueWidth := max(4, m.boxInnerWidth()-17)
 	for _, field := range fields {
 		localOnly := st.PendingOperation() == parameterStateNew
 		changed := field.cloud != field.local && st.HasLocalChanges()
 		cloudValue := component.renderEditableDetailValue(field.cloud, valueWidth, changed || localOnly, !localOnly)
-		lines = append(lines, "  "+m.fieldLine(field.label, cloudValue, 11))
+		cloudMarker := component.editableDetailMarker(changed || localOnly, !localOnly)
+		lines = append(lines, "  "+m.fieldLine(field.label, cloudMarker+cloudValue, 11))
 
-		if changed {
+		if changed && !deleted {
 			localValue := component.renderEditableLocalDetailValue(field, valueWidth)
-			lines = append(lines, "  "+strings.Repeat(" ", 13)+localValue)
-			continue
+			localMarker := component.editableDetailMarker(true, false)
+			lines = append(lines, "  "+strings.Repeat(" ", 13)+localMarker+localValue)
 		}
-
-		lines = append(lines, "")
 	}
 
 	return lines
+}
+
+func (component tableViewComponent) cleanSelectedParameterDetailsHeight(lines []string) int {
+	return max(selectedParameterDetailsContentRows, len(lines)) + selectedParameterDetailsBoxPadding
+}
+
+func (component tableViewComponent) dirtySelectedParameterDetailsHeight(lines []string) int {
+	return max(selectedParameterDetailsContentRows, len(lines)) + selectedParameterDetailsBoxPadding
 }
 
 func (component tableViewComponent) editableDetailFields(st *Status) []editableDetailField {
@@ -175,6 +183,19 @@ func (component tableViewComponent) renderEditableLocalDetailValue(field editabl
 	}
 
 	return component.renderEditableDetailValue(field.local, width, true, false)
+}
+
+func (component tableViewComponent) editableDetailMarker(changed, cloud bool) string {
+	m := component.model
+	if !changed {
+		return "  "
+	}
+
+	if cloud {
+		return m.diffCloudValue("- ")
+	}
+
+	return m.diffLocalValue("+ ")
 }
 
 func (component tableViewComponent) renderEditableDetailValue(value string, width int, changed, cloud bool) string {
@@ -645,11 +666,15 @@ func (component tableViewComponent) selectedParameterBlockHeight() int {
 		return 0
 	}
 
-	if m.hasLocalChanges() {
-		return dirtySelectedParameterDetailsHeight
+	if st.HasLocalChanges() {
+		lines := component.editableSelectedParameterLines(&st)
+
+		return component.dirtySelectedParameterDetailsHeight(lines)
 	}
 
-	return cleanSelectedParameterDetailsHeight
+	lines := m.renderFieldPairs(m.selectedParameterFields(&st, true), 11)
+
+	return component.cleanSelectedParameterDetailsHeight(lines)
 }
 
 func (component tableViewComponent) listBodyHeight() int {

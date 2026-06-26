@@ -59,6 +59,10 @@ func (m model) formActionButtonsLine(primary string, focused bool, cursor int) s
 		m.formActionButton("Cancel", focused && cursor == importActionCancel)
 }
 
+func (m model) formSingleActionButtonLine(label string, focused bool) string {
+	return m.formActionButton(label, focused)
+}
+
 func (m model) formActionButton(label string, focused bool) string {
 	prefix := "  "
 	if focused {

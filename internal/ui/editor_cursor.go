@@ -177,6 +177,19 @@ func (component *editorCursor) activeTextDeleteChar() {
 	component.setActiveTextValueAndCursor(string(value), pos)
 }
 
+func (component *editorCursor) activeTextDeleteBackward() bool {
+	value := []rune(component.activeTextValue())
+	pos := component.activeTextCursorAbs()
+	if pos <= 0 || pos > len(value) {
+		return false
+	}
+
+	value = append(value[:pos-1], value[pos:]...)
+	component.setActiveTextValueAndCursor(string(value), pos-1)
+
+	return true
+}
+
 func (component *editorCursor) activeTextDeleteToLineEnd() {
 	value := []rune(component.activeTextValue())
 
@@ -309,6 +322,13 @@ func (component *editorCursor) setActiveTextValueAndCursor(value string, pos int
 		m.textArea.SetValue(value)
 		component.setTextAreaCursorAbs(pos)
 	}
+}
+
+func (component *editorCursor) setTextFieldValueAndCursor(field editField, value string, pos int) {
+	currentField := component.state.editField
+	component.state.editField = field
+	component.setActiveTextValueAndCursor(value, pos)
+	component.state.editField = currentField
 }
 
 func (component *editorCursor) textAreaCursorAbs() int {

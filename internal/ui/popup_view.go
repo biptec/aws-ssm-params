@@ -13,7 +13,9 @@ type popupViewComponent struct {
 
 func (component popupViewComponent) renderSortPopup() string {
 	m := component.model
-	return m.renderPopupBoxWithActions("Sort By", m.sortOptionLines(), "Space toggle   D direction   Esc close")
+	lines := append(m.sortOptionLines(), "", m.formSingleActionButtonLine("Close", m.sortButtonsFocused))
+
+	return m.renderPopupBox("Sort By", lines)
 }
 
 func (component popupViewComponent) renderValueActionsPopup() string {
@@ -222,7 +224,7 @@ func (component popupViewComponent) sortOptionLines() []string {
 
 	for i, item := range items {
 		_, checked := m.sortRules.find(item.column)
-		lines = append(lines, m.multiSelectLine(m.sortPopupLabel(item), checked, i == m.sortCursor))
+		lines = append(lines, m.multiSelectLine(m.sortPopupLabel(item), checked, i == m.sortCursor && !m.sortButtonsFocused))
 	}
 
 	return lines
@@ -247,7 +249,7 @@ func (component popupViewComponent) renderConfirmPopup() string {
 	m := component.model
 	confirmLines := strings.Split(m.confirmPrompt, "\n")
 
-	lines := make([]string, 0, len(confirmLines)+2)
+	lines := make([]string, 0, len(confirmLines)+2+len(m.confirmStateFilterOrder))
 	for _, line := range confirmLines {
 		if strings.TrimSpace(line) == "" {
 			lines = append(lines, "")
@@ -257,9 +259,35 @@ func (component popupViewComponent) renderConfirmPopup() string {
 		lines = append(lines, line)
 	}
 
-	lines = append(lines, "", m.formActionButtonsLine("Confirm", true, m.confirmButtonCursor))
+	if len(m.confirmStateFilterOrder) > 0 {
+		lines = append(lines, "")
+		for i, state := range m.confirmStateFilterOrder {
+			lines = append(lines, m.multiSelectLine(confirmStateFilterLabel(state), m.confirmStateFilterSelected[state], m.confirmFocus == i))
+		}
+	}
+
+	buttonCursor := importActionPrimary
+	if m.confirmFocus == confirmFocusCancelButton {
+		buttonCursor = importActionCancel
+	}
+
+	buttonsFocused := m.confirmFocus == confirmFocusPrimaryButton || m.confirmFocus == confirmFocusCancelButton
+	lines = append(lines, "", m.formActionButtonsLine("Confirm", buttonsFocused, buttonCursor))
 
 	return m.renderPopupBox("Confirm", lines)
+}
+
+func confirmStateFilterLabel(state parameterState) string {
+	switch state {
+	case parameterStateNew:
+		return "New"
+	case parameterStateModified:
+		return "Modified"
+	case parameterStateDeleted:
+		return "Deleted"
+	default:
+		return string(state)
+	}
 }
 
 // renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.

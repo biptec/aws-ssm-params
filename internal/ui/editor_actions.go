@@ -46,7 +46,7 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 	choose := func(action string) (tea.Model, tea.Cmd) {
 		switch action {
 		case "clear":
-			m.textArea.SetValue("")
+			m.setTextFieldValueAndCursor(editFieldValue, "", 0)
 			m.returnToEditorPopup()
 			m.message = "Value cleared. Press Ctrl-s to save."
 
@@ -288,10 +288,10 @@ func (m *model) clearTextActionField(field editField) {
 	default:
 		switch field {
 		case editFieldPolicies:
-			m.editPoliciesArea.SetValue("")
+			m.setTextFieldValueAndCursor(editFieldPolicies, "", 0)
 			m.message = "Policies cleared. Press Ctrl-s to save."
 		case editFieldDescription:
-			m.editDescriptionArea.SetValue("")
+			m.setTextFieldValueAndCursor(editFieldDescription, "", 0)
 			m.message = "Description cleared. Press Ctrl-s to save."
 		case editFieldValue,
 			editFieldSSMPath,
