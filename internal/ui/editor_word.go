@@ -6,11 +6,11 @@ import (
 
 func wordForwardIndex(value []rune, pos int) int {
 	pos = min(max(0, pos), len(value))
-	for pos < len(value) && !unicode.IsSpace(value[pos]) {
+	for pos < len(value) && textWordRune(value[pos]) {
 		pos++
 	}
 
-	for pos < len(value) && unicode.IsSpace(value[pos]) {
+	for pos < len(value) && !textWordRune(value[pos]) {
 		pos++
 	}
 
@@ -19,15 +19,23 @@ func wordForwardIndex(value []rune, pos int) int {
 
 func wordBackwardIndex(value []rune, pos int) int {
 	pos = min(max(0, pos), len(value))
-	for pos > 0 && unicode.IsSpace(value[pos-1]) {
+	for pos > 0 && !textWordRune(value[pos-1]) {
 		pos--
 	}
 
-	for pos > 0 && !unicode.IsSpace(value[pos-1]) {
+	for pos > 0 && textWordRune(value[pos-1]) {
 		pos--
 	}
 
 	return pos
+}
+
+func textWordRune(r rune) bool {
+	return unicode.IsLetter(r) ||
+		unicode.IsDigit(r) ||
+		r == '_' ||
+		r == '-' ||
+		r == '.'
 }
 
 func absInt(value int) int {

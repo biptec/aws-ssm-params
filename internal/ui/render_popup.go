@@ -57,6 +57,8 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderFileWriteConfirmPopup()
 			case popupUnsavedChanges:
 				return m.renderUnsavedChangesPopup()
+			case popupQuitConfirm:
+				return m.renderQuitConfirmPopup()
 			case popupRandomValue:
 				return m.renderRandomValuePopup()
 			case popupEditor:
@@ -75,6 +77,20 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderImportMapPathsPopup()
 			case popupImportDefaults:
 				return m.renderImportDefaultsPopup()
+			case popupExportFile:
+				return m.renderExportFilePopup()
+			case popupExportKeyField:
+				return m.renderExportKeyFieldPopup()
+			case popupExportFormat:
+				return m.renderExportFormatPopup()
+			case popupExportOutputFields:
+				return m.renderExportOutputFieldsPopup()
+			case popupExportMapFields:
+				return m.renderExportMapFieldsPopup()
+			case popupExportMapPaths:
+				return m.renderExportMapPathsPopup()
+			case popupExportOverwriteConfirm:
+				return m.renderExportOverwriteConfirmPopup()
 			default:
 				return ""
 			}

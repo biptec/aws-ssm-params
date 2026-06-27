@@ -338,16 +338,29 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		return updated, nil
 	}
 
+	if m.keymapStyle() == keymapVi && m.viInsertMode && isEditableTextField(m.editField) {
+		switch key {
+		case "alt+f":
+			m.activeTextWordForward()
+			m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
+			return m, nil
+		case "alt+b":
+			m.activeTextWordBackward()
+			m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
+			return m, nil
+		}
+	}
+
 	var cmd tea.Cmd
 
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
-		m.editPathInput, cmd = m.editPathInput.Update(msg)
+		cmd = m.updateTextInput(&m.editPathInput, msg)
 	case editFieldDescription:
 		m.editDescriptionArea, cmd = m.editDescriptionArea.Update(msg)
 	case editFieldFilePath:
-		m.editFileInput, cmd = m.editFileInput.Update(msg)
+		cmd = m.updateTextInput(&m.editFileInput, msg)
 	case editFieldPolicies:
 		m.editPoliciesArea, cmd = m.editPoliciesArea.Update(msg)
 	case editFieldValue:

@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/charmbracelet/lipgloss"
@@ -49,6 +52,9 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 	}
 
 	lines := m.renderFieldPairs(fields, labelWidth)
+	if full {
+		lines = component.cleanSelectedParameterLines(fields, labelWidth)
+	}
 
 	height := len(lines) + 2
 	if full {
@@ -73,7 +79,7 @@ func (component tableViewComponent) selectedParameterFields(st *Status, full boo
 
 	fields := [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 	if full {
-		detailWidth := max(20, m.boxInnerWidth()-18)
+		detailWidth := max(20, m.boxInnerWidth()-20)
 		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, detailWidth)}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", oneLineValuePreview(st.Description, detailWidth)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 		if st.Error != "" {
 			fields = append(fields, [2]string{"Error", st.Error})
@@ -127,6 +133,25 @@ func (component tableViewComponent) cleanSelectedParameterDetailsHeight(lines []
 	return max(selectedParameterDetailsContentRows, len(lines)) + selectedParameterDetailsBoxPadding
 }
 
+func (component tableViewComponent) cleanSelectedParameterLines(fields [][2]string, labelWidth int) []string {
+	m := component.model
+	lines := make([]string, 0, len(fields))
+	for _, pair := range fields {
+		value := pair[1]
+		renderedValue := m.value(value)
+		if value == "" || value == "-" {
+			renderedValue = m.muted("(none)")
+		}
+		if pair[0] == "Value" && value == encryptedPlaceholderText {
+			renderedValue = m.encryptedPlaceholder()
+		}
+
+		lines = append(lines, "  "+m.fieldLine(pair[0], "  "+renderedValue, labelWidth))
+	}
+
+	return lines
+}
+
 func (component tableViewComponent) dirtySelectedParameterDetailsHeight(lines []string) int {
 	return max(selectedParameterDetailsContentRows, len(lines)) + selectedParameterDetailsBoxPadding
 }
@@ -150,7 +175,7 @@ func (component tableViewComponent) editableDetailFields(st *Status) []editableD
 		{label: "Type", cloud: cloud.Type, local: local.Type},
 		{label: "Tier", cloud: cloud.Tier, local: local.Tier},
 		{label: "DataType", cloud: cloud.DataType, local: local.DataType},
-		{label: "Policies", cloud: cloud.Policies, local: local.Policies},
+		{label: "Policies", cloud: compactPolicyForDetails(cloud.Policies), local: compactPolicyForDetails(local.Policies)},
 		{label: "Description", cloud: cloud.Description, local: local.Description},
 		{label: "Value", cloud: component.editableDetailValue(&cloud), local: component.editableDetailValue(&local)},
 	}
@@ -224,6 +249,26 @@ func editableDetailValuePresent(value string) bool {
 	return value != "" && value != "-"
 }
 
+func compactPolicyForDetails(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(value)); err == nil {
+		return compact.String()
+	}
+
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+
+		return r
+	}, value)
+}
+
 func (component tableViewComponent) filterSelectedParameterFields(fields [][2]string) [][2]string {
 	m := component.model
 	if len(m.opts.Fields) == 0 {
@@ -294,7 +339,7 @@ func (component tableViewComponent) displayValue(st *Status, full bool) string {
 
 	width := max(20, m.boxInnerWidth()-22)
 	if full {
-		width = max(20, m.boxInnerWidth()-18)
+		width = max(20, m.boxInnerWidth()-20)
 	}
 
 	return oneLineValuePreview(st.Value, width)
@@ -355,7 +400,7 @@ func (component tableViewComponent) shouldShowEncryptedEditPlaceholder() bool {
 	return m.encryptedValueLocked() && m.editField != editFieldValue && m.textArea.Value() == ""
 }
 
-// renderListBlock renders the main table, including dynamic columns, scrolling, search/filter status, and messages.
+// renderListBlock renders the main table, including dynamic columns, scrolling, local filter status, and messages.
 func (component tableViewComponent) renderListBlock() string {
 	m := component.model
 	vis := m.visible()
@@ -383,10 +428,10 @@ func (component tableViewComponent) renderListBlock() string {
 		lines = append(lines, "")
 	}
 
-	if m.searchMode || m.effectiveQuery != "" {
+	if m.filterMode || m.effectiveFilter != "" {
 		lines = append(lines, m.divider(divider))
-		if m.searchMode {
-			lines = append(lines, m.searchLine())
+		if m.filterMode {
+			lines = append(lines, m.filterLine())
 		} else {
 			lines = append(lines, m.filteredLine())
 		}
@@ -679,9 +724,9 @@ func (component tableViewComponent) selectedParameterBlockHeight() int {
 
 func (component tableViewComponent) listBodyHeight() int {
 	m := component.model
-	// Top/bottom border + header + header divider + optional filter/search lines.
+	// Top/bottom border + header + header divider + optional local filter lines.
 	reserved := 4
-	if m.searchMode || m.effectiveQuery != "" {
+	if m.filterMode || m.effectiveFilter != "" {
 		reserved += 2
 	}
 

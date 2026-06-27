@@ -174,9 +174,7 @@ func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, 
 		return component.finishConfirmAction()
 	}
 
-	var cmd tea.Cmd
-
-	m.input, cmd = m.input.Update(msg)
+	cmd := m.updateTextInput(&m.input, msg)
 
 	return m, cmd
 }
@@ -308,6 +306,67 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	if key == " " && m.confirmFocus >= 0 {
 		m.toggleConfirmStateFilter(m.confirmFocus)
 		return m, nil
+	}
+
+	return m, nil
+}
+
+func (m *model) openQuitConfirmPopup() {
+	m.message = ""
+	m.warningMessage = ""
+	m.errMessage = ""
+	m.pendingQuit = true
+	m.pendingQuitKey = ""
+	m.confirmFocus = confirmFocusPrimaryButton
+	m.confirmButtonCursor = importActionPrimary
+
+	if m.activePopup == popupNone {
+		m.pushPopup(popupQuitConfirm)
+		return
+	}
+
+	m.pushNestedPopup(popupQuitConfirm)
+}
+
+func (component popupUpdateComponent) updateQuitConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
+	key := msg.String()
+
+	confirm := func() (tea.Model, tea.Cmd) {
+		m.pendingQuit = false
+		m.pendingQuitKey = ""
+
+		return m, tea.Quit
+	}
+
+	cancel := func() (tea.Model, tea.Cmd) {
+		m.pendingQuit = false
+		m.pendingQuitKey = ""
+		m.popPopup()
+
+		return m, nil
+	}
+
+	switch key {
+	case "ctrl+_", "ctrl+/":
+		m.openPopupShortcuts(screenMain, popupQuitConfirm)
+		return m, nil
+	case "q", "esc", "ctrl+g":
+		return cancel()
+	case "ctrl+m":
+		return confirm()
+	}
+
+	if (&m).navigateConfirmButtons(key) {
+		return m, nil
+	}
+
+	if importEnterKey(key) {
+		if m.confirmFocus == confirmFocusCancelButton {
+			return cancel()
+		}
+
+		return confirm()
 	}
 
 	return m, nil

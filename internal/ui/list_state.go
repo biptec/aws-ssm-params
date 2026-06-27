@@ -3,8 +3,10 @@ package ui
 import (
 	"strings"
 
+	paramfilter "github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ssm"
+	"github.com/charmbracelet/bubbles/textinput"
 )
 
 type listState struct {
@@ -13,10 +15,13 @@ type listState struct {
 	selected         int
 	selectedExpanded bool
 
-	searchMode     bool
-	query          string
-	effectiveQuery string
-	searchInvalid  bool
+	filterMode            bool
+	filterQuery           string
+	filterInput           textinput.Model
+	effectiveFilter       string
+	effectiveFilterGroups paramfilter.Groups
+	filterInvalid         bool
+	filterError           string
 }
 
 func (m *listState) currentStatus() Status {
@@ -42,15 +47,14 @@ func (m *listState) currentItem() inventory.Item {
 }
 
 func (m *listState) visible() []int {
-	return m.matchesFor(m.effectiveQuery)
+	return m.matchesForFilter(m.effectiveFilterGroups)
 }
 
-func (m *listState) matchesFor(query string) []int {
-	q := strings.ToLower(query)
+func (m *listState) matchesForFilter(groups paramfilter.Groups) []int {
 	out := []int{}
 
 	for i := range m.statuses {
-		if q == "" || strings.Contains(strings.ToLower(m.statuses[i].Item.Path), q) {
+		if groups.Match(tuiFilterRecord(m.statuses[i].FilterRecord())) {
 			out = append(out, i)
 		}
 	}
@@ -58,27 +62,105 @@ func (m *listState) matchesFor(query string) []int {
 	return out
 }
 
-// applySearchQuery updates the search query, validates it against visible rows, and keeps selection in range.
-func (m *listState) applySearchQuery(query string) {
-	m.query = query
+// applyFilterQuery parses the TUI filter expression and applies it to the already-loaded rows.
+func (m *listState) applyFilterQuery(query string) {
+	m.filterQuery = query
 	if query == "" {
-		m.effectiveQuery = ""
-		m.searchInvalid = false
+		m.effectiveFilter = ""
+		m.effectiveFilterGroups = nil
+		m.filterInvalid = false
+		m.filterError = ""
 		m.selected = 0
 
 		return
 	}
 
-	if len(m.matchesFor(query)) > 0 {
-		m.effectiveQuery = query
-		m.searchInvalid = false
-		m.selected = 0
+	groups, err := paramfilter.ParseGroups([]string{strings.ToLower(tuiFilterExpression(query))})
+	if err != nil {
+		m.filterInvalid = true
+		m.filterError = err.Error()
+		m.ensureSelection()
 
 		return
 	}
 
-	m.searchInvalid = true
-	m.ensureSelection()
+	if len(m.matchesForFilter(groups)) == 0 {
+		m.filterInvalid = true
+		m.filterError = "filter has no matches"
+		m.ensureSelection()
+
+		return
+	}
+
+	m.effectiveFilter = query
+	m.effectiveFilterGroups = groups
+	m.filterInvalid = false
+	m.filterError = ""
+	m.selected = 0
+}
+
+func tuiFilterExpression(query string) string {
+	conditions := strings.Split(query, ";")
+	for i := range conditions {
+		conditions[i] = tuiFilterConditionExpression(conditions[i])
+	}
+
+	return strings.Join(conditions, ";")
+}
+
+func tuiFilterRecord(record *paramfilter.Record) *paramfilter.Record {
+	return &paramfilter.Record{
+		Name:        strings.ToLower(record.Name),
+		Region:      strings.ToLower(record.Region),
+		Type:        strings.ToLower(record.Type),
+		Tier:        strings.ToLower(record.Tier),
+		DataType:    strings.ToLower(record.DataType),
+		Description: strings.ToLower(record.Description),
+		Policies:    strings.ToLower(record.Policies),
+		Value:       strings.ToLower(record.Value),
+	}
+}
+
+func tuiFilterConditionExpression(condition string) string {
+	condition = strings.TrimSpace(condition)
+	if condition == "" || tuiFilterHasExplicitField(condition) {
+		return condition
+	}
+
+	return tuiFilterPrefix(condition) + condition + tuiFilterSuffix(condition)
+}
+
+func tuiFilterHasExplicitField(condition string) bool {
+	idx := strings.Index(condition, ":")
+	if idx <= 0 {
+		return false
+	}
+
+	_, ok := paramfilter.CanonicalField(condition[:idx])
+
+	return ok
+}
+
+func tuiFilterPrefix(pattern string) string {
+	switch {
+	case strings.HasPrefix(pattern, "**"):
+		return ""
+	case strings.HasPrefix(pattern, "*") && !strings.HasPrefix(pattern, "*("):
+		return "*"
+	default:
+		return "**"
+	}
+}
+
+func tuiFilterSuffix(pattern string) string {
+	switch {
+	case strings.HasSuffix(pattern, "**"):
+		return ""
+	case strings.HasSuffix(pattern, "*"):
+		return "*"
+	default:
+		return "**"
+	}
 }
 
 func (m *listState) visiblePaths() []string {
@@ -104,7 +186,29 @@ func (m *listState) visibleItems() inventory.Items {
 }
 
 func (m *listState) isFiltered() bool {
-	return m.effectiveQuery != "" || len(m.visible()) < len(m.statuses)
+	return m.effectiveFilter != "" || len(m.visible()) < len(m.statuses)
+}
+
+func (m *listState) openFilterMode() {
+	m.filterMode = true
+	m.filterQuery = m.effectiveFilter
+	m.filterInput.SetValue(m.filterQuery)
+	m.filterInput.SetCursor(len([]rune(m.filterQuery)))
+	m.filterInput.Focus()
+	m.filterInvalid = false
+	m.filterError = ""
+}
+
+func (m *listState) closeFilterMode() {
+	m.filterMode = false
+	if m.filterInvalid {
+		m.filterQuery = m.effectiveFilter
+		m.filterInput.SetValue(m.effectiveFilter)
+		m.filterInvalid = false
+		m.filterError = ""
+	}
+
+	m.filterInput.Blur()
 }
 
 // ensureSelection clamps the selected row so it always points at a visible item when possible.

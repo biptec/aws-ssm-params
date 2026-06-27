@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ type Options struct {
 	ShowSecureValues          bool
 	AllowNamesFileUpdate      bool
 	UseInputTTY               bool
+	ImportStdin               []byte
 	NoConfirmOverwriteFile    bool
 	NoConfirmWriteSecureValue bool
 	NoConfirmDeleteOne        bool
@@ -279,6 +281,11 @@ func (m model) updateFileWriteConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 func (m model) updateUnsavedChangesPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	component := editorActionsComponent{model: m}
 	return component.updateUnsavedChangesPopup(msg)
+}
+
+func (m model) updateQuitConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateQuitConfirmPopup(msg)
 }
 
 func (m model) updateRandomValuePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -948,6 +955,41 @@ func (m model) updateImportDefaultsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return component.updateImportDefaultsPopup(msg)
 }
 
+func (m model) updateExportFilePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportFilePopup(msg)
+}
+
+func (m model) updateExportKeyFieldPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportKeyFieldPopup(msg)
+}
+
+func (m model) updateExportFormatPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportFormatPopup(msg)
+}
+
+func (m model) updateExportOutputFieldsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportOutputFieldsPopup(msg)
+}
+
+func (m model) updateExportMapFieldsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportMapFieldsPopup(msg)
+}
+
+func (m model) updateExportMapPathsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportMapPathsPopup(msg)
+}
+
+func (m model) updateExportOverwriteConfirmPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	component := popupUpdateComponent{model: m}
+	return component.updateExportOverwriteConfirmPopup(msg)
+}
+
 func (m model) renderSortPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderSortPopup()
@@ -981,6 +1023,11 @@ func (m model) renderFileWriteConfirmPopup() string {
 func (m model) renderUnsavedChangesPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderUnsavedChangesPopup()
+}
+
+func (m model) renderQuitConfirmPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderQuitConfirmPopup()
 }
 
 func (m model) renderRandomValuePopup() string {
@@ -1021,6 +1068,41 @@ func (m model) renderImportMapPathsPopup() string {
 func (m model) renderImportDefaultsPopup() string {
 	component := popupViewComponent{model: m}
 	return component.renderImportDefaultsPopup()
+}
+
+func (m model) renderExportFilePopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportFilePopup()
+}
+
+func (m model) renderExportKeyFieldPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportKeyFieldPopup()
+}
+
+func (m model) renderExportFormatPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportFormatPopup()
+}
+
+func (m model) renderExportOutputFieldsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportOutputFieldsPopup()
+}
+
+func (m model) renderExportMapFieldsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportMapFieldsPopup()
+}
+
+func (m model) renderExportMapPathsPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportMapPathsPopup()
+}
+
+func (m model) renderExportOverwriteConfirmPopup() string {
+	component := popupViewComponent{model: m}
+	return component.renderExportOverwriteConfirmPopup()
 }
 
 func (m model) sortOptionLines() []string {
@@ -1215,6 +1297,10 @@ func (m model) muted(s string) string {
 	return newStyleRenderer(m).muted(s)
 }
 
+func (m model) errorValue(s string) string {
+	return newStyleRenderer(m).applyErr(s)
+}
+
 func (m model) focusMarker(s string) string {
 	return newStyleRenderer(m).focusMarker(s)
 }
@@ -1235,8 +1321,21 @@ func (m model) selectedMarker() string {
 	return newStyleRenderer(m).selectedMarker()
 }
 
-func (m model) searchLine() string {
-	return newStyleRenderer(m).searchLine()
+func (m model) filterLine() string {
+	renderer := newStyleRenderer(m)
+	input := m.filterInput
+	value := input.Value()
+	if value != m.filterQuery {
+		value = m.filterQuery
+	}
+
+	width := max(1, m.width-lipgloss.Width("Filter > ")-4)
+	renderedValue := renderInputValueWithCursor(value, input.Position(), width, renderer.value, renderer.noColor)
+	if m.filterInvalid {
+		renderedValue = renderInputValueWithCursor(value, input.Position(), width, renderer.applyErr, renderer.noColor)
+	}
+
+	return renderer.filterPrompt() + renderedValue
 }
 
 func (m model) filteredLine() string {
@@ -1259,7 +1358,23 @@ func (m model) renderFooterWithStatus(text string) string {
 }
 
 func (m model) renderStatusMessage() string {
-	return newStyleRenderer(m).renderStatusMessage()
+	renderer := newStyleRenderer(m)
+	if renderer.busyMessage != "" {
+		return renderer.muted(renderer.busyMessage)
+	}
+
+	if (m.screen == screenTextArea || m.editorPopupActiveOrStack()) && !parameterNameIsValid(strings.TrimSpace(m.editPathInput.Value())) {
+		return renderer.applyErr(parameterNameValidationMessage)
+	}
+
+	if m.screen == screenMain && m.activePopup == popupNone {
+		status := m.currentStatus()
+		if status.State == parameterStateError && status.PushError != "" {
+			return renderer.applyErr(status.PushError)
+		}
+	}
+
+	return renderer.renderStatusMessage()
 }
 
 func (m *model) clearTransientStatus() {
@@ -1514,6 +1629,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.input.Width = max(20, msg.Width-12)
+		m.filterInput.Width = max(20, msg.Width-14)
 		m.editPathInput.Width = max(20, msg.Width-18)
 		m.editDescriptionInput.Width = max(20, msg.Width-18)
 		m.editFileInput.Width = max(20, msg.Width-18)
@@ -1559,10 +1675,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case loadedMsg:
 		m.statuses = Statuses(msg)
 		m.applySortWithRules(m.sortRulesOrDefault())
+		m.selected = 0
 		m.screen = screenMain
 		m.busyMessage = ""
 		m.loadingTitle = ""
 		m.ensureSelection()
+		if len(bytes.TrimSpace(m.opts.ImportStdin)) > 0 && !m.importStdinOpened {
+			m.openImportStdinPopup()
+		}
 
 		return m, nil
 
@@ -1660,17 +1780,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
-		if m.pendingQuit && key == "y" {
-			return m, tea.Quit
-		}
 
 		if key == "ctrl+c" || key == "ctrl+q" {
-			m.message = ""
-			m.errMessage = ""
-			m.warningMessage = quitConfirmationMessage()
-			m.pendingQuit = true
-			m.pendingQuitKey = key
-			m.pendingFileWrite = fileWriteConfirmationNone
+			if m.activePopup != popupQuitConfirm {
+				m.openQuitConfirmPopup()
+			}
 
 			return m, nil
 		}
@@ -1713,6 +1827,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateFileWriteConfirmPopup(msg)
 			case popupUnsavedChanges:
 				return m.updateUnsavedChangesPopup(msg)
+			case popupQuitConfirm:
+				return m.updateQuitConfirmPopup(msg)
 			case popupRandomValue:
 				return m.updateRandomValuePopup(msg)
 			case popupEditor:
@@ -1731,6 +1847,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateImportMapPathsPopup(msg)
 			case popupImportDefaults:
 				return m.updateImportDefaultsPopup(msg)
+			case popupExportFile:
+				return m.updateExportFilePopup(msg)
+			case popupExportKeyField:
+				return m.updateExportKeyFieldPopup(msg)
+			case popupExportFormat:
+				return m.updateExportFormatPopup(msg)
+			case popupExportOutputFields:
+				return m.updateExportOutputFieldsPopup(msg)
+			case popupExportMapFields:
+				return m.updateExportMapFieldsPopup(msg)
+			case popupExportMapPaths:
+				return m.updateExportMapPathsPopup(msg)
+			case popupExportOverwriteConfirm:
+				return m.updateExportOverwriteConfirmPopup(msg)
 			}
 		}
 
@@ -1784,8 +1914,8 @@ func (m model) View() string {
 		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
 		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "", m.mainListFiltered())
-		if m.searchMode {
-			footer = searchFooterText()
+		if m.filterMode {
+			footer = filterFooterText()
 		}
 
 		return m.renderPage(footer, func(content model) string { return content.renderMainScreen() })

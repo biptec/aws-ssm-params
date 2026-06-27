@@ -16,6 +16,7 @@ type shortcuts struct {
 	popupSortOptions     []sortItem
 	visibleSortOptions   []sortItem
 	importMainCursor     int
+	exportMainCursor     int
 	importDefaultsCursor int
 	importButtonsFocused bool
 	importButtonCursor   int
@@ -43,6 +44,7 @@ func newShortcuts(m model) *shortcuts {
 		popupSortOptions:     m.popupSortItems(),
 		visibleSortOptions:   m.visibleSortItems(),
 		importMainCursor:     m.importMainCursor,
+		exportMainCursor:     m.exportMainCursor,
 		importDefaultsCursor: m.importDefaultsCursor,
 		importButtonsFocused: m.importButtonsFocused,
 		importButtonCursor:   m.importButtonCursor,
@@ -83,10 +85,10 @@ func mainFooterText(detailsShown, filtered bool) string {
 		scope = "filtered"
 	}
 
-	return "ctrl+/ help • enter edit • n new • i import • " + detailsAction + " • / search • c columns • s sort • x delete • X delete " + scope + " • r revert • R revert " + scope + " • p push • P push " + scope + " • esc quit"
+	return "ctrl+/ help • enter edit • n new • i import • e export • " + detailsAction + " • / filter • f filter • c columns • s sort • x delete • X delete " + scope + " • r revert • R revert " + scope + " • p push • P push " + scope + " • esc quit"
 }
 
-func searchFooterText() string {
+func filterFooterText() string {
 	return "ctrl+/ help • esc close"
 }
 
@@ -156,6 +158,8 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 		return "ctrl+/ help • enter yes • esc cancel"
 	case popupUnsavedChanges:
 		return "ctrl+/ help • ctrl+m discard • enter " + m.editorSelectorEnterAction("discard") + " • esc cancel"
+	case popupQuitConfirm:
+		return "ctrl+/ help • ctrl+m quit • enter focused button • esc cancel"
 	case popupConfirm:
 		return "ctrl+/ help • ctrl+m confirm • enter focused control • space toggle • esc cancel"
 	case popupRegionSelect:
@@ -243,6 +247,31 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 		}
 
 		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+	case popupExportFile:
+		return "ctrl+/ help • ctrl+m export • enter " + m.exportFileEnterAction() + " • esc cancel"
+	case popupExportKeyField:
+		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
+	case popupExportFormat:
+		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
+	case popupExportOutputFields, popupExportMapFields:
+		enterAction := m.importSelectorEnterAction("apply")
+		if !m.importButtonsFocused {
+			enterAction = "toggle"
+			if kind == popupExportMapFields {
+				enterAction = "new line"
+			}
+		}
+
+		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+	case popupExportMapPaths:
+		enterAction := m.importSelectorEnterAction("apply")
+		if !m.importButtonsFocused {
+			enterAction = "next input"
+		}
+
+		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+	case popupExportOverwriteConfirm:
+		return "ctrl+/ help • ctrl+m overwrite • enter " + m.importFocusedButtonAction("overwrite") + " • esc cancel"
 	default:
 		return "ctrl+/ help • esc cancel"
 	}
@@ -297,6 +326,18 @@ func (m *shortcuts) importFileEnterAction() string {
 	}
 
 	if importMainField(m.importMainCursor) == importMainFieldFilePath {
+		return "browse"
+	}
+
+	return "open"
+}
+
+func (m *shortcuts) exportFileEnterAction() string {
+	if m.importButtonsFocused {
+		return m.importFocusedButtonAction("export")
+	}
+
+	if exportMainField(m.exportMainCursor) == exportMainFieldFilePath {
 		return "browse"
 	}
 
@@ -541,6 +582,12 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
   enter        discard changes / focused button
   tab          move between buttons
   esc / q / ctrl+g  cancel`)
+	case popupQuitConfirm:
+		return strings.TrimSpace(`Actions
+  ctrl+m       quit
+  enter        focused button
+  tab          move between buttons
+  esc / q / ctrl+g  cancel`)
 	case popupRandomValue:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
@@ -618,6 +665,35 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
   esc / q / ctrl+g  cancel`)
 	case popupImportMapFields, popupImportMapPaths, popupImportDefaults:
 		return m.importChildActionsShortcuts(kind)
+	case popupExportFile:
+		return strings.TrimSpace(fmt.Sprintf(`Actions
+  ctrl+m      export visible parameters
+  enter       %s
+  tab         move between form and buttons
+  esc / q / ctrl+g  cancel`, m.exportFileEnterAction()))
+	case popupExportKeyField:
+		return strings.TrimSpace(fmt.Sprintf(`Actions
+  ctrl+m      select focused option
+  enter       %s
+  tab         move between options and buttons
+  esc / q / ctrl+g  cancel`, m.importSelectorEnterAction("select")))
+	case popupExportFormat:
+		return strings.TrimSpace(fmt.Sprintf(`Actions
+  ctrl+m      select focused option
+  enter       %s
+  d           Dotenv
+  j           JSON
+  y           YAML
+  tab         move between options and buttons
+  esc / q / ctrl+g  cancel`, m.importSelectorEnterAction("select")))
+	case popupExportOutputFields, popupExportMapFields, popupExportMapPaths:
+		return m.importChildActionsShortcuts(kind)
+	case popupExportOverwriteConfirm:
+		return strings.TrimSpace(`Actions
+  ctrl+m      overwrite existing file
+  enter       focused button
+  tab         move between buttons
+  esc / q / ctrl+g  cancel`)
 	default:
 		return strings.TrimSpace(`Actions
   esc / q / ctrl+g  cancel`)
@@ -672,11 +748,14 @@ func (m *shortcuts) importFileActionsShortcuts() string {
 func (m *shortcuts) importChildActionsShortcuts(kind popupKind) string {
 	enterAction := "apply values"
 	tabAction := "move through fields and buttons"
-	if kind == popupImportMapFields && !m.importButtonsFocused {
+	if (kind == popupImportMapFields || kind == popupExportMapFields) && !m.importButtonsFocused {
 		enterAction = "move to next line"
 	}
+	if kind == popupExportOutputFields && !m.importButtonsFocused {
+		enterAction = "toggle"
+	}
 
-	if kind == popupImportMapPaths && !m.importButtonsFocused {
+	if (kind == popupImportMapPaths || kind == popupExportMapPaths) && !m.importButtonsFocused {
 		enterAction = "move to next input"
 		tabAction = "move through rows and buttons"
 	}
@@ -805,22 +884,52 @@ func (m *shortcuts) editorPopupNavigationShortcuts() string {
 	}
 
 	if m.keymapStyle() == keymapVi {
-		return strings.TrimSpace(`Navigation
-  ↑ / k                      previous field
-  ↓ / j                      next field
-  PgUp / ctrl+b              page up in Description/Policies/Value
-  PgDn / ctrl+f              page down in Description/Policies/Value
-  Home / gg                  first field
-  End / G                    last field`)
+		lines := []string{
+			"Navigation",
+			"  ↑ / k                      previous field",
+			"  ↓ / j                      next field",
+		}
+		if isEditableTextField(m.editField) {
+			if m.viInsertMode {
+				lines = append(lines, "  alt+b / alt+f              backward/forward word")
+			} else {
+				lines = append(lines, "  b / w                      backward/forward word")
+			}
+		}
+		if isMultilineEditField(m.editField) {
+			lines = append(lines,
+				"  PgUp / ctrl+b              page up",
+				"  PgDn / ctrl+f              page down",
+			)
+		}
+		lines = append(lines,
+			"  Home / gg                  first field",
+			"  End / G                    last field",
+		)
+
+		return strings.Join(lines, "\n")
 	}
 
-	return strings.TrimSpace(`Navigation
-  ↑ / ctrl+p                 previous field
-  ↓ / ctrl+n                 next field
-  PgUp / alt+v               page up in Description/Policies/Value
-  PgDn / ctrl+v              page down in Description/Policies/Value
-  Home / alt+<               first field
-  End / alt+>                last field`)
+	lines := []string{
+		"Navigation",
+		"  ↑ / ctrl+p                 previous field",
+		"  ↓ / ctrl+n                 next field",
+	}
+	if isEditableTextField(m.editField) {
+		lines = append(lines, "  alt+b / alt+f              backward/forward word")
+	}
+	if isMultilineEditField(m.editField) {
+		lines = append(lines,
+			"  PgUp / alt+v               page up",
+			"  PgDn / ctrl+v              page down",
+		)
+	}
+	lines = append(lines,
+		"  Home / alt+<               first field",
+		"  End / alt+>                last field",
+	)
+
+	return strings.Join(lines, "\n")
 }
 
 func (m *shortcuts) actionsShortcuts(forScreen screen) string {
@@ -832,8 +941,9 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
   enter        edit value
   n            new parameter
   i            import from file
+  e            export to file
   d            show/hide details
-  /            search
+  / / f        filter
   c            columns
   s            sort popup
   x            mark selected value for deletion
@@ -1002,12 +1112,14 @@ func (m *shortcuts) fieldNavigationShortcuts() string {
 	if m.keymapStyle() == keymapVi {
 		return strings.TrimSpace(`Navigation
   ↑ / k / shift+tab          previous field
-  ↓ / j / tab                next field`)
+  ↓ / j / tab                next field
+  alt+b / alt+f              backward/forward word in inputs`)
 	}
 
 	return strings.TrimSpace(`Navigation
   ↑ / ctrl+p / shift+tab     previous field
-  ↓ / ctrl+n / tab           next field`)
+  ↓ / ctrl+n / tab           next field
+  alt+b / alt+f              backward/forward word in inputs`)
 }
 
 func globalShortcuts() string {

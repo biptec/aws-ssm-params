@@ -48,6 +48,7 @@ const (
 	popupFileAction
 	popupFileWriteConfirm
 	popupUnsavedChanges
+	popupQuitConfirm
 	popupRandomValue
 	popupEditor
 	popupImportFile
@@ -57,6 +58,13 @@ const (
 	popupImportMapFields
 	popupImportMapPaths
 	popupImportDefaults
+	popupExportFile
+	popupExportKeyField
+	popupExportFormat
+	popupExportOutputFields
+	popupExportMapFields
+	popupExportMapPaths
+	popupExportOverwriteConfirm
 )
 
 type confirmAction int

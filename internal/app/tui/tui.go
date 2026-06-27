@@ -28,6 +28,7 @@ type Options struct {
 	NoConfirmDeleteOne        bool
 	NoConfirmDeleteAll        bool
 	UseInputTTY               bool
+	ImportStdin               []byte
 }
 
 // runner owns the configuration and input mode of one TUI invocation.
@@ -120,5 +121,6 @@ func (r runner) uiOptions(regionLabel string, regions []string) *ui.Options {
 		NoConfirmDeleteOne:        opts.NoConfirmDeleteOne,
 		NoConfirmDeleteAll:        opts.NoConfirmDeleteAll,
 		UseInputTTY:               opts.UseInputTTY,
+		ImportStdin:               opts.ImportStdin,
 	}
 }

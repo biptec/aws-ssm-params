@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -10,7 +11,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	tuicmd "github.com/biptec/aws-ssm-params/internal/app/tui"
-	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/ui"
 )
 
@@ -86,12 +86,11 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 		return &tuicmd.Options{}, errors.Wrap(err, "parse show columns")
 	}
 
-	stdinItems, useInputTTY, err := loadTUIInventoryFromStdin()
+	stdinImport, useInputTTY, err := loadTUIImportFromStdin()
 	if err != nil {
 		return &tuicmd.Options{}, err
 	}
 
-	global.InventoryItems = append(global.InventoryItems, stdinItems...)
 	global.WithDecryption = boolFlagValueAny(
 		cmd,
 		tuiFlagWithDecryption,
@@ -109,10 +108,11 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 		NoConfirmDeleteOne:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteOne, tuiEnvNoConfirmDeleteOne),
 		NoConfirmDeleteAll:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteAll, tuiEnvNoConfirmDeleteAll),
 		UseInputTTY:               useInputTTY,
+		ImportStdin:               stdinImport,
 	}, nil
 }
 
-func loadTUIInventoryFromStdin() (inventory.Items, bool, error) {
+func loadTUIImportFromStdin() ([]byte, bool, error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return nil, false, errors.Wrap(err, "stat stdin")
@@ -122,10 +122,10 @@ func loadTUIInventoryFromStdin() (inventory.Items, bool, error) {
 		return nil, false, nil
 	}
 
-	items, err := inventory.LoadPaths(os.Stdin, "stdin")
+	data, err := io.ReadAll(os.Stdin)
 	if err != nil {
-		return nil, true, errors.Wrap(err, "load TUI inventory from stdin")
+		return nil, true, errors.Wrap(err, "read TUI import from stdin")
 	}
 
-	return items, true, nil
+	return data, true, nil
 }

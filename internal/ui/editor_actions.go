@@ -473,9 +473,7 @@ func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (t
 		return runPrimary()
 	}
 
-	var cmd tea.Cmd
-
-	m.input, cmd = m.input.Update(msg)
+	cmd := m.updateTextInput(&m.input, msg)
 
 	return m, cmd
 }

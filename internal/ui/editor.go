@@ -102,6 +102,32 @@ type editSnapshot struct {
 	value         string
 }
 
+const parameterNameValidationMessage = "Parameter name can consist of the following symbols and letters only: a-zA-Z0-9_.-/"
+
+func parameterNameIsValid(name string) bool {
+	if name == "" {
+		return true
+	}
+
+	for _, r := range name {
+		if !parameterNameRuneAllowed(r) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func parameterNameRuneAllowed(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		r == '_' ||
+		r == '.' ||
+		r == '-' ||
+		r == '/'
+}
+
 func (snapshot *editSnapshot) isZero() bool {
 	return *snapshot == (editSnapshot{})
 }

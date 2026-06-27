@@ -181,6 +181,17 @@ func (component popupViewComponent) renderUnsavedChangesPopup() string {
 	return m.renderPopupBox("Confirm", lines)
 }
 
+func (component popupViewComponent) renderQuitConfirmPopup() string {
+	m := component.model
+	lines := []string{
+		"Are you sure you want to quit?",
+		"",
+		m.formActionButtonsLine("Quit", true, m.confirmButtonCursor),
+	}
+
+	return m.renderPopupBox("Confirm", lines)
+}
+
 func (component popupViewComponent) renderRandomValuePopup() string {
 	m := component.model
 	items := randomItems()

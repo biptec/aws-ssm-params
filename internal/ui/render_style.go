@@ -8,9 +8,9 @@ import (
 
 type styleRenderer struct {
 	noColor        bool
-	query          string
-	effectiveQuery string
-	searchInvalid  bool
+	filterQuery     string
+	effectiveFilter string
+	filterInvalid   bool
 	message        string
 	warningMessage string
 	errMessage     string
@@ -20,9 +20,9 @@ type styleRenderer struct {
 func newStyleRenderer(m model) *styleRenderer {
 	return &styleRenderer{
 		noColor:        m.opts.NoColor,
-		query:          m.query,
-		effectiveQuery: m.effectiveQuery,
-		searchInvalid:  m.searchInvalid,
+		filterQuery:     m.filterQuery,
+		effectiveFilter: m.effectiveFilter,
+		filterInvalid:   m.filterInvalid,
 		message:        m.message,
 		warningMessage: m.warningMessage,
 		errMessage:     m.errMessage,
@@ -90,25 +90,25 @@ func (renderer *styleRenderer) selectedMarker() string {
 	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
 }
 
-func (renderer *styleRenderer) searchLine() string {
-	line := "Search > " + renderer.query
-	if renderer.searchInvalid {
+func (renderer *styleRenderer) filterLine() string {
+	line := "Filter > " + renderer.filterQuery
+	if renderer.filterInvalid {
 		return renderer.applyErr(line)
 	}
 
-	return renderer.searchPrompt() + renderer.value(renderer.query)
+	return renderer.filterPrompt() + renderer.value(renderer.filterQuery)
 }
 
 func (renderer *styleRenderer) filteredLine() string {
-	return renderer.filteredPrompt() + renderer.value(renderer.effectiveQuery)
+	return renderer.filteredPrompt() + renderer.value(renderer.effectiveFilter)
 }
 
-func (renderer *styleRenderer) searchPrompt() string {
+func (renderer *styleRenderer) filterPrompt() string {
 	if renderer.noColor {
-		return "Search > "
+		return "Filter > "
 	}
 
-	return searchStyle.Render("Search > ")
+	return searchStyle.Render("Filter > ")
 }
 
 func (renderer *styleRenderer) filteredPrompt() string {
@@ -116,7 +116,7 @@ func (renderer *styleRenderer) filteredPrompt() string {
 		return "Filtered > "
 	}
 
-	return searchStyle.Render("Filtered > ")
+	return tableHeaderStyle.Render("Filtered > ")
 }
 
 func (renderer *styleRenderer) applyErr(s string) string {

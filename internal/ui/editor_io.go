@@ -355,6 +355,14 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 			return m, nil
 		}
 
+		if !parameterNameIsValid(newPath) {
+			m.errMessage = parameterNameValidationMessage
+			m.message = ""
+			m.warningMessage = ""
+
+			return m, nil
+		}
+
 		item.Path = newPath
 	}
 

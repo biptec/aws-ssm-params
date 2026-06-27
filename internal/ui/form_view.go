@@ -14,6 +14,10 @@ import (
 // It is shared by the editor and import popups so field sizing, labels, and input
 // cursor behavior stay consistent across the TUI.
 func (m model) formTextInputFieldLine(name string, input *textinput.Model, labelWidth, innerWidth int) string {
+	return m.formTextInputFieldLineWithValidation(name, input, labelWidth, innerWidth, false)
+}
+
+func (m model) formTextInputFieldLineWithValidation(name string, input *textinput.Model, labelWidth, innerWidth int, invalid bool) string {
 	labelText := padMin(name+":", labelWidth+1)
 	focused := input.Focused()
 	// Bubbles textinput renders the focused cursor as one visible cell in addition to
@@ -27,6 +31,13 @@ func (m model) formTextInputFieldLine(name string, input *textinput.Model, label
 	input.SetCursor(input.Position())
 
 	renderedValue := input.View()
+	if invalid {
+		if focused {
+			renderedValue = m.inputValueWithInvalidRunes(input.Value(), input.Position(), input.Width)
+		} else {
+			renderedValue = m.valueWithInvalidRunes(truncateInline(input.Value(), input.Width))
+		}
+	}
 	if !focused && input.Value() == "" {
 		renderedValue = m.muted(nonePlaceholderText)
 	}
@@ -51,6 +62,70 @@ func (m model) formFocusPrefix(focused bool) string {
 	}
 
 	return "  "
+}
+
+func (m model) inputValueWithInvalidRunes(value string, pos, width int) string {
+	runes := []rune(value)
+	pos = min(max(0, pos), len(runes))
+	width = max(1, width)
+
+	if len(runes) == 0 {
+		return m.value(inputCursor(m.opts.NoColor))
+	}
+
+	start := 0
+	if pos >= len(runes) {
+		textWidth := max(0, width-1)
+		if len(runes) > textWidth {
+			start = len(runes) - textWidth
+		}
+
+		end := min(len(runes), start+textWidth)
+
+		return m.valueWithInvalidRunes(string(runes[start:end])) + m.value(inputCursor(m.opts.NoColor))
+	}
+
+	if len(runes) > width {
+		start = pos - width + 1
+		if start < 0 {
+			start = 0
+		}
+
+		if start > len(runes)-width {
+			start = len(runes) - width
+		}
+	}
+
+	end := min(len(runes), start+width)
+
+	var b strings.Builder
+	for i := start; i < end; i++ {
+		if i == pos {
+			b.WriteString(inputCursorForRune(runes[i], m.opts.NoColor))
+			continue
+		}
+
+		b.WriteString(m.renderParameterNameRune(runes[i]))
+	}
+
+	return b.String()
+}
+
+func (m model) valueWithInvalidRunes(value string) string {
+	var b strings.Builder
+	for _, r := range value {
+		b.WriteString(m.renderParameterNameRune(r))
+	}
+
+	return b.String()
+}
+
+func (m model) renderParameterNameRune(r rune) string {
+	if !parameterNameRuneAllowed(r) {
+		return m.errorValue(string(r))
+	}
+
+	return m.value(string(r))
 }
 
 func (m model) formActionButtonsLine(primary string, focused bool, cursor int) string {

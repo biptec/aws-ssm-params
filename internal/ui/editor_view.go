@@ -364,8 +364,9 @@ func (component editorViewComponent) editFieldLine(field editField, name, render
 func (component editorViewComponent) editTextInputFieldLine(field editField, name string, input *textinput.Model, labelWidth int) string {
 	m := component.model
 	label := m.editFieldLabel(field, name)
+	invalid := field == editFieldSSMPath && !parameterNameIsValid(strings.TrimSpace(input.Value()))
 
-	return m.formTextInputFieldLine(label, input, labelWidth, m.editorLineWidth())
+	return m.formTextInputFieldLineWithValidation(label, input, labelWidth, m.editorLineWidth(), invalid)
 }
 
 func (component editorViewComponent) editorLineWidth() int {

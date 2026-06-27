@@ -35,6 +35,8 @@ type runtimeState struct {
 
 	pendingQuit    bool
 	pendingQuitKey string
+
+	importStdinOpened bool
 }
 
 // RunInteractive creates and runs the Bubble Tea program in the terminal alternate screen.
@@ -78,10 +80,16 @@ func newModel(ctx context.Context, client ssmclient.Client, items inventory.Item
 	editFileInput.CharLimit = 0
 	editFileInput.Width = 80
 
+	filterInput := textinput.New()
+	filterInput.Prompt = ""
+	filterInput.CharLimit = 0
+	filterInput.Width = 80
+
 	configureTextInputStyles(&input, opts)
 	configureTextInputStyles(&editPathInput, opts)
 	configureTextInputStyles(&editDescriptionInput, opts)
 	configureTextInputStyles(&editFileInput, opts)
+	configureTextInputStyles(&filterInput, opts)
 
 	area := textarea.New()
 	area.Prompt = ""
@@ -120,6 +128,7 @@ func newModel(ctx context.Context, client ssmclient.Client, items inventory.Item
 	m.editPathInput = editPathInput
 	m.editDescriptionInput = editDescriptionInput
 	m.editFileInput = editFileInput
+	m.filterInput = filterInput
 	m.importState = newImportState(opts)
 	m.columns = defaultColumnVisibility(opts.ShowColumns)
 	m.sortBy = sortBy

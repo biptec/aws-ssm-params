@@ -13,45 +13,31 @@ type mainScreenComponent struct {
 }
 
 // updateMain handles navigation and actions on the main parameter table.
-// It also owns search mode, where printable keys update the active filter instead of triggering table shortcuts.
+// It also owns filter mode, where printable keys update the active local filter instead of triggering table shortcuts.
 func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.message = ""
 
 	key := msg.String()
-	if m.searchMode {
+	if m.filterMode {
 		switch key {
 		case "ctrl+_", "ctrl+/":
 			m.openShortcuts(screenMain)
 			return m, nil
 		case "esc", "ctrl+g":
-			m.searchMode = false
-			if m.searchInvalid {
-				m.query = m.effectiveQuery
-				m.searchInvalid = false
-			}
-
-			return m, nil
-		case "backspace":
-			if m.query != "" {
-				m.applySearchQuery(m.query[:len(m.query)-1])
-			}
-
+			m.closeFilterMode()
 			return m, nil
 		case "enter":
-			m.searchMode = false
-			if m.searchInvalid {
-				m.query = m.effectiveQuery
-				m.searchInvalid = false
-			}
-
+			m.closeFilterMode()
 			return m, nil
 		default:
-			if len(msg.String()) == 1 {
-				m.applySearchQuery(m.query + msg.String())
+			before := m.filterInput.Value()
+			cmd := m.updateTextInput(&m.filterInput, msg)
+			if after := m.filterInput.Value(); after != before {
+				m.applyFilterQuery(after)
 			}
 
-			return m, nil
+			return m, cmd
 		}
 	}
 
@@ -90,10 +76,10 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		return m.startNewParameter(screenMain)
 	case "i":
 		m.openImportPopup()
-	case "/":
-		m.searchMode = true
-		m.query = m.effectiveQuery
-		m.searchInvalid = false
+	case "e":
+		m.openExportPopup()
+	case "/", "f":
+		m.openFilterMode()
 	case "d":
 		m.selectedExpanded = !m.selectedExpanded
 	case "c":
