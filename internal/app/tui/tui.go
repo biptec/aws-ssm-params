@@ -23,10 +23,7 @@ type Options struct {
 	ShowColumns               []string
 	SortColumns               []string
 	Fields                    textio.Fields
-	NoConfirmOverwriteFile    bool
-	NoConfirmWriteSecureValue bool
-	NoConfirmDeleteOne        bool
-	NoConfirmDeleteAll        bool
+	ApplyImmediately          bool
 	UseInputTTY               bool
 	ImportStdin               []byte
 }
@@ -116,10 +113,7 @@ func (r runner) uiOptions(regionLabel string, regions []string) *ui.Options {
 		Fields:                    opts.Fields,
 		IncludeValues:             opts.WithDecryption || opts.Fields.RequiresValues() || opts.FilterGroups.HasField(filter.FieldValue),
 		ShowSecureValues:          opts.WithDecryption,
-		NoConfirmOverwriteFile:    opts.NoConfirmOverwriteFile,
-		NoConfirmWriteSecureValue: opts.NoConfirmWriteSecureValue,
-		NoConfirmDeleteOne:        opts.NoConfirmDeleteOne,
-		NoConfirmDeleteAll:        opts.NoConfirmDeleteAll,
+		ApplyImmediately:          opts.ApplyImmediately,
 		UseInputTTY:               opts.UseInputTTY,
 		ImportStdin:               opts.ImportStdin,
 	}

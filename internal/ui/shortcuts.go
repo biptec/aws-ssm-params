@@ -27,6 +27,7 @@ type shortcuts struct {
 	editorAreaExpanded   bool
 	editorSelector       bool
 	editorPopupActive    bool
+	applyImmediately    bool
 
 	importDefaultPoliciesExpanded    bool
 	importDefaultDescriptionExpanded bool
@@ -55,6 +56,7 @@ func newShortcuts(m model) *shortcuts {
 		editorAreaExpanded:   m.isCurrentExpandableFieldExpanded(),
 		editorSelector:       m.editorSelectorActive(),
 		editorPopupActive:    m.editorPopupActiveOrStack(),
+		applyImmediately:    m.opts.ApplyImmediately,
 
 		importDefaultPoliciesExpanded:    m.importDefaultAreaExpanded(&m.importDefaultPolicies),
 		importDefaultDescriptionExpanded: m.importDefaultAreaExpanded(&m.importDefaultDescription),
@@ -74,7 +76,7 @@ func (m *shortcuts) visibleSortItems() []sortItem {
 }
 
 // mainFooterText returns shortcuts for the main table screen.
-func mainFooterText(detailsShown, filtered bool) string {
+func mainFooterText(detailsShown, filtered, applyImmediately bool) string {
 	detailsAction := "d show details"
 	if detailsShown {
 		detailsAction = "d hide details"
@@ -85,7 +87,12 @@ func mainFooterText(detailsShown, filtered bool) string {
 		scope = "filtered"
 	}
 
-	return "ctrl+/ help • enter edit • n new • i import • e export • " + detailsAction + " • / filter • f filter • c columns • s sort • x delete • X delete " + scope + " • r revert • R revert " + scope + " • p push • P push " + scope + " • esc quit"
+	footer := "ctrl+/ help • enter edit • n new • i import • e export • " + detailsAction + " • / filter • f filter • c columns • s sort • x delete • X delete " + scope
+	if !applyImmediately {
+		footer += " • r revert • R revert " + scope + " • p push • P push " + scope
+	}
+
+	return footer + " • esc quit"
 }
 
 func filterFooterText() string {
@@ -937,21 +944,31 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
 	case screenHelp:
 		return ""
 	case screenMain:
-		return strings.TrimSpace(`Actions
-  enter        edit value
-  n            new parameter
-  i            import from file
-  e            export to file
-  d            show/hide details
-  / / f        filter
-  c            columns
-  s            sort popup
-  x            mark selected value for deletion
-  X            mark filtered values for deletion
-  r            revert current local change
-  p            push current local change
-  P            push filtered local changes
-  esc / q      quit`)
+		lines := []string{
+			"Actions",
+			"  enter        edit value",
+			"  n            new parameter",
+			"  i            import from file",
+			"  e            export to file",
+			"  d            show/hide details",
+			"  / / f        filter",
+			"  c            columns",
+			"  s            sort popup",
+			"  x            delete selected value",
+			"  X            delete filtered values",
+		}
+		if !m.applyImmediately {
+			lines = append(lines,
+				"  r            revert current local change",
+				"  R            revert filtered local changes",
+				"  p            push current local change",
+				"  P            push filtered local changes",
+			)
+		}
+
+		lines = append(lines, "  esc / q      quit")
+
+		return strings.Join(lines, "\n")
 	case screenTextArea:
 		if m.keymapStyle() == keymapVi {
 			if m.viInsertMode {

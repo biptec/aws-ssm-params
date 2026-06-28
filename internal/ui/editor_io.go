@@ -133,7 +133,7 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 		return m, nil
 	}
 
-	if m.fileActionField == editFieldValue && m.normalizedEditType() == ssm.ParameterTypeSecureString && !secureConfirmed && !m.opts.NoConfirmWriteSecureValue {
+	if m.fileActionField == editFieldValue && m.normalizedEditType() == ssm.ParameterTypeSecureString && !secureConfirmed {
 		m.errMessage = ""
 		m.message = ""
 		m.warningMessage = ""
@@ -142,7 +142,7 @@ func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteCo
 		return m, nil
 	}
 
-	if _, err := backendFor(m).statFile(expandedPath); err == nil && !overwriteConfirmed && !m.opts.NoConfirmOverwriteFile {
+	if _, err := backendFor(m).statFile(expandedPath); err == nil && !overwriteConfirmed {
 		m.errMessage = ""
 		m.message = ""
 		m.warningMessage = ""
@@ -451,6 +451,11 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		m.replaceStatusByKey(itemKey(item.Region, item.Path), &local)
 		m.applySortWithRules(m.sortRulesOrDefault())
 		m.selectItem(item)
+		if m.opts.ApplyImmediately {
+			m.discardEditorChanges()
+			return m.applyImmediatelyDirtyStatuses(m.dirtyStatusIndexes(), "Saving parameter...")
+		}
+
 		m.message = "Created local change for " + item.Path + ". Press p to push."
 		m.errMessage = ""
 		m.warningMessage = ""
@@ -497,6 +502,20 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 	m.applySortWithRules(m.sortRulesOrDefault())
 	m.selectItem(item)
 
+	if m.opts.ApplyImmediately {
+		if !local.HasLocalChanges() {
+			m.message = "No changes to save."
+			m.errMessage = ""
+			m.warningMessage = ""
+			m.discardEditorChanges()
+
+			return m, nil
+		}
+
+		m.discardEditorChanges()
+		return m.applyImmediatelyDirtyStatuses(m.dirtyStatusIndexes(), "Saving parameter...")
+	}
+
 	if local.State == parameterStateClean {
 		m.message = "No local changes."
 	} else {
@@ -508,6 +527,24 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 	m.discardEditorChanges()
 
 	return m, nil
+}
+
+func (m model) applyImmediatelyDirtyStatuses(indexes []int, busyMessage string) (tea.Model, tea.Cmd) {
+	statuses := m.dirtyStatuses(indexes)
+	if len(statuses) == 0 {
+		m.message = "No changes to apply."
+		m.errMessage = ""
+		m.warningMessage = ""
+
+		return m, nil
+	}
+
+	m.busyMessage = busyMessage
+	m.loadingTitle = ""
+	m.clearPopupStack()
+	m.screen = m.returnScreen
+
+	return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 }
 
 // saveValueCmd writes one SSM parameter to Parameter Store and reloads its fresh status for the UI.

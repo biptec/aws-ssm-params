@@ -288,6 +288,45 @@ func (component editorViewComponent) renderMultilineFieldLines(field editField, 
 	return m.formMultilineAreaLines(area, maxRows, component.editorTextareaContentWidth(area), focused)
 }
 
+func (component editorViewComponent) editorTextareaMaxRows(field editField) int {
+	m := component.model
+	innerHeight := m.textAreaBodyHeight() - 2
+	if m.editorPopupActiveOrStack() {
+		innerHeight = max(1, m.popupContentLineBudget()-2)
+	}
+
+	fixedLines := 1
+	if m.editFieldAllowed(editFieldRegion) {
+		fixedLines++
+	}
+	if m.editFieldAllowed(editFieldType) {
+		fixedLines++
+	}
+	if m.editFieldAllowed(editFieldTier) {
+		fixedLines++
+	}
+	if m.editFieldAllowed(editFieldDataType) {
+		fixedLines++
+	}
+	if m.shouldShowOverwriteField() {
+		fixedLines++
+	}
+
+	expandableFields := component.editorExpandableFieldViews()
+	expandedFields := component.expandedEditorTextareaItems(expandableFields)
+	fixedLines += len(expandableFields) + component.editorExpandableSeparatorCount(expandableFields)
+	if m.shouldShowEncryptedEditPlaceholder() {
+		fixedLines++
+	}
+
+	rowLimits := formTextareaRowLimits(expandedFields, max(1, innerHeight-fixedLines))
+	if rows := rowLimits[int(field)]; rows > 0 {
+		return rows
+	}
+
+	return 1
+}
+
 type multilineVisualSegment struct {
 	logical int
 	start   int
@@ -401,8 +440,32 @@ func (component editorViewComponent) editorPopupLineWidth() int {
 	}
 
 	lineWidth := max(editorPopupMinContentLineWidth(), importInputLineWidth(labelWidth, valueWidth))
+	for _, area := range component.editorPopupTextareasForWidth() {
+		areaWidth := formTextareaLogicalContentWidth(area, importMinimumValueWidth(labelWidth), m.popupAvailableLineWidth())
+		if m.showGutters {
+			areaWidth += formTextareaGutterWidth(area)
+		}
+
+		lineWidth = max(lineWidth, areaWidth)
+	}
 
 	return min(m.popupAvailableLineWidth(), lineWidth)
+}
+
+func (component editorViewComponent) editorPopupTextareasForWidth() []*textarea.Model {
+	m := component.model
+	areas := []*textarea.Model{}
+	if m.editFieldAllowed(editFieldDescription) {
+		areas = append(areas, &m.editDescriptionArea)
+	}
+	if m.shouldShowPoliciesField() {
+		areas = append(areas, &m.editPoliciesArea)
+	}
+	if !m.shouldShowEncryptedEditPlaceholder() && m.editFieldAllowed(editFieldValue) {
+		areas = append(areas, &m.textArea)
+	}
+
+	return areas
 }
 
 func (component editorViewComponent) editorTextareaContentWidth(area *textarea.Model) int {

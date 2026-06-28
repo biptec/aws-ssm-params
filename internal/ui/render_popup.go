@@ -184,7 +184,17 @@ func popupPaddedLines(lines []string) []string {
 
 	pad := strings.Repeat(" ", horizontalPadding)
 	for _, line := range lines {
-		out = append(out, pad+line+pad)
+		rawLeft := strings.HasPrefix(line, rawLeftLinePrefix)
+		if rawLeft {
+			line = strings.TrimPrefix(line, rawLeftLinePrefix)
+		}
+
+		line = pad + line + pad
+		if rawLeft {
+			line = rawLeftLinePrefix + line
+		}
+
+		out = append(out, line)
 	}
 
 	for i := 0; i < verticalPadding; i++ {
@@ -227,6 +237,12 @@ func (renderer popupRenderer) popupBoxBottom(innerWidth int) string {
 }
 
 func (renderer popupRenderer) popupBoxLine(content string, innerWidth int) string {
+	rawLeft := strings.HasPrefix(content, rawLeftLinePrefix)
+	if rawLeft {
+		content = strings.TrimPrefix(content, rawLeftLinePrefix)
+		innerWidth++
+	}
+
 	visible := lipgloss.Width(content)
 	if visible > innerWidth {
 		content = truncateStyled(content, innerWidth)
@@ -238,7 +254,12 @@ func (renderer popupRenderer) popupBoxLine(content string, innerWidth int) strin
 		padWidth = 0
 	}
 
-	return renderer.popupFrame("│") + content + strings.Repeat(" ", padWidth) + renderer.popupFrame("│")
+	leftFrame := renderer.popupFrame("│")
+	if rawLeft {
+		leftFrame = ""
+	}
+
+	return leftFrame + content + strings.Repeat(" ", padWidth) + renderer.popupFrame("│")
 }
 
 func (renderer popupRenderer) popupFrame(s string) string {

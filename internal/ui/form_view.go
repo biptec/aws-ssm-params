@@ -198,10 +198,7 @@ func (m model) formMultilineAreaLines(area *textarea.Model, maxRows, contentWidt
 	lineInfo := area.LineInfo()
 	cursorOffset := min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(logicalLines[cursorLine])))
 
-	cursorVisual := 0
-	if focused {
-		cursorVisual = cursorVisualSegmentIndex(logicalLines, segments, cursorLine, cursorOffset, contentWidth)
-	}
+	cursorVisual := cursorVisualSegmentIndex(logicalLines, segments, cursorLine, cursorOffset, contentWidth)
 
 	type visualLine struct {
 		text string
@@ -240,11 +237,7 @@ func (m model) formMultilineAreaLines(area *textarea.Model, maxRows, contentWidt
 	start := 0
 
 	if len(visual) > maxRows {
-		if focused {
-			start = min(max(0, cursorVisual-maxRows+1), len(visual)-maxRows)
-		} else {
-			start = len(visual) - maxRows
-		}
+		start = min(max(0, cursorVisual), len(visual)-maxRows)
 	}
 
 	end := min(len(visual), start+maxRows)
@@ -257,12 +250,6 @@ func (m model) formMultilineAreaLines(area *textarea.Model, maxRows, contentWidt
 		}
 
 		lines = append(lines, padVisible(line.text, lineWidth))
-	}
-
-	if focused {
-		for len(lines) < maxRows {
-			lines = append(lines, m.formEmptyMultilineAreaLine(contentWidth, lineWidth))
-		}
 	}
 
 	return lines

@@ -2796,6 +2796,20 @@ func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
 		m.selectItem(inventory.Item{Path: first.Record.Path, Region: first.Region})
 	}
 
+	if m.opts.ApplyImmediately {
+		indexes := m.dirtyStatusIndexes()
+		m.popPopup()
+		m.errMessage = ""
+		m.warningMessage = ""
+		if len(indexes) > 0 {
+			m.returnScreen = screenMain
+			return m.applyImmediatelyDirtyStatuses(indexes, fmt.Sprintf("Applying %d import change(s)...", len(indexes)))
+		}
+
+		m.message = m.importLoadedMessage(len(planned), created, modified, unchanged)
+		return m, nil
+	}
+
 	m.popPopup()
 	m.errMessage = ""
 	m.warningMessage = ""
@@ -2812,6 +2826,10 @@ func (m model) importLoadedMessage(total, created, modified, unchanged int) stri
 
 	if unchanged > 0 {
 		base = fmt.Sprintf("Imported %d record(s): %d new, %d modified, %d unchanged.", total, created, modified, unchanged)
+	}
+
+	if m.opts.ApplyImmediately {
+		return base
 	}
 
 	return base + fmt.Sprintf(" Press P to push %s.", m.mainListScope())

@@ -20,18 +20,12 @@ const (
 	tuiFlagWithDecryption            = "with-decryption"
 	tuiFlagShowColumn                = "show-column"
 	tuiFlagSortBy                    = "sort-by"
-	tuiFlagNoConfirmOverwriteFile    = "no-confirm-overwrite-file"
-	tuiFlagNoConfirmWriteSecureValue = "no-confirm-write-securestring"
-	tuiFlagNoConfirmDeleteOne        = "no-confirm-delete-one"
-	tuiFlagNoConfirmDeleteAll        = "no-confirm-delete-all"
+	tuiFlagApplyImmediately          = "apply-immediately"
 
 	tuiEnvWithDecryption            = envVarPrefix + "WITH_DECRYPTION"
 	tuiEnvShowColumn                = envVarPrefix + "SHOW_COLUMN"
 	tuiEnvSortBy                    = envVarPrefix + "SORT_BY"
-	tuiEnvNoConfirmOverwriteFile    = envVarPrefix + "NO_CONFIRM_OVERWRITE_FILE"
-	tuiEnvNoConfirmWriteSecureValue = envVarPrefix + "NO_CONFIRM_WRITE_SECURESTRING"
-	tuiEnvNoConfirmDeleteOne        = envVarPrefix + "NO_CONFIRM_DELETE_ONE"
-	tuiEnvNoConfirmDeleteAll        = envVarPrefix + "NO_CONFIRM_DELETE_ALL"
+	tuiEnvApplyImmediately          = envVarPrefix + "APPLY_IMMEDIATELY"
 )
 
 func tuiFlags() []cli.Flag {
@@ -39,10 +33,7 @@ func tuiFlags() []cli.Flag {
 		&cli.BoolFlag{Name: tuiFlagWithDecryption, Sources: cli.EnvVars(tuiEnvWithDecryption), Usage: "decrypt SecureString values"},
 		&cli.StringSliceFlag{Name: tuiFlagShowColumn, Sources: cli.EnvVars(tuiEnvShowColumn), Usage: "optional column to show in the TUI; repeat for multiple columns; env accepts comma-separated values"},
 		&cli.StringSliceFlag{Name: tuiFlagSortBy, Sources: cli.EnvVars(tuiEnvSortBy), Usage: "initial sort as field:asc or field:desc; repeat for multiple fields; env accepts comma-separated values"},
-		&cli.BoolFlag{Name: tuiFlagNoConfirmOverwriteFile, Sources: cli.EnvVars(tuiEnvNoConfirmOverwriteFile), Usage: "do not ask before overwriting local files from the TUI"},
-		&cli.BoolFlag{Name: tuiFlagNoConfirmWriteSecureValue, Sources: cli.EnvVars(tuiEnvNoConfirmWriteSecureValue), Usage: "do not ask before writing SecureString values to local files in plaintext"},
-		&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteOne, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteOne), Usage: "do not ask before deleting one parameter in the TUI"},
-		&cli.BoolFlag{Name: tuiFlagNoConfirmDeleteAll, Sources: cli.EnvVars(tuiEnvNoConfirmDeleteAll), Usage: "do not ask before deleting all visible parameters in the TUI"},
+		&cli.BoolFlag{Name: tuiFlagApplyImmediately, Sources: cli.EnvVars(tuiEnvApplyImmediately), Usage: "apply TUI create, update, and delete operations directly to AWS instead of staging local changes"},
 	}
 
 	sort.Sort(cli.FlagsByName(flags))
@@ -103,10 +94,7 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 		Keymap:                    global.Keymap,
 		ShowColumns:               showColumns,
 		SortColumns:               compactStrings(stringSliceFlagValue(cmd, tuiFlagSortBy, tuiEnvSortBy)),
-		NoConfirmOverwriteFile:    boolFlagValueAny(cmd, tuiFlagNoConfirmOverwriteFile, tuiEnvNoConfirmOverwriteFile),
-		NoConfirmWriteSecureValue: boolFlagValueAny(cmd, tuiFlagNoConfirmWriteSecureValue, tuiEnvNoConfirmWriteSecureValue),
-		NoConfirmDeleteOne:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteOne, tuiEnvNoConfirmDeleteOne),
-		NoConfirmDeleteAll:        boolFlagValueAny(cmd, tuiFlagNoConfirmDeleteAll, tuiEnvNoConfirmDeleteAll),
+		ApplyImmediately:          boolFlagValueAny(cmd, tuiFlagApplyImmediately, tuiEnvApplyImmediately),
 		UseInputTTY:               useInputTTY,
 		ImportStdin:               stdinImport,
 	}, nil

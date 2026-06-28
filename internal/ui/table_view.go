@@ -37,7 +37,7 @@ func (component tableViewComponent) renderSelectedParameterBlock(full bool) stri
 		return m.renderBox("Selected Parameter", []string{"No parameters found."}, 8)
 	}
 
-	if full && st.HasLocalChanges() {
+	if full && st.HasLocalChanges() && !m.opts.ApplyImmediately {
 		title := component.selectedParameterDetailsTitle(&st)
 		lines := component.editableSelectedParameterLines(&st)
 
@@ -451,7 +451,7 @@ type tableColumn struct {
 func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 	m := component.model
 	keys := []columnName{columnIndex, columnPath}
-	if m.hasLocalChanges() {
+	if m.hasLocalChanges() && !m.opts.ApplyImmediately {
 		keys = []columnName{columnIndex, columnState, columnPath}
 	}
 

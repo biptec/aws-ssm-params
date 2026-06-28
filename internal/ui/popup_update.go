@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 
+	"github.com/biptec/aws-ssm-params/internal/inventory"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -503,6 +504,15 @@ func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd)
 
 		return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
 	default:
+		if m.opts.ApplyImmediately {
+			items := append(inventory.Items(nil), m.confirmItems...)
+			m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
+			m.loadingTitle = ""
+			m.clearPopupStack()
+
+			return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+		}
+
 		changed := m.applyLocalDeleteItems(m.confirmItems)
 		m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
 		if changed == 0 {

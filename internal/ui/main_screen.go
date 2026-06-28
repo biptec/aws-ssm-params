@@ -93,31 +93,31 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 	case "x":
 		if len(m.visible()) > 0 {
 			items := inventory.Items{m.currentItem()}
-			if m.opts.NoConfirmDeleteOne {
+			if m.opts.ApplyImmediately {
+				m.startConfirm("Delete selected parameter?", "", items, screenMain)
+			} else {
 				changed := m.applyLocalDeleteItems(items)
 				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
 				m.ensureSelection()
-
-				return m, nil
 			}
-
-			m.startConfirm("Delete selected parameter?", "", items, screenMain)
 		}
 	case "X":
 		items := m.visibleItems()
 		if len(items) > 0 {
 			scope := m.mainListScope()
-			if m.opts.NoConfirmDeleteAll {
+			if m.opts.ApplyImmediately {
+				m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "", items, screenMain)
+			} else {
 				changed := m.applyLocalDeleteItems(items)
 				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press P to push %s.", changed, scope)
 				m.ensureSelection()
-
-				return m, nil
 			}
-
-			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "", items, screenMain)
 		}
 	case "r":
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
 		operation, ok := m.revertCurrentLocalChange()
 		if !ok {
 			m.message = "No local change to revert."
@@ -131,6 +131,10 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		m.warningMessage = ""
 		m.applySortWithRules(m.sortRulesOrDefault())
 	case "R":
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
 		indexes := m.visibleDirtyStatusIndexes()
 		if len(indexes) == 0 {
 			m.message = "No visible local changes to revert."
@@ -146,6 +150,10 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		m.warningMessage = ""
 		m.applySortWithRules(m.sortRulesOrDefault())
 	case "p":
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
 		indexes := m.currentDirtyStatusIndexes()
 		if len(indexes) == 0 {
 			m.message = "No local change to push."
@@ -156,6 +164,10 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 
 		m.startPushConfirm("Push selected local change?", indexes, screenMain, false)
 	case "P":
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
 		indexes := m.visibleDirtyStatusIndexes()
 		if len(indexes) == 0 {
 			m.message = "No visible local changes to push."

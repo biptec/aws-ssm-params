@@ -37,10 +37,7 @@ type Options struct {
 	AllowNamesFileUpdate      bool
 	UseInputTTY               bool
 	ImportStdin               []byte
-	NoConfirmOverwriteFile    bool
-	NoConfirmWriteSecureValue bool
-	NoConfirmDeleteOne        bool
-	NoConfirmDeleteAll        bool
+	ApplyImmediately          bool
 }
 
 // screen identifies the currently active TUI view.
@@ -148,25 +145,25 @@ type pushResult struct {
 }
 
 var (
-	frameColor       = lipgloss.Color("24")
-	labelFg          = lipgloss.Color("214")
-	valueFg          = lipgloss.Color("254")
-	mutedFg          = lipgloss.Color("244")
-	selectedFg       = lipgloss.Color("81")
-	missFg           = lipgloss.Color("245")
-	emptyFg          = lipgloss.Color("45")
-	errFg            = lipgloss.Color("203")
-	stateModifiedFg  = lipgloss.Color("39")
-	stateNewFg       = lipgloss.Color("35")
-	stateDeletedFg   = lipgloss.Color("166")
-	stateErrorFg     = lipgloss.Color("88")
-	diffCloudFg      = lipgloss.Color("166")
-	diffLocalFg      = lipgloss.Color("35")
-	tableHeaderFg    = lipgloss.Color("250")
-	searchPromptFg   = lipgloss.Color("81")
-	statusLineFg     = lipgloss.Color("244")
-	warningFg        = lipgloss.Color("214")
-	hotkeyFg         = lipgloss.Color("255")
+	frameColor       = lipgloss.AdaptiveColor{Light: "24", Dark: "24"}
+	labelFg          = lipgloss.AdaptiveColor{Light: "130", Dark: "214"}
+	valueFg          = lipgloss.AdaptiveColor{Light: "235", Dark: "254"}
+	mutedFg          = lipgloss.AdaptiveColor{Light: "240", Dark: "244"}
+	selectedFg       = lipgloss.AdaptiveColor{Light: "31", Dark: "81"}
+	missFg           = lipgloss.AdaptiveColor{Light: "242", Dark: "245"}
+	emptyFg          = lipgloss.AdaptiveColor{Light: "31", Dark: "45"}
+	errFg            = lipgloss.AdaptiveColor{Light: "160", Dark: "203"}
+	stateModifiedFg  = lipgloss.AdaptiveColor{Light: "25", Dark: "39"}
+	stateNewFg       = lipgloss.AdaptiveColor{Light: "28", Dark: "35"}
+	stateDeletedFg   = lipgloss.AdaptiveColor{Light: "130", Dark: "166"}
+	stateErrorFg     = lipgloss.AdaptiveColor{Light: "88", Dark: "88"}
+	diffCloudFg      = lipgloss.AdaptiveColor{Light: "130", Dark: "166"}
+	diffLocalFg      = lipgloss.AdaptiveColor{Light: "28", Dark: "35"}
+	tableHeaderFg    = lipgloss.AdaptiveColor{Light: "240", Dark: "250"}
+	searchPromptFg   = lipgloss.AdaptiveColor{Light: "31", Dark: "81"}
+	statusLineFg     = lipgloss.AdaptiveColor{Light: "240", Dark: "244"}
+	warningFg        = lipgloss.AdaptiveColor{Light: "130", Dark: "214"}
+	hotkeyFg         = lipgloss.AdaptiveColor{Light: "235", Dark: "255"}
 	titleStyle       = lipgloss.NewStyle().Bold(true).Foreground(frameColor)
 	labelStyle       = lipgloss.NewStyle().Foreground(labelFg)
 	valueStyle       = lipgloss.NewStyle().Foreground(valueFg)
@@ -1768,9 +1765,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.applySortWithRules(m.sortRulesOrDefault())
 		m.ensureSelection()
-		m.message = fmt.Sprintf("Pushed %d local change(s).", pushed)
+		if m.opts.ApplyImmediately {
+			m.message = fmt.Sprintf("Applied %d change(s).", pushed)
+		} else {
+			m.message = fmt.Sprintf("Pushed %d local change(s).", pushed)
+		}
 		if failed > 0 {
-			m.errMessage = fmt.Sprintf("Failed to push %d local change(s). See ERR state.", failed)
+			if m.opts.ApplyImmediately {
+				m.errMessage = fmt.Sprintf("Failed to apply %d change(s).", failed)
+			} else {
+				m.errMessage = fmt.Sprintf("Failed to push %d local change(s). See ERR state.", failed)
+			}
 		} else {
 			m.errMessage = ""
 		}
@@ -1913,7 +1918,7 @@ func (m model) View() string {
 	case screenLoading:
 		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
 	case screenMain:
-		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "", m.mainListFiltered())
+		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "", m.mainListFiltered(), m.opts.ApplyImmediately)
 		if m.filterMode {
 			footer = filterFooterText()
 		}

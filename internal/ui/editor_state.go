@@ -32,6 +32,8 @@ func (component editorStateComponent) startMultiline() (tea.Model, tea.Cmd) {
 	m.expandedFields = map[editField]bool{}
 	m.textArea.SetValue(m.currentStatus().Value)
 	m.editPoliciesArea.SetValue(prettyPoliciesForEditor(m.currentStatus().Policies))
+	setTextAreaAbsPosition(&m.textArea, 0)
+	setTextAreaAbsPosition(&m.editPoliciesArea, 0)
 	m.editPathInput.SetValue(m.currentItem().Path)
 	m.editPathInput.Placeholder = ""
 	m.editPathInput.Blur()
@@ -39,6 +41,7 @@ func (component editorStateComponent) startMultiline() (tea.Model, tea.Cmd) {
 	m.editDescriptionInput.Placeholder = ""
 	m.editDescriptionInput.Blur()
 	m.editDescriptionArea.SetValue(m.currentStatus().Description)
+	setTextAreaAbsPosition(&m.editDescriptionArea, 0)
 	m.editDescriptionArea.Blur()
 	m.editFileInput.SetValue("")
 	m.editFileInput.Placeholder = ""
@@ -72,12 +75,15 @@ func (component editorStateComponent) startNewParameter(ret screen) (tea.Model, 
 	m.expandedFields = map[editField]bool{}
 	m.textArea.SetValue("")
 	m.editPoliciesArea.SetValue("")
+	setTextAreaAbsPosition(&m.textArea, 0)
+	setTextAreaAbsPosition(&m.editPoliciesArea, 0)
 	m.editPathInput.SetValue("")
 	m.editPathInput.Placeholder = ""
 	m.editDescriptionInput.SetValue("")
 	m.editDescriptionInput.Placeholder = ""
 	m.editDescriptionInput.Blur()
 	m.editDescriptionArea.SetValue("")
+	setTextAreaAbsPosition(&m.editDescriptionArea, 0)
 	m.editDescriptionArea.Blur()
 	m.editFileInput.SetValue("")
 	m.editFileInput.Placeholder = ""
