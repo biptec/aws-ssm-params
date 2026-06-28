@@ -48,7 +48,7 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 		case "clear":
 			m.setTextFieldValueAndCursor(editFieldValue, "", 0)
 			m.returnToEditorPopup()
-			m.message = "Value cleared. Press Ctrl-s to save."
+			m.message = "Value cleared. Press Ctrl-Space to save."
 
 			return m, nil
 		case "random":
@@ -289,10 +289,10 @@ func (m *model) clearTextActionField(field editField) {
 		switch field {
 		case editFieldPolicies:
 			m.setTextFieldValueAndCursor(editFieldPolicies, "", 0)
-			m.message = "Policies cleared. Press Ctrl-s to save."
+			m.message = "Policies cleared. Press Ctrl-Space to save."
 		case editFieldDescription:
 			m.setTextFieldValueAndCursor(editFieldDescription, "", 0)
-			m.message = "Description cleared. Press Ctrl-s to save."
+			m.message = "Description cleared. Press Ctrl-Space to save."
 		case editFieldValue,
 			editFieldSSMPath,
 			editFieldRegion,

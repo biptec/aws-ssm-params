@@ -909,12 +909,12 @@ func TestFooterStatusLineIsDynamic(t *testing.T) {
 func TestEditorFooterKeepsHotkeysAtSameBottomOffset(t *testing.T) {
 	m := newModel(context.Background(), nil, nil, &Options{NoColor: true})
 
-	withoutStatus := m.renderFooterWithStatus("ctrl+s save")
+	withoutStatus := m.renderFooterWithStatus("ctrl+space save")
 	m.warningMessage = "warning"
-	withStatus := m.renderFooterWithStatus("ctrl+s save")
+	withStatus := m.renderFooterWithStatus("ctrl+space save")
 
-	assert.Equal(t, 2, hotkeyOffsetFromBottom(withoutStatus, "ctrl+s"))
-	assert.Equal(t, 2, hotkeyOffsetFromBottom(withStatus, "ctrl+s"))
+	assert.Equal(t, 2, hotkeyOffsetFromBottom(withoutStatus, "ctrl+space"))
+	assert.Equal(t, 2, hotkeyOffsetFromBottom(withStatus, "ctrl+space"))
 	assert.Contains(t, withStatus, "warning")
 }
 
@@ -1938,7 +1938,7 @@ func TestRandomPopupInsertsIntoEditorWithoutSaving(t *testing.T) {
 	assert.Nil(t, cmd)
 	assert.Equal(t, screenTextArea, m.screen)
 	assert.NotEmpty(t, m.textArea.Value())
-	assert.Contains(t, m.message, "Press Ctrl-s to save")
+	assert.Contains(t, m.message, "Press Ctrl-Space to save")
 	assert.Equal(t, popupNone, m.activePopup)
 }
 
@@ -2042,7 +2042,7 @@ func TestTextAreaFooterUsesStableHotkeyOrderWithoutColons(t *testing.T) {
 
 	footer := m.textAreaFooterText()
 
-	assert.Contains(t, footer, "ctrl+/ help • ctrl+s save")
+	assert.Contains(t, footer, "ctrl+/ help • ctrl+space save")
 	assert.Contains(t, footer, "alt+e value actions")
 	assert.False(t, strings.Contains(footer, "save AWS"))
 	assert.False(t, strings.Contains(footer, "ctrl+o read file"))

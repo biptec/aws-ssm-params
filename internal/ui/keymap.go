@@ -121,3 +121,11 @@ func (keys keymap) resolvePendingNavigationSequence(pending, key string) (naviga
 func isHelpKey(key string) bool {
 	return key == "ctrl+_" || key == "ctrl+/" || key == "ctrl+?"
 }
+
+func isPrimaryActionKey(key string) bool {
+	return key == "ctrl+@" || key == "ctrl+space"
+}
+
+func primaryActionHelp() string {
+	return "ctrl+space"
+}

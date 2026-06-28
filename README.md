@@ -546,7 +546,7 @@ While editing a parameter:
 
 | Shortcut | Action |
 | --- | --- |
-| `ctrl+s` | Save. |
+| `ctrl+space` | Save. |
 | `alt+e` | Open value or policies actions popup. |
 | `ctrl+l` | Toggle line numbers in multiline fields. |
 | `esc`, `q`, `ctrl+g` | Go back or cancel. |

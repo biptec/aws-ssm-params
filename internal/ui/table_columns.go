@@ -110,12 +110,17 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	}
 
 	if m.columnButtonsFocused {
+		if isPrimaryActionKey(key) {
+			m.closeColumnsPopup()
+			return m, nil
+		}
+
 		switch key {
 		case "ctrl+_", "ctrl+/":
 			m.openPopupShortcuts(screenColumns, popupColumns)
 		case "q", "esc", "ctrl+g":
 			m.closeColumnsPopup()
-		case "ctrl+m", "enter", "ctrl+j":
+		case "enter", "ctrl+j":
 			m.closeColumnsPopup()
 		}
 
@@ -145,8 +150,6 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 		m.openPopupShortcuts(screenColumns, popupColumns)
 	case "q", "esc", "ctrl+g":
 		m.closeColumnsPopup()
-	case "ctrl+m":
-		m.closeColumnsPopup()
 	case "enter", "ctrl+j":
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
@@ -165,6 +168,9 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 		for _, c := range cols {
 			m.columns[c] = false
 		}
+	}
+	if isPrimaryActionKey(key) {
+		m.closeColumnsPopup()
 	}
 
 	return m, nil

@@ -21,12 +21,17 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 	}
 
 	if m.sortButtonsFocused {
+		if isPrimaryActionKey(key) {
+			m.closeSortPopup()
+			return m, nil
+		}
+
 		switch key {
 		case "ctrl+_", "ctrl+/":
 			m.openPopupShortcuts(screenMain, popupSort)
 		case "q", "esc", "ctrl+g":
 			m.closeSortPopup()
-		case "ctrl+m", "enter", "ctrl+j":
+		case "enter", "ctrl+j":
 			m.closeSortPopup()
 		}
 
@@ -49,8 +54,6 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 		m.openPopupShortcuts(screenMain, popupSort)
 	case "q", "esc", "ctrl+g":
 		m.closeSortPopup()
-	case "ctrl+m":
-		m.closeSortPopup()
 	case " ", "enter", "ctrl+j":
 		if len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
@@ -61,6 +64,9 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 			m.sortCursor = min(m.sortCursor, len(items)-1)
 			m.toggleSortDirection(items[m.sortCursor].column)
 		}
+	}
+	if isPrimaryActionKey(key) {
+		m.closeSortPopup()
 	}
 
 	return m, nil
@@ -273,6 +279,11 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	m := component.model
 
 	key := msg.String()
+	if isPrimaryActionKey(key) {
+		component.model = m
+		return component.finishConfirmAction()
+	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenConfirm, popupConfirm)
@@ -280,9 +291,6 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	case "q", "esc", "ctrl+g":
 		m.popPopup()
 		return m, nil
-	case "ctrl+m":
-		component.model = m
-		return component.finishConfirmAction()
 	}
 
 	if (&m).navigateConfirmButtons(key) {
@@ -348,14 +356,16 @@ func (component popupUpdateComponent) updateQuitConfirmPopup(msg tea.KeyMsg) (te
 		return m, nil
 	}
 
+	if isPrimaryActionKey(key) {
+		return confirm()
+	}
+
 	switch key {
 	case "ctrl+_", "ctrl+/":
 		m.openPopupShortcuts(screenMain, popupQuitConfirm)
 		return m, nil
 	case "q", "esc", "ctrl+g":
 		return cancel()
-	case "ctrl+m":
-		return confirm()
 	}
 
 	if (&m).navigateConfirmButtons(key) {

@@ -661,7 +661,7 @@ func (component popupViewComponent) renderImportFilePopup() string {
 	lines = m.appendImportSummarySection(lines, "Defaults", m.importParentDefaultSummaryPairs(), int(importMainFieldDefaults), &previousSummaryLines)
 	lines = append(lines, "", m.importActionButtonsLineFocused("Load", m.activePopup == popupImportFile && m.importButtonsFocused))
 
-	return m.renderPopupBoxMinWidth(title, lines, importPopupMinInnerWidth(importMainLabelWidth))
+	return m.renderPopupBoxMinWidth(title, lines, importPopupWideMinInnerWidth(importMainLabelWidth))
 }
 
 func (component popupViewComponent) renderImportFormatPopup() string {
@@ -705,7 +705,7 @@ func (component popupViewComponent) renderImportMapFieldsPopup() string {
 
 	lines = append(lines, "", m.importActionButtonsLineFocused("Apply", m.activePopup == popupImportMapFields && m.importButtonsFocused))
 
-	return m.renderPopupBoxMinWidth("Map fields", lines, importPopupMinInnerWidth(labelWidth))
+	return m.renderPopupBoxMinWidth("Map fields", lines, importPopupWideMinInnerWidth(labelWidth))
 }
 
 func (component popupViewComponent) renderImportMapPathsPopup() string {
@@ -726,7 +726,7 @@ func (component popupViewComponent) renderImportMapPathsPopup() string {
 
 	lines = append(lines, "", m.importActionButtonsLine("Apply"))
 
-	return m.renderPopupBoxMinWidth("Map paths", lines, m.importMapPathsMinInnerWidth(leftInputWidth, rightInputWidth))
+	return m.renderPopupBoxMinWidth("Map paths", lines, importPopupWideMinInnerWidthForContent(m.importMapPathsMinInnerWidth(leftInputWidth, rightInputWidth)))
 }
 
 func (component popupViewComponent) renderImportDefaultsPopup() string {
@@ -745,7 +745,7 @@ func (component popupViewComponent) renderImportDefaultsPopup() string {
 	lines = append(lines, m.importDefaultAreaLines("Description", &m.importDefaultDescription, 5, rowLimits[5])...)
 	lines = append(lines, "", m.importActionButtonsLine("Apply"))
 
-	return m.renderPopupBoxWithActionsMinWidth("Defaults", lines, "", max(importPopupMinInnerWidth(importDefaultsLabelWidth), m.importDefaultsMinInnerWidth()))
+	return m.renderPopupBoxWithActionsMinWidth("Defaults", lines, "", importPopupWideMinInnerWidthForContent(max(importPopupMinInnerWidth(importDefaultsLabelWidth), m.importDefaultsMinInnerWidth())))
 }
 
 func (component popupViewComponent) renderImportFilePickerPopup() string {
@@ -770,7 +770,7 @@ func (component popupViewComponent) renderImportFilePickerPopup() string {
 		minInnerWidth = importFilePickerStableMinInnerWidth(picker)
 	}
 
-	return m.renderPopupBoxMinWidth("Open Path", lines, minInnerWidth)
+	return m.renderPopupBoxMinWidth("Open Path", lines, importPopupWideMinInnerWidthForContent(minInnerWidth))
 }
 
 func (component popupViewComponent) renderExportFilePopup() string {
@@ -791,7 +791,7 @@ func (component popupViewComponent) renderExportFilePopup() string {
 	lines = m.appendExportSummarySection(lines, "Map paths", m.exportMapPathSummaryPairs(), int(exportMainFieldMapPaths), &previousSummaryLines)
 	lines = append(lines, "", m.importActionButtonsLineFocused("Export", m.activePopup == popupExportFile && m.importButtonsFocused))
 
-	return m.renderPopupBoxMinWidth("Export to file", lines, importPopupMinInnerWidth(exportMainLabelWidth))
+	return m.renderPopupBoxMinWidth("Export to file", lines, importPopupWideMinInnerWidth(exportMainLabelWidth))
 }
 
 func (component popupViewComponent) renderExportOverwriteConfirmPopup() string {
@@ -845,7 +845,7 @@ func (component popupViewComponent) renderExportOutputFieldsPopup() string {
 
 	lines = append(lines, "", m.importActionButtonsLineFocused("Apply", m.activePopup == popupExportOutputFields && m.importButtonsFocused))
 
-	return m.renderPopupBoxMinWidth("Output fields", lines, importPopupMinInnerWidth(labelWidth))
+	return m.renderPopupBoxMinWidth("Output fields", lines, importPopupWideMinInnerWidth(labelWidth))
 }
 
 func (m model) exportOutputFieldLine(label, value string, cursor, labelWidth int) string {
@@ -892,7 +892,7 @@ func (component popupViewComponent) renderExportMapFieldsPopup() string {
 
 	lines = append(lines, "", m.importActionButtonsLineFocused("Apply", m.activePopup == popupExportMapFields && m.importButtonsFocused))
 
-	return m.renderPopupBoxMinWidth("Map fields", lines, importPopupMinInnerWidth(labelWidth))
+	return m.renderPopupBoxMinWidth("Map fields", lines, importPopupWideMinInnerWidth(labelWidth))
 }
 
 func (component popupViewComponent) renderExportMapPathsPopup() string {
@@ -912,7 +912,7 @@ func (component popupViewComponent) renderExportMapPathsPopup() string {
 
 	lines = append(lines, "", m.importActionButtonsLine("Apply"))
 
-	return m.renderPopupBoxMinWidth("Map paths", lines, m.importMapPathsMinInnerWidth(leftInputWidth, rightInputWidth))
+	return m.renderPopupBoxMinWidth("Map paths", lines, importPopupWideMinInnerWidthForContent(m.importMapPathsMinInnerWidth(leftInputWidth, rightInputWidth)))
 }
 
 func (m model) exportChoiceLine(label, value string, cursor int) string {
@@ -1726,6 +1726,14 @@ func importPopupMinInnerWidth(labelWidth int) int {
 	return importBaseLineWidth(labelWidth) + 4
 }
 
+func importPopupWideMinInnerWidth(labelWidth int) int {
+	return importPopupWideMinInnerWidthForContent(importPopupMinInnerWidth(labelWidth))
+}
+
+func importPopupWideMinInnerWidthForContent(width int) int {
+	return max(64, width)
+}
+
 func importBaseLineWidth(labelWidth int) int {
 	return importInputLineWidth(labelWidth, importMinimumValueWidth(labelWidth))
 }
@@ -1804,7 +1812,7 @@ func importEnterKey(key string) bool {
 }
 
 func importPrimaryActionKey(key string) bool {
-	return key == "ctrl+m"
+	return isPrimaryActionKey(key)
 }
 
 func importCancelKey(key string) bool {

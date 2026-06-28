@@ -582,28 +582,28 @@ func (component editorViewComponent) textAreaFooterText() string {
 
 	if m.usesViEditMode() {
 		if m.viInsertMode {
-			return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + " • esc normal"
+			return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + " • esc normal"
 		}
 
-		return "ctrl+/ help • i insert • ctrl+s save" + lineAction + valueAction + " • esc back"
+		return "ctrl+/ help • i insert • " + primaryActionHelp() + " save" + lineAction + valueAction + " • esc back"
 	}
 
 	suffix := " • esc back"
 
 	switch m.editField {
 	case editFieldValue, editFieldSSMPath, editFieldDescription, editFieldPolicies, editFieldFilePath:
-		return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + suffix
+		return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + suffix
 	case editFieldRegion:
-		return "ctrl+/ help • enter choose region • ctrl+s save" + suffix
+		return "ctrl+/ help • enter choose region • " + primaryActionHelp() + " save" + suffix
 	case editFieldType:
-		return "ctrl+/ help • enter choose type • ctrl+s save" + suffix
+		return "ctrl+/ help • enter choose type • " + primaryActionHelp() + " save" + suffix
 	case editFieldTier:
-		return "ctrl+/ help • enter choose tier • ctrl+s save" + suffix
+		return "ctrl+/ help • enter choose tier • " + primaryActionHelp() + " save" + suffix
 	case editFieldDataType:
-		return "ctrl+/ help • enter choose data type • ctrl+s save" + suffix
+		return "ctrl+/ help • enter choose data type • " + primaryActionHelp() + " save" + suffix
 	case editFieldOverwrite:
-		return "ctrl+/ help • enter choose overwrite • ctrl+s save" + suffix
+		return "ctrl+/ help • enter choose overwrite • " + primaryActionHelp() + " save" + suffix
 	default:
-		return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + suffix
+		return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + suffix
 	}
 }

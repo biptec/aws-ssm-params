@@ -323,7 +323,7 @@ func (component editorIOComponent) generateRandomValueIntoEditor(kind string) (t
 
 	m.textArea.SetValue(value)
 	m = m.focusEditField(editFieldValue)
-	m.message = "Random value inserted. Press Ctrl-s to save."
+	m.message = "Random value inserted. Press Ctrl-Space to save."
 	m.errMessage = ""
 	m.warningMessage = ""
 	if m.editorPopupActiveOrStack() {

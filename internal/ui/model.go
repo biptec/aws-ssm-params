@@ -21,23 +21,23 @@ import (
 // Options contains runtime settings passed from the CLI layer into the interactive TUI.
 // It deliberately excludes CLI parsing details so the Bubble Tea model can be tested independently.
 type Options struct {
-	Environment               string
-	Region                    string
-	Regions                   []string
-	Profile                   string
-	NamesFile                 string
-	FilterGroups              filter.Groups
-	NoColor                   bool
-	Keymap                    string
-	ShowColumns               []string
-	Sort                      []string
-	Fields                    textio.Fields
-	IncludeValues             bool
-	ShowSecureValues          bool
-	AllowNamesFileUpdate      bool
-	UseInputTTY               bool
-	ImportStdin               []byte
-	ApplyImmediately          bool
+	Environment          string
+	Region               string
+	Regions              []string
+	Profile              string
+	NamesFile            string
+	FilterGroups         filter.Groups
+	NoColor              bool
+	Keymap               string
+	ShowColumns          []string
+	Sort                 []string
+	Fields               textio.Fields
+	IncludeValues        bool
+	ShowSecureValues     bool
+	AllowNamesFileUpdate bool
+	UseInputTTY          bool
+	ImportStdin          []byte
+	ApplyImmediately     bool
 }
 
 // screen identifies the currently active TUI view.

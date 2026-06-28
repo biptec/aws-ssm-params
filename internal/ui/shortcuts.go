@@ -108,28 +108,28 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 	case popupSort:
 		return m.sortPopupScreenFooter()
 	case popupColumns:
-		return "ctrl+/ help • ctrl+m close • enter focused control • space toggle • a all • x none • esc close"
+		return "ctrl+/ help • " + primaryActionHelp() + " close • enter focused control • space toggle • a all • x none • esc close"
 	case popupValueActions:
 		if m.editorPopupActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • c clear • r random • l load • w write • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • c clear • r random • l load • w write • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • c clear • r random • l load • w write • esc cancel"
 	case popupPoliciesActions:
 		if m.editorPopupActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • c clear • l load • w write • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • c clear • l load • w write • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • c clear • l load • w write • esc cancel"
 	case popupDescriptionActions:
 		if m.editorPopupActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • c clear • l load • w write • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • c clear • l load • w write • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • c clear • l load • w write • esc cancel"
 	case popupRandomValue:
 		if m.editorPopupActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • b base64 • x hex • u uuid • c custom • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • b base64 • x hex • u uuid • c custom • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • b base64 • x hex • u uuid • c custom • esc cancel"
@@ -153,74 +153,74 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 				enterAction = "browse"
 			}
 
-			return "ctrl+/ help • ctrl+m " + button + " • enter " + enterAction + " • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " " + button + " • enter " + enterAction + " • esc cancel"
 		}
 
 		return "ctrl+/ help • enter " + button + " • esc cancel"
 	case popupFileWriteConfirm:
 		if m.editorPopupActive {
-			return "ctrl+/ help • ctrl+m yes • enter " + m.editorSelectorEnterAction("yes") + " • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " yes • enter " + m.editorSelectorEnterAction("yes") + " • esc cancel"
 		}
 
 		return "ctrl+/ help • enter yes • esc cancel"
 	case popupUnsavedChanges:
-		return "ctrl+/ help • ctrl+m discard • enter " + m.editorSelectorEnterAction("discard") + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " discard • enter " + m.editorSelectorEnterAction("discard") + " • esc cancel"
 	case popupQuitConfirm:
-		return "ctrl+/ help • ctrl+m quit • enter focused button • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " quit • enter focused button • esc cancel"
 	case popupConfirm:
-		return "ctrl+/ help • ctrl+m confirm • enter focused control • space toggle • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " confirm • enter focused control • space toggle • esc cancel"
 	case popupRegionSelect:
 		if m.importSelectorActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
 		}
 
 		if m.editorSelector {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • esc cancel"
 	case popupTypeSelect:
 		if m.importSelectorActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • e secure • s string • l list • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • e secure • s string • l list • esc cancel"
 		}
 
 		if m.editorSelector {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • e secure • s string • l list • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • e secure • s string • l list • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • e secure • s string • l list • esc cancel"
 	case popupTierSelect:
 		if m.importSelectorActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • i intelligent • s standard • a advanced • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • i intelligent • s standard • a advanced • esc cancel"
 		}
 
 		if m.editorSelector {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • i intelligent • s standard • a advanced • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • i intelligent • s standard • a advanced • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • i intelligent • s standard • a advanced • esc cancel"
 	case popupDataTypeSelect:
 		if m.importSelectorActive {
-			return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • t text • a AMI • i integration • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • t text • a AMI • i integration • esc cancel"
 		}
 
 		if m.editorSelector {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • t text • a AMI • i integration • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • t text • a AMI • i integration • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • t text • a AMI • i integration • esc cancel"
 	case popupOverwriteSelect:
 		if m.editorSelector {
-			return "ctrl+/ help • ctrl+m select • enter " + m.editorSelectorEnterAction("select") + " • t true • f false • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.editorSelectorEnterAction("select") + " • t true • f false • esc cancel"
 		}
 
 		return "ctrl+/ help • enter select • t true • f false • esc cancel"
 	case popupImportFile:
-		return "ctrl+/ help • ctrl+m load • enter " + m.importFileEnterAction() + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " load • enter " + m.importFileEnterAction() + " • esc cancel"
 	case popupImportKeyField:
-		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
 	case popupImportFormat:
-		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
 	case popupImportFilePicker:
 		return "ctrl+/ help • enter select/open • tab buttons • " + m.filePickerParentFooterShortcut() + " parent • esc cancel"
 	case popupImportDefaults:
@@ -239,10 +239,10 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 				enterAction = "newline"
 			}
 
-			return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • alt+e actions • esc cancel"
+			return "ctrl+/ help • " + primaryActionHelp() + " apply • enter " + enterAction + " • alt+e actions • esc cancel"
 		}
 
-		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " apply • enter " + enterAction + " • esc cancel"
 	case popupImportMapFields, popupImportMapPaths:
 		enterAction := m.importSelectorEnterAction("apply")
 		if kind == popupImportMapFields && !m.importButtonsFocused {
@@ -253,13 +253,13 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 			enterAction = "next input"
 		}
 
-		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " apply • enter " + enterAction + " • esc cancel"
 	case popupExportFile:
-		return "ctrl+/ help • ctrl+m export • enter " + m.exportFileEnterAction() + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " export • enter " + m.exportFileEnterAction() + " • esc cancel"
 	case popupExportKeyField:
-		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • esc cancel"
 	case popupExportFormat:
-		return "ctrl+/ help • ctrl+m select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " select • enter " + m.importSelectorEnterAction("select") + " • d dotenv • j json • y yaml • esc cancel"
 	case popupExportOutputFields, popupExportMapFields:
 		enterAction := m.importSelectorEnterAction("apply")
 		if !m.importButtonsFocused {
@@ -269,16 +269,16 @@ func (m *shortcuts) popupFooterText(kind popupKind) string {
 			}
 		}
 
-		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " apply • enter " + enterAction + " • esc cancel"
 	case popupExportMapPaths:
 		enterAction := m.importSelectorEnterAction("apply")
 		if !m.importButtonsFocused {
 			enterAction = "next input"
 		}
 
-		return "ctrl+/ help • ctrl+m apply • enter " + enterAction + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " apply • enter " + enterAction + " • esc cancel"
 	case popupExportOverwriteConfirm:
-		return "ctrl+/ help • ctrl+m overwrite • enter " + m.importFocusedButtonAction("overwrite") + " • esc cancel"
+		return "ctrl+/ help • " + primaryActionHelp() + " overwrite • enter " + m.importFocusedButtonAction("overwrite") + " • esc cancel"
 	default:
 		return "ctrl+/ help • esc cancel"
 	}
@@ -312,7 +312,7 @@ func (m *shortcuts) editorPopupFooterText() string {
 		}
 	}
 
-	parts := []string{"ctrl+/ help", "ctrl+s save", "enter " + enterAction}
+	parts := []string{"ctrl+/ help", primaryActionHelp() + " save", "enter " + enterAction}
 	if !m.editorButtonsFocused {
 		switch m.editField {
 		case editFieldDescription:
@@ -395,7 +395,7 @@ func (m *shortcuts) sortPopupScreenFooter() string {
 	sortItems := m.popupSortItems()
 	parts := make([]string, 0, 2+len(sortItems)+1)
 
-	parts = append(parts, "ctrl+/ help", "ctrl+m close", "enter focused control", "d direction")
+	parts = append(parts, "ctrl+/ help", primaryActionHelp()+" close", "enter focused control", "d direction")
 	for _, item := range sortItems {
 		parts = append(parts, item.hotkey+" "+strings.ToLower(item.label))
 	}
@@ -461,21 +461,21 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 		return ""
 	case popupConfirm:
 		return strings.TrimSpace(`Actions
-  ctrl+m       confirm
+  ctrl+space   confirm
   enter        focused control
   space        toggle focused checkbox
   tab          move between controls
   esc / q / ctrl+g  cancel`)
 	case popupSort:
 		return strings.TrimSpace(`Actions
-  ctrl+m       close
+  ctrl+space   close
   enter        toggle focused column / focused button
   d            toggle selected direction
   tab          move between list and buttons
   esc / q / ctrl+g  close`)
 	case popupColumns:
 		return strings.TrimSpace(`Actions
-  ctrl+m       close
+  ctrl+space   close
   enter        toggle focused column / focused button
   space        toggle focused column
   a            show all columns
@@ -485,7 +485,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	case popupValueActions:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
-  ctrl+m       select focused action
+  ctrl+space   select focused action
   enter        select focused action / focused button
   c            clear value
   r            random value
@@ -505,7 +505,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	case popupPoliciesActions:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
-  ctrl+m       select focused action
+  ctrl+space   select focused action
   enter        select focused action / focused button
   c            clear policies
   l            load from file
@@ -523,7 +523,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	case popupDescriptionActions:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
-  ctrl+m       select focused action
+  ctrl+space   select focused action
   enter        select focused action / focused button
   c            clear description
   l            load from file
@@ -560,7 +560,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 			}
 
 			return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m       %s
+  ctrl+space   %s
   enter        %s
   tab          move between input and buttons
   esc / q / ctrl+g  cancel`, primaryAction, enterAction))
@@ -572,7 +572,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 	case popupFileWriteConfirm:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
-  ctrl+m       yes / continue
+  ctrl+space   yes / continue
   enter        yes / continue / focused button
   y            yes / continue
   tab          move between buttons
@@ -585,20 +585,20 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
   esc / q / ctrl+g  cancel`)
 	case popupUnsavedChanges:
 		return strings.TrimSpace(`Actions
-  ctrl+m       discard changes
+  ctrl+space   discard changes
   enter        discard changes / focused button
   tab          move between buttons
   esc / q / ctrl+g  cancel`)
 	case popupQuitConfirm:
 		return strings.TrimSpace(`Actions
-  ctrl+m       quit
+  ctrl+space   quit
   enter        focused button
   tab          move between buttons
   esc / q / ctrl+g  cancel`)
 	case popupRandomValue:
 		if m.editorPopupActive {
 			return strings.TrimSpace(`Actions
-  ctrl+m       select focused option
+  ctrl+space   select focused option
   enter        select focused option / focused button
   b            base64 32 bytes
   x            hex 32 bytes
@@ -652,13 +652,13 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 		return m.importFileActionsShortcuts()
 	case popupImportKeyField:
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      select focused option
+  ctrl+space  select focused option
   enter       %s
   tab         move between options and buttons
   esc / q / ctrl+g  cancel`, m.importSelectorEnterAction("select")))
 	case popupImportFormat:
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      select focused option
+  ctrl+space  select focused option
   enter       %s
   d           Dotenv
   j           JSON
@@ -674,19 +674,19 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 		return m.importChildActionsShortcuts(kind)
 	case popupExportFile:
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      export visible parameters
+  ctrl+space  export visible parameters
   enter       %s
   tab         move between form and buttons
   esc / q / ctrl+g  cancel`, m.exportFileEnterAction()))
 	case popupExportKeyField:
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      select focused option
+  ctrl+space  select focused option
   enter       %s
   tab         move between options and buttons
   esc / q / ctrl+g  cancel`, m.importSelectorEnterAction("select")))
 	case popupExportFormat:
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      select focused option
+  ctrl+space  select focused option
   enter       %s
   d           Dotenv
   j           JSON
@@ -697,7 +697,7 @@ func (m *shortcuts) popupActionsShortcuts(kind popupKind) string {
 		return m.importChildActionsShortcuts(kind)
 	case popupExportOverwriteConfirm:
 		return strings.TrimSpace(`Actions
-  ctrl+m      overwrite existing file
+  ctrl+space  overwrite existing file
   enter       focused button
   tab         move between buttons
   esc / q / ctrl+g  cancel`)
@@ -725,7 +725,7 @@ func (m *shortcuts) editorPopupActionsShortcuts() string {
 
 	lines := []string{
 		"Actions",
-		"  ctrl+s      save",
+		"  ctrl+space  save",
 		"  enter       " + enterAction,
 	}
 
@@ -746,7 +746,7 @@ func (m *shortcuts) editorPopupActionsShortcuts() string {
 
 func (m *shortcuts) importFileActionsShortcuts() string {
 	return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      load file
+  ctrl+space  load file
   enter       %s
   tab         move through fields and buttons
   esc / q / ctrl+g  cancel`, m.importFileEnterAction()))
@@ -778,7 +778,7 @@ func (m *shortcuts) importChildActionsShortcuts(kind popupKind) string {
 		}
 
 		return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      apply values
+  ctrl+space  apply values
   enter       %s
   alt+e       actions popup
   tab         %s
@@ -786,7 +786,7 @@ func (m *shortcuts) importChildActionsShortcuts(kind popupKind) string {
 	}
 
 	return strings.TrimSpace(fmt.Sprintf(`Actions
-  ctrl+m      apply values
+  ctrl+space  apply values
   enter       %s
   tab         %s
   esc / q / ctrl+g  cancel`, enterAction, tabAction))
@@ -974,21 +974,21 @@ func (m *shortcuts) actionsShortcuts(forScreen screen) string {
 			if m.viInsertMode {
 				return strings.TrimSpace(`Actions
   esc          normal mode
-  ctrl+s       save
+  ctrl+space   save
   alt+e        value/description/policies actions popup
   y            confirm pending file write warning`)
 			}
 
 			return strings.TrimSpace(`Actions
   i            insert mode
-  ctrl+s       save
+  ctrl+space   save
   alt+e        value/description/policies actions popup
   y            confirm pending file write warning
   esc / q / ctrl+g  back`)
 		}
 
 		return strings.TrimSpace(`Actions
-  ctrl+s       save
+  ctrl+space   save
   alt+e        value/description/policies actions popup
   enter        expand/newline in Description/Policies/Value / choose selectors / next field
   y            confirm pending file write warning

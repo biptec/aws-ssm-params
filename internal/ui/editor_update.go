@@ -13,14 +13,16 @@ func (component editorUpdateComponent) updateEditorPopup(msg tea.KeyMsg) (tea.Mo
 	key := msg.String()
 
 	if m.editorButtonsFocused {
+		if isPrimaryActionKey(key) {
+			return m.saveValue(m.textArea.Value())
+		}
+
 		switch key {
 		case "ctrl+_", "ctrl+/":
 			m.openPopupShortcuts(screenTextArea, popupEditor)
 			return m, nil
 		case "q", "esc", "ctrl+g":
 			return m.requestEditorBack()
-		case "ctrl+s":
-			return m.saveValue(m.textArea.Value())
 		case "enter", "ctrl+j":
 			if m.editorButtonCursor == importActionCancel {
 				return m.requestEditorBack()
@@ -178,6 +180,11 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 				}
 			}
 
+			if isPrimaryActionKey(key) {
+				resetFileConfirmation()
+				return m.saveValue(m.textArea.Value())
+			}
+
 			switch key {
 			case "q", "esc", "ctrl+g":
 				return m.requestEditorBack()
@@ -207,9 +214,6 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 				if m.editField == editFieldOverwrite {
 					return m.startOverwriteSelect(screenTextArea)
 				}
-			case "ctrl+s":
-				resetFileConfirmation()
-				return m.saveValue(m.textArea.Value())
 			case "alt+e":
 				if m.openActionsPopupForFocusedField() {
 					return m, nil
@@ -244,6 +248,11 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
 			return updated, cmd
 		}
+	}
+
+	if isPrimaryActionKey(key) {
+		resetFileConfirmation()
+		return m.saveValue(m.textArea.Value())
 	}
 
 	switch key {
@@ -318,9 +327,6 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		if isMultilineEditField(m.editField) {
 			return m, nil
 		}
-	case "ctrl+s":
-		resetFileConfirmation()
-		return m.saveValue(m.textArea.Value())
 	case "backspace", "ctrl+h":
 		if isEditableTextField(m.editField) && m.activeTextDeleteBackward() {
 			m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
