@@ -13,18 +13,24 @@ type editorActionsComponent struct {
 func (component *editorActionsComponent) openActionsPopupForFocusedField() bool {
 	m := &component.model
 	switch m.editField {
-	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
+	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
 		return false
 	case editFieldValue:
 		m.valueActionCursor = 0
 		m.fileActionField = editFieldValue
-		m.pushPopup(popupValueActions)
+		m.pushEditorChildPopup(popupValueActions)
+
+		return true
+	case editFieldDescription:
+		m.valueActionCursor = 0
+		m.fileActionField = editFieldDescription
+		m.pushEditorChildPopup(popupDescriptionActions)
 
 		return true
 	case editFieldPolicies:
 		m.valueActionCursor = 0
 		m.fileActionField = editFieldPolicies
-		m.pushPopup(popupPoliciesActions)
+		m.pushEditorChildPopup(popupPoliciesActions)
 
 		return true
 	default:
@@ -37,6 +43,62 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 	items := valueActions()
 
 	key := msg.String()
+	choose := func(action string) (tea.Model, tea.Cmd) {
+		switch action {
+		case "clear":
+			m.setTextFieldValueAndCursor(editFieldValue, "", 0)
+			m.returnToEditorPopup()
+			m.message = "Value cleared. Press Ctrl-Space to save."
+
+			return m, nil
+		case "random":
+			m.randomCursor = 0
+			m.fileActionField = editFieldValue
+			m.pushEditorChildPopup(popupRandomValue)
+
+			return m, nil
+		case "load":
+			m.fileActionMode = "load"
+			m.fileActionField = editFieldValue
+			m.input.SetValue(m.editFileInput.Value())
+			m.input.Placeholder = ""
+			m.input.Focus()
+			m.pushEditorChildPopup(popupFileAction)
+
+			return m, nil
+		case "write":
+			m.fileActionMode = "write"
+			m.fileActionField = editFieldValue
+			m.input.SetValue(m.editFileInput.Value())
+			m.input.Placeholder = ""
+			m.input.Focus()
+			m.pushEditorChildPopup(popupFileAction)
+
+			return m, nil
+		}
+
+		return m, nil
+	}
+
+	if m.editorPopupActiveOrStack() {
+		if importPrimaryActionKey(key) {
+			return choose(items[min(m.valueActionCursor, len(items)-1)].value)
+		}
+
+		if m.editorButtonsFocused && importEnterKey(key) {
+			if m.editorButtonCursor == importActionCancel {
+				m.returnToEditorPopup()
+				return m, nil
+			}
+
+			return choose(items[min(m.valueActionCursor, len(items)-1)].value)
+		}
+
+		if (&m).navigateEditorPopupButtons(key) {
+			return m, nil
+		}
+	}
+
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.valueActionCursor = cursorFromNavigation(m.valueActionCursor, len(items), action)
@@ -50,57 +112,24 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	choose := func(action string) (tea.Model, tea.Cmd) {
-		switch action {
-		case "clear":
-			m.textArea.SetValue("")
-			m.clearPopupStack()
-			m.message = "Value cleared. Press Ctrl-s to save."
-
-			return m, nil
-		case "random":
-			m.randomCursor = 0
-			m.fileActionField = editFieldValue
-			m.pushPopup(popupRandomValue)
-
-			return m, nil
-		case "load":
-			m.fileActionMode = "load"
-			m.fileActionField = editFieldValue
-			m.input.SetValue(m.editFileInput.Value())
-			m.input.Placeholder = ""
-			m.input.Focus()
-			m.pushPopup(popupFileAction)
-
-			return m, nil
-		case "write":
-			m.fileActionMode = "write"
-			m.fileActionField = editFieldValue
-			m.input.SetValue(m.editFileInput.Value())
-			m.input.Placeholder = ""
-			m.input.Focus()
-			m.pushPopup(popupFileAction)
-
-			return m, nil
-		}
-
-		return m, nil
-	}
 	if action, ok := items.valueByHotkey(key); ok {
 		return choose(action)
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTextArea, popupValueActions)
-	case "q", "esc", "ctrl+g":
-		m.popPopup()
-	case "enter", "ctrl+j":
+	case isCancelKeyMsg(msg):
+		if m.editorPopupActiveOrStack() {
+			m.returnToEditorPopup()
+		} else {
+			m.popPopup()
+		}
+	case isEnterKeyMsg(msg):
 		if len(items) > 0 {
 			return choose(items[m.valueActionCursor].value)
 		}
@@ -110,10 +139,65 @@ func (component editorActionsComponent) updateValueActionsPopup(msg tea.KeyMsg) 
 }
 
 func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	return component.updateTextActionsPopup(msg, editFieldPolicies, policiesActions())
+}
+
+func (component editorActionsComponent) updateDescriptionActionsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	return component.updateTextActionsPopup(msg, editFieldDescription, descriptionActions())
+}
+
+func (component editorActionsComponent) updateTextActionsPopup(msg tea.KeyMsg, field editField, items valueActionItems) (tea.Model, tea.Cmd) {
 	m := component.model
-	items := policiesActions()
 
 	key := msg.String()
+	choose := func(action string) (tea.Model, tea.Cmd) {
+		switch action {
+		case "clear":
+			m.clearTextActionField(field)
+
+			return m, nil
+		case "load":
+			m.fileActionMode = "load"
+			m.fileActionField = field
+			m.input.SetValue(m.initialTextActionFilePath())
+			m.input.Placeholder = ""
+			m.input.Focus()
+			m.pushNestedPopup(popupFileAction)
+
+			return m, nil
+		case "write":
+			m.fileActionMode = "write"
+			m.fileActionField = field
+			m.input.SetValue(m.initialTextActionFilePath())
+			m.input.Placeholder = ""
+			m.input.Focus()
+			m.pushNestedPopup(popupFileAction)
+
+			return m, nil
+		}
+
+		return m, nil
+	}
+
+	if m.editorPopupActiveOrStack() {
+		if importPrimaryActionKey(key) {
+			return choose(items[min(m.valueActionCursor, len(items)-1)].value)
+		}
+
+		if m.editorButtonsFocused && importEnterKey(key) {
+			if m.editorButtonCursor == importActionCancel {
+				m.returnToEditorPopup()
+				return m, nil
+			}
+
+			return choose(items[min(m.valueActionCursor, len(items)-1)].value)
+		}
+
+		if (&m).navigateEditorPopupButtons(key) {
+			return m, nil
+		}
+	}
+
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.valueActionCursor = cursorFromNavigation(m.valueActionCursor, len(items), action)
@@ -127,52 +211,29 @@ func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMs
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	choose := func(action string) (tea.Model, tea.Cmd) {
-		switch action {
-		case "clear":
-			m.editPoliciesArea.SetValue("")
-			m.clearPopupStack()
-			m.message = "Policies cleared. Press Ctrl-s to save."
-			m.focusEditField(editFieldPolicies)
-
-			return m, nil
-		case "load":
-			m.fileActionMode = "load"
-			m.fileActionField = editFieldPolicies
-			m.input.SetValue(m.editFileInput.Value())
-			m.input.Placeholder = ""
-			m.input.Focus()
-			m.pushPopup(popupFileAction)
-
-			return m, nil
-		case "write":
-			m.fileActionMode = "write"
-			m.fileActionField = editFieldPolicies
-			m.input.SetValue(m.editFileInput.Value())
-			m.input.Placeholder = ""
-			m.input.Focus()
-			m.pushPopup(popupFileAction)
-
-			return m, nil
-		}
-
-		return m, nil
-	}
 	if action, ok := items.valueByHotkey(key); ok {
 		return choose(action)
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
+		if field == editFieldDescription {
+			m.openPopupShortcuts(screenTextArea, popupDescriptionActions)
+			break
+		}
+
 		m.openPopupShortcuts(screenTextArea, popupPoliciesActions)
-	case "q", "esc", "ctrl+g":
-		m.popPopup()
-	case "enter", "ctrl+j":
+	case isCancelKeyMsg(msg):
+		if m.editorPopupActiveOrStack() {
+			m.returnToEditorPopup()
+		} else {
+			m.popPopup()
+		}
+	case isEnterKeyMsg(msg):
 		if len(items) > 0 {
 			return choose(items[m.valueActionCursor].value)
 		}
@@ -181,14 +242,128 @@ func (component editorActionsComponent) updatePoliciesActionsPopup(msg tea.KeyMs
 	return m, nil
 }
 
+func (m *model) openImportDefaultActionsPopup(field editField) {
+	m.valueActionCursor = 0
+	m.fileActionField = field
+
+	switch field {
+	case editFieldPolicies:
+		m.pushNestedPopup(popupPoliciesActions)
+	case editFieldDescription:
+		m.pushNestedPopup(popupDescriptionActions)
+	case editFieldValue,
+		editFieldSSMPath,
+		editFieldRegion,
+		editFieldType,
+		editFieldTier,
+		editFieldDataType,
+		editFieldOverwrite,
+		editFieldFilePath:
+	}
+}
+
+func (m *model) clearTextActionField(field editField) {
+	switch {
+	case m.importDefaultsInPopupStack():
+		switch field {
+		case editFieldPolicies:
+			m.importDefaultPolicies.SetValue("")
+			m.importDefaultsCursor = 4
+			m.message = "Policies cleared."
+		case editFieldDescription:
+			m.importDefaultDescription.SetValue("")
+			m.importDefaultsCursor = 5
+			m.message = "Description cleared."
+		case editFieldValue,
+			editFieldSSMPath,
+			editFieldRegion,
+			editFieldType,
+			editFieldTier,
+			editFieldDataType,
+			editFieldOverwrite,
+			editFieldFilePath:
+		}
+
+		m.returnToImportDefaultsPopup()
+	default:
+		switch field {
+		case editFieldPolicies:
+			m.setTextFieldValueAndCursor(editFieldPolicies, "", 0)
+			m.message = "Policies cleared. Press Ctrl-Space to save."
+		case editFieldDescription:
+			m.setTextFieldValueAndCursor(editFieldDescription, "", 0)
+			m.message = "Description cleared. Press Ctrl-Space to save."
+		case editFieldValue,
+			editFieldSSMPath,
+			editFieldRegion,
+			editFieldType,
+			editFieldTier,
+			editFieldDataType,
+			editFieldOverwrite,
+			editFieldFilePath:
+			return
+		}
+
+		m.returnToEditorPopup()
+		*m = m.focusEditField(field)
+	}
+}
+
+func (m model) initialTextActionFilePath() string {
+	if m.importDefaultsInPopupStack() {
+		return ""
+	}
+
+	return m.editFileInput.Value()
+}
+
+func (m model) importDefaultsInPopupStack() bool {
+	if m.activePopup == popupImportDefaults {
+		return true
+	}
+
+	for _, kind := range m.popupStack {
+		if kind == popupImportDefaults {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (m model) fileActionUsesButtons() bool {
+	return m.editorPopupActiveOrStack() || m.importDefaultsInPopupStack()
+}
+
+func (m *model) returnToImportDefaultsPopup() {
+	for m.activePopup != popupNone && m.activePopup != popupImportDefaults {
+		m.popPopup()
+	}
+
+	if m.activePopup == popupImportDefaults {
+		m.focusImportDefaults()
+	}
+}
+
 func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+
 	key := msg.String()
+	if m.fileActionUsesButtons() && !m.editorButtonsFocused && importEnterKey(key) && m.fileActionMode != "random-custom" {
+		cmd := (&m).openPopupFileActionPicker()
+		return m, cmd
+	}
+
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
-			if mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone {
+			switch {
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone && mm.importDefaultsInPopupStack():
+				mm.returnToImportDefaultsPopup()
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone && mm.editorPopupActiveOrStack():
+				mm.returnToEditorPopup()
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone:
 				mm.clearPopupStack()
-			} else if mm.activePopup == popupFileAction {
+			case mm.activePopup == popupFileAction:
 				mm.input.Focus()
 			}
 
@@ -197,39 +372,7 @@ func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (t
 
 		return updated, cmd
 	}
-
-	switch key {
-	case "ctrl+_", "ctrl+/":
-		m.openPopupShortcuts(screenTextArea, popupFileAction)
-		return m, nil
-	case "q", "esc", "ctrl+g":
-		m.input.Blur()
-		m.pendingFileWrite = fileWriteConfirmationNone
-		m.warningMessage = ""
-		m.popPopup()
-
-		return m, nil
-	case "y":
-		if m.fileActionMode != "write" {
-			break
-		}
-
-		switch m.pendingFileWrite {
-		case fileWriteConfirmationNone:
-		case fileWriteConfirmationSecure:
-			m.pendingFileWrite = fileWriteConfirmationNone
-			m.warningMessage = ""
-
-			return finish(m.writeValueToFile(true, false))
-		case fileWriteConfirmationOverwrite:
-			m.pendingFileWrite = fileWriteConfirmationNone
-			m.warningMessage = ""
-
-			return finish(m.writeValueToFile(true, true))
-
-		default:
-		}
-	case "enter", "ctrl+j":
+	runPrimary := func() (tea.Model, tea.Cmd) {
 		m.input.Blur()
 
 		var (
@@ -239,10 +382,16 @@ func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (t
 
 		switch m.fileActionMode {
 		case "load":
-			m.editFileInput.SetValue(m.input.Value())
+			if !m.importDefaultsInPopupStack() {
+				m.editFileInput.SetValue(m.input.Value())
+			}
+
 			updated, cmd = m.loadValueFromFile()
 		case "write":
-			m.editFileInput.SetValue(m.input.Value())
+			if !m.importDefaultsInPopupStack() {
+				m.editFileInput.SetValue(m.input.Value())
+			}
+
 			updated, cmd = m.writeValueToFile(false, false)
 		case "random-custom":
 			updated, cmd = m.generateRandomValueIntoEditor("base64-custom")
@@ -253,9 +402,61 @@ func (component editorActionsComponent) updateFileActionPopup(msg tea.KeyMsg) (t
 		return finish(updated, cmd)
 	}
 
-	var cmd tea.Cmd
+	if m.fileActionUsesButtons() {
+		if importPrimaryActionKey(key) {
+			return runPrimary()
+		}
 
-	m.input, cmd = m.input.Update(msg)
+		if m.editorButtonsFocused && importEnterKey(key) {
+			if m.editorButtonCursor == importActionCancel {
+				m.input.Blur()
+				m.pendingFileWrite = fileWriteConfirmationNone
+				m.warningMessage = ""
+				m.popPopup()
+
+				m.editorButtonsFocused = false
+				if m.activePopup == popupEditor {
+					m = m.focusEditField(m.editField)
+				}
+
+				return m, nil
+			}
+
+			return runPrimary()
+		}
+
+		if (&m).navigateEditorPopupButtons(key) {
+			if m.editorButtonsFocused {
+				m.input.Blur()
+			} else {
+				m.input.Focus()
+			}
+
+			return m, nil
+		}
+	}
+
+	switch {
+	case isHelpKeyMsg(msg):
+		m.openPopupShortcuts(screenTextArea, popupFileAction)
+		return m, nil
+	case isCancelKeyMsg(msg):
+		m.input.Blur()
+		m.pendingFileWrite = fileWriteConfirmationNone
+		m.warningMessage = ""
+		m.popPopup()
+
+		m.editorButtonsFocused = false
+		if m.activePopup == popupEditor {
+			m = m.focusEditField(m.editField)
+		}
+
+		return m, nil
+	case isEnterKeyMsg(msg):
+		return runPrimary()
+	}
+
+	cmd := m.updateTextInput(&m.input, msg)
 
 	return m, cmd
 }
@@ -265,9 +466,14 @@ func (component editorActionsComponent) updateFileWriteConfirmPopup(msg tea.KeyM
 	key := msg.String()
 	finish := func(updated tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
 		if mm, ok := updated.(model); ok {
-			if mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone {
+			switch {
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone && mm.importDefaultsInPopupStack():
+				mm.returnToImportDefaultsPopup()
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone && mm.editorPopupActiveOrStack():
+				mm.returnToEditorPopup()
+			case mm.errMessage == "" && mm.pendingFileWrite == fileWriteConfirmationNone:
 				mm.clearPopupStack()
-			} else if mm.activePopup == popupFileAction {
+			case mm.activePopup == popupFileAction:
 				mm.input.Focus()
 			}
 
@@ -276,22 +482,7 @@ func (component editorActionsComponent) updateFileWriteConfirmPopup(msg tea.KeyM
 
 		return updated, cmd
 	}
-
-	switch key {
-	case "ctrl+_", "ctrl+/":
-		m.openPopupShortcuts(screenTextArea, popupFileWriteConfirm)
-		return m, nil
-	case "q", "esc", "ctrl+g":
-		m.pendingFileWrite = fileWriteConfirmationNone
-		m.warningMessage = ""
-		m.popPopup()
-
-		if m.activePopup == popupFileAction {
-			m.input.Focus()
-		}
-
-		return m, nil
-	case "enter", "ctrl+j", "y":
+	confirm := func() (tea.Model, tea.Cmd) {
 		switch m.pendingFileWrite {
 		case fileWriteConfirmationNone:
 		case fileWriteConfirmationSecure:
@@ -307,21 +498,96 @@ func (component editorActionsComponent) updateFileWriteConfirmPopup(msg tea.KeyM
 		default:
 			m.popPopup()
 		}
+
+		return m, nil
+	}
+
+	if m.editorPopupActiveOrStack() {
+		if importPrimaryActionKey(key) {
+			return confirm()
+		}
+
+		if m.editorButtonsFocused && importEnterKey(key) {
+			if m.editorButtonCursor == importActionCancel {
+				m.pendingFileWrite = fileWriteConfirmationNone
+				m.warningMessage = ""
+				m.popPopup()
+				m.editorButtonsFocused = false
+				(&m).focusAfterFileWriteConfirmClose()
+
+				return m, nil
+			}
+
+			return confirm()
+		}
+
+		if (&m).navigateEditorPopupButtons(key) {
+			return m, nil
+		}
+	}
+
+	switch {
+	case isHelpKeyMsg(msg):
+		m.openPopupShortcuts(screenTextArea, popupFileWriteConfirm)
+		return m, nil
+	case isCancelKeyMsg(msg):
+		m.pendingFileWrite = fileWriteConfirmationNone
+		m.warningMessage = ""
+		m.popPopup()
+		m.editorButtonsFocused = false
+		(&m).focusAfterFileWriteConfirmClose()
+
+		return m, nil
+	case isPrimaryActionMsg(msg), isEnterKeyMsg(msg):
+		return confirm()
 	}
 
 	return m, nil
 }
 
+func (m *model) focusAfterFileWriteConfirmClose() {
+	if m.activePopup == popupFileAction {
+		m.input.Focus()
+		return
+	}
+
+	if m.activePopup == popupEditor {
+		*m = m.focusEditField(m.editField)
+	}
+}
+
 func (component editorActionsComponent) updateUnsavedChangesPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
+	key := msg.String()
 
-	switch msg.String() {
-	case "ctrl+_", "ctrl/", "ctrl+/":
-		m.openPopupShortcuts(screenTextArea, popupUnsavedChanges)
-	case "q", "esc", "ctrl+g":
+	if importPrimaryActionKey(key) {
+		m.discardEditorChanges()
+		return m, nil
+	}
+
+	if m.editorButtonsFocused && importEnterKey(key) {
+		if m.editorButtonCursor == importActionPrimary {
+			m.discardEditorChanges()
+			return m, nil
+		}
+
 		m.popPopup()
 		m = m.focusEditField(m.editField)
-	case "enter", "ctrl+j", "y":
+
+		return m, nil
+	}
+
+	if (&m).navigateEditorPopupButtons(key) {
+		return m, nil
+	}
+
+	switch {
+	case isHelpKeyMsg(msg):
+		m.openPopupShortcuts(screenTextArea, popupUnsavedChanges)
+	case isCancelKeyMsg(msg):
+		m.popPopup()
+		m = m.focusEditField(m.editField)
+	case isEnterKeyMsg(msg):
 		m.discardEditorChanges()
 	}
 
@@ -333,6 +599,25 @@ func (component editorActionsComponent) updateRandomValuePopup(msg tea.KeyMsg) (
 	items := randomItems()
 
 	key := msg.String()
+	if m.editorPopupActiveOrStack() {
+		if importPrimaryActionKey(key) {
+			return m.startRandomFromPopup(items[min(m.randomCursor, len(items)-1)].value)
+		}
+
+		if m.editorButtonsFocused && importEnterKey(key) {
+			if m.editorButtonCursor == importActionCancel {
+				m.returnToEditorPopup()
+				return m, nil
+			}
+
+			return m.startRandomFromPopup(items[min(m.randomCursor, len(items)-1)].value)
+		}
+
+		if (&m).navigateEditorPopupButtons(key) {
+			return m, nil
+		}
+	}
+
 	if kind, ok := items.randomKindByHotkey(key); ok {
 		return m.startRandomFromPopup(kind)
 	}
@@ -350,17 +635,20 @@ func (component editorActionsComponent) updateRandomValuePopup(msg tea.KeyMsg) (
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTextArea, popupRandomValue)
-	case "q", "esc", "ctrl+g":
-		m.popPopup()
-	case "enter", "ctrl+j":
+	case isCancelKeyMsg(msg):
+		if m.editorPopupActiveOrStack() {
+			m.returnToEditorPopup()
+		} else {
+			m.popPopup()
+		}
+	case isEnterKeyMsg(msg):
 		if len(items) > 0 {
 			return m.startRandomFromPopup(items[m.randomCursor].value)
 		}
@@ -399,6 +687,14 @@ func valueActions() valueActionItems {
 func policiesActions() valueActionItems {
 	return valueActionItems{
 		{hotkey: "c", value: "clear", label: "Clear policies"},
+		{hotkey: "l", value: "load", label: "Load from file"},
+		{hotkey: "w", value: "write", label: "Write to file"},
+	}
+}
+
+func descriptionActions() valueActionItems {
+	return valueActionItems{
+		{hotkey: "c", value: "clear", label: "Clear description"},
 		{hotkey: "l", value: "load", label: "Load from file"},
 		{hotkey: "w", value: "write", label: "Write to file"},
 	}

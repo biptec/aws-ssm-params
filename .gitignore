@@ -74,3 +74,6 @@ checksums.txt
 
 # Vendored dependencies are kept outside the repository/archive.
 vendor/
+
+# AI instructions
+AGENTS.md

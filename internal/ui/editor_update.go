@@ -1,11 +1,117 @@
 package ui
 
-import (
-	tea "github.com/charmbracelet/bubbletea"
-)
+import tea "github.com/charmbracelet/bubbletea"
 
 type editorUpdateComponent struct {
 	model model
+}
+
+func (component editorUpdateComponent) updateEditorPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m := component.model
+	key := msg.String()
+
+	if m.editorButtonsFocused {
+		if isPrimaryActionMsg(msg) {
+			return m.saveValue(m.textArea.Value())
+		}
+
+		switch {
+		case isHelpKeyMsg(msg):
+			m.openPopupShortcuts(screenTextArea, popupEditor)
+			return m, nil
+		case isCancelKeyMsg(msg):
+			return m.requestEditorBack()
+		case isEnterKeyMsg(msg):
+			if m.editorButtonCursor == importActionCancel {
+				return m.requestEditorBack()
+			}
+
+			return m.saveValue(m.textArea.Value())
+		}
+
+		switch {
+		case isForwardTabKeyString(key):
+			if m.editorButtonCursor == importActionPrimary {
+				m.editorButtonCursor = importActionCancel
+			} else {
+				m.clearEditorButtonFocus()
+				m = m.focusEditField(m.editFieldOrder()[0])
+			}
+
+			return m, nil
+		case isBackwardTabKeyString(key):
+			if m.editorButtonCursor == importActionCancel {
+				m.editorButtonCursor = importActionPrimary
+			} else {
+				m.clearEditorButtonFocus()
+				fields := m.editFieldOrder()
+				m = m.focusEditField(fields[len(fields)-1])
+			}
+
+			return m, nil
+		case isLeftKeyString(key):
+			m.editorButtonCursor = importActionPrimary
+			return m, nil
+		case isRightKeyString(key):
+			m.editorButtonCursor = importActionCancel
+			return m, nil
+		}
+
+		if action, ok := m.interpretNavigationKey(key); ok {
+			switch action {
+			case navPrevious:
+				m.clearEditorButtonFocus()
+			case navFirst:
+				m.clearEditorButtonFocus()
+				m = m.focusEditField(m.editFieldOrder()[0])
+			case navLast:
+				m.editorButtonCursor = importActionCancel
+			case navNone, navNext, navPageUp, navPageDown:
+			}
+
+			return m, nil
+		}
+
+		return m, nil
+	}
+
+	switch {
+	case isForwardTabKeyString(key):
+		m.moveEditorPopupTabFocus(false)
+		return m, nil
+	case isBackwardTabKeyString(key):
+		m.moveEditorPopupTabFocus(true)
+		return m, nil
+	}
+
+	return component.updateTextArea(msg)
+}
+
+func (m *model) moveEditorPopupTabFocus(reverse bool) {
+	fields := m.editFieldOrder()
+
+	idx := indexOfEditField(fields, m.editField)
+	if idx < 0 {
+		idx = 0
+	}
+
+	if reverse {
+		if idx == 0 {
+			m.focusEditorButton(importActionCancel)
+			return
+		}
+
+		*m = m.focusEditField(fields[idx-1])
+
+		return
+	}
+
+	if idx >= len(fields)-1 {
+		m.focusEditorButton(importActionPrimary)
+		return
+	}
+
+	*m = m.focusEditField(fields[idx+1])
 }
 
 // updateTextArea handles the unified edit form: editable SSM name, region/type selectors, file path, multiline value, and save/file operations.
@@ -49,19 +155,19 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		beforeExpandableValue = m.expandableFieldValue(beforeEditField)
 	}
 
-	if key == "ctrl+l" && isExpandableEditField(m.editField) {
+	if isLineNumbersKeyMsg(msg) && isExpandableEditField(m.editField) {
 		m.showGutters = !m.showGutters
 		return m, nil
 	}
 
 	if m.keymapStyle() == keymapVi && isEditableTextField(m.editField) {
-		if isHelpKey(key) {
-			m.openShortcuts(screenTextArea)
+		if isHelpKeyMsg(msg) {
+			m.openEditorPopupShortcuts()
 			return m, nil
 		}
 
 		if m.viInsertMode {
-			if key == "esc" {
+			if isViNormalModeKeyMsg(msg) {
 				m.viInsertMode = false
 				m.pendingKeySequence = ""
 
@@ -69,16 +175,22 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 			}
 		} else {
 			if action, ok := m.editorNavigationAction(key); ok {
-				allowFromExpanded := action == navPrevious && key == "shift+tab" || action == navNext && key == "tab"
+				allowFromExpanded := action == navPrevious && isBackwardTabKeyString(key) ||
+					action == navNext && isForwardTabKeyString(key)
 				if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
 					return updated, cmd
 				}
 			}
 
-			switch key {
-			case "q", "esc", "ctrl+g":
+			if isPrimaryActionMsg(msg) {
+				resetFileConfirmation()
+				return m.saveValue(m.textArea.Value())
+			}
+
+			switch {
+			case isCancelKeyMsg(msg):
 				return m.requestEditorBack()
-			case "enter", "ctrl+j":
+			case isEnterKeyMsg(msg):
 				resetFileConfirmation()
 
 				if m.expandCompactFieldIfNeeded() {
@@ -104,10 +216,7 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 				if m.editField == editFieldOverwrite {
 					return m.startOverwriteSelect(screenTextArea)
 				}
-			case "ctrl+s":
-				resetFileConfirmation()
-				return m.saveValue(m.textArea.Value())
-			case "alt+e":
+			case isFocusedFieldActionsKeyMsg(msg):
 				if m.openActionsPopupForFocusedField() {
 					return m, nil
 				}
@@ -124,12 +233,12 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
-		m.openShortcuts(screenTextArea)
+	switch {
+	case isHelpKeyMsg(msg):
+		m.openEditorPopupShortcuts()
 		return m, nil
-	case "q", "esc", "ctrl+g":
-		if key == "q" && m.shouldTypePrintableQInEditField() {
+	case isCancelKeyMsg(msg):
+		if isPrintableCancelKeyMsg(msg) && m.shouldTypePrintableQInEditField() {
 			break
 		}
 
@@ -137,14 +246,20 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 	}
 
 	if action, ok := m.editorNavigationAction(key); ok {
-		allowFromExpanded := action == navPrevious && key == "shift+tab" || action == navNext && key == "tab"
+		allowFromExpanded := action == navPrevious && isBackwardTabKeyString(key) ||
+			action == navNext && isForwardTabKeyString(key)
 		if updated, cmd, handled := moveFocusWithNavigation(action, allowFromExpanded); handled {
 			return updated, cmd
 		}
 	}
 
-	switch key {
-	case "enter", "ctrl+j":
+	if isPrimaryActionMsg(msg) {
+		resetFileConfirmation()
+		return m.saveValue(m.textArea.Value())
+	}
+
+	switch {
+	case isEnterKeyMsg(msg):
 		resetFileConfirmation()
 
 		if m.expandCompactFieldIfNeeded() {
@@ -168,56 +283,29 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 
 		default:
 		}
-	case "alt+e":
+	case isFocusedFieldActionsKeyMsg(msg):
 		resetFileConfirmation()
 		m.openActionsPopupForFocusedField()
 
 		return m, nil
-	case "y":
-		switch m.pendingFileWrite {
-		case fileWriteConfirmationNone:
-		case fileWriteConfirmationSecure:
-			m.pendingFileWrite = fileWriteConfirmationNone
-			m.warningMessage = ""
-
-			return m.writeValueToFile(true, false)
-		case fileWriteConfirmationOverwrite:
-			m.pendingFileWrite = fileWriteConfirmationNone
-			m.warningMessage = ""
-
-			return m.writeValueToFile(true, true)
-
-		default:
-		}
-	case "pagedown", "pgdown", "ctrl+v":
-		if !isMultilineEditField(m.editField) {
-			break
-		}
-
-		resetFileConfirmation()
-		m.moveActiveMultilinePage(1)
-
-		return m, nil
-	case "alt+v", "pageup", "pgup":
-		if !isMultilineEditField(m.editField) {
-			break
-		}
-
-		resetFileConfirmation()
-		m.moveActiveMultilinePage(-1)
-
-		return m, nil
-	case "ctrl+k":
+	case bindingMatchesString(emacsTextKillLineShortcut, key):
 		if isMultilineEditField(m.editField) && m.keymapStyle() != keymapEmacs {
 			return m, nil
 		}
-	case "ctrl+w", "ctrl+r":
+	case isReservedMultilineEditKeyMsg(msg):
 		if isMultilineEditField(m.editField) {
 			return m, nil
 		}
-	case "ctrl+s":
-		resetFileConfirmation()
-		return m.saveValue(m.textArea.Value())
+	case isDeleteBackwardKeyMsg(msg):
+		if isEditableTextField(m.editField) && m.activeTextDeleteBackward() {
+			m.collapseExpandedFieldAfterEdit(beforeEditField, beforeExpandableValue)
+			m.pendingFileWrite = fileWriteConfirmationNone
+			m.warningMessage = ""
+			m.message = ""
+			m.errMessage = ""
+
+			return m, nil
+		}
 	}
 
 	if updated, handled := m.updateEmacsTextFieldKey(key); handled {
@@ -230,11 +318,11 @@ func (component editorUpdateComponent) updateTextArea(msg tea.KeyMsg) (tea.Model
 	switch m.editField {
 	case editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite:
 	case editFieldSSMPath:
-		m.editPathInput, cmd = m.editPathInput.Update(msg)
+		cmd = m.updateTextInput(&m.editPathInput, msg)
 	case editFieldDescription:
 		m.editDescriptionArea, cmd = m.editDescriptionArea.Update(msg)
 	case editFieldFilePath:
-		m.editFileInput, cmd = m.editFileInput.Update(msg)
+		cmd = m.updateTextInput(&m.editFileInput, msg)
 	case editFieldPolicies:
 		m.editPoliciesArea, cmd = m.editPoliciesArea.Update(msg)
 	case editFieldValue:

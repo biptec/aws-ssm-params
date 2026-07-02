@@ -13,45 +13,33 @@ type mainScreenComponent struct {
 }
 
 // updateMain handles navigation and actions on the main parameter table.
-// It also owns search mode, where printable keys update the active filter instead of triggering table shortcuts.
+// It also owns filter mode, where printable keys update the active local filter instead of triggering table shortcuts.
 func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.message = ""
 
 	key := msg.String()
-	if m.searchMode {
-		switch key {
-		case "ctrl+_", "ctrl+/":
+
+	if m.filterMode {
+		switch {
+		case isHelpKeyMsg(msg):
 			m.openShortcuts(screenMain)
 			return m, nil
-		case "esc", "ctrl+g":
-			m.searchMode = false
-			if m.searchInvalid {
-				m.query = m.effectiveQuery
-				m.searchInvalid = false
-			}
-
+		case isEscapeCloseKeyMsg(msg):
+			m.closeFilterMode()
 			return m, nil
-		case "backspace":
-			if m.query != "" {
-				m.applySearchQuery(m.query[:len(m.query)-1])
-			}
-
-			return m, nil
-		case "enter":
-			m.searchMode = false
-			if m.searchInvalid {
-				m.query = m.effectiveQuery
-				m.searchInvalid = false
-			}
-
+		case isEnterKeyMsg(msg):
+			m.closeFilterMode()
 			return m, nil
 		default:
-			if len(msg.String()) == 1 {
-				m.applySearchQuery(m.query + msg.String())
+			before := m.filterInput.Value()
+
+			cmd := m.updateTextInput(&m.filterInput, msg)
+			if after := m.filterInput.Value(); after != before {
+				m.applyFilterQuery(after)
 			}
 
-			return m, nil
+			return m, cmd
 		}
 	}
 
@@ -72,62 +60,153 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if m.keymapStyle() == keymapVi && isViFirstNavigationPrefixString(key) {
+		m.pendingKeySequence = firstBindingKey(viFirstNavigationPrefixShortcut)
 		return m, nil
 	}
 
-	switch key {
-	case "q", "esc":
-		return m, tea.Quit
-	case "enter", "ctrl+j":
+	if isHelpKeyMsg(msg) {
+		m.openShortcuts(screenMain)
+		return m, nil
+	}
+
+	if isEnterKeyMsg(msg) {
 		if len(m.visible()) == 0 {
 			return m, nil
 		}
 
 		return m.startMultiline()
-	case "n":
+	}
+
+	switch {
+	case isQuitKeyMsg(msg):
+		return m, tea.Quit
+	case isNewParameterShortcutMsg(msg):
 		return m.startNewParameter(screenMain)
-	case "/":
-		m.searchMode = true
-		m.query = m.effectiveQuery
-		m.searchInvalid = false
-	case "d":
+	case isImportShortcutMsg(msg):
+		m.openImportPopup()
+	case isExportShortcutMsg(msg):
+		m.openExportPopup()
+	case isFilterShortcutMsg(msg):
+		m.openFilterMode()
+	case isDetailsShortcutMsg(msg):
 		m.selectedExpanded = !m.selectedExpanded
-	case "c":
+	case isColumnsShortcutMsg(msg):
 		m.openColumnsPopup()
-	case "s":
-		m.sortCursor = m.sortCursorForCurrentSort()
-		m.pushPopup(popupSort)
-	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case isSortShortcutMsg(msg):
+		m.openSortPopup()
+	case isSortColumnShortcut(key):
 		if col, ok := m.visibleSortColumnByHotkey(key); ok {
 			m.applySort(col)
 		}
-	case "x":
+	case isDeleteOneShortcutMsg(msg):
 		if len(m.visible()) > 0 {
 			items := inventory.Items{m.currentItem()}
-			if m.opts.NoConfirmDeleteOne {
-				return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+			if m.opts.ApplyImmediately {
+				m.startConfirm("Delete selected parameter?", "", items, screenMain)
+			} else {
+				changed := m.applyLocalDeleteItems(items)
+				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
+				m.ensureSelection()
 			}
-
-			m.startConfirm("Delete selected parameter?", "", items, screenMain)
 		}
-	case "X":
+	case isDeleteVisibleShortcutMsg(msg):
 		items := m.visibleItems()
 		if len(items) > 0 {
-			if m.opts.NoConfirmDeleteAll {
-				return m, deleteCmdWithBackend(m.contextProvider(), backendFor(m), items, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
+			scope := m.mainListScope()
+			if m.opts.ApplyImmediately {
+				m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "", items, screenMain)
+			} else {
+				changed := m.applyLocalDeleteItems(items)
+				m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press P to push %s.", changed, scope)
+				m.ensureSelection()
 			}
-
-			m.startConfirm(fmt.Sprintf("Delete %d visible parameter(s)?", len(items)), "DELETE ALL", items, screenMain)
 		}
-	case "ctrl+_", "ctrl+/":
-		m.openShortcuts(screenMain)
+	case isRevertOneShortcutMsg(msg):
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
+		operation, ok := m.revertCurrentLocalChange()
+		if !ok {
+			m.message = "No local change to revert."
+			m.errMessage = ""
+			m.warningMessage = ""
+
+			return m, nil
+		}
+
+		m.message = fmt.Sprintf("Reverted %s local change.", operation)
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.applySortWithRules(m.sortRulesOrDefault())
+	case isRevertVisibleShortcutMsg(msg):
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
+		indexes := m.visibleDirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No visible local changes to revert."
+			m.errMessage = ""
+			m.warningMessage = ""
+
+			return m, nil
+		}
+
+		scope := m.mainListScope()
+		changed := m.revertLocalChanges(indexes)
+		m.message = fmt.Sprintf("Reverted %d %s local change(s).", changed, scope)
+		m.errMessage = ""
+		m.warningMessage = ""
+		m.applySortWithRules(m.sortRulesOrDefault())
+	case isPushOneShortcutMsg(msg):
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
+		indexes := m.currentDirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No local change to push."
+			m.errMessage = ""
+			m.warningMessage = ""
+
+			return m, nil
+		}
+
+		m.startPushConfirm("Push selected local change?", indexes, screenMain, false)
+	case isPushVisibleShortcutMsg(msg):
+		if m.opts.ApplyImmediately {
+			return m, nil
+		}
+
+		indexes := m.visibleDirtyStatusIndexes()
+		if len(indexes) == 0 {
+			m.message = "No visible local changes to push."
+			m.errMessage = ""
+			m.warningMessage = ""
+
+			return m, nil
+		}
+
+		m.startPushConfirm(fmt.Sprintf("Push %d %s local change(s)?", len(indexes), m.mainListScope()), indexes, screenMain, true)
 	}
 
 	m.ensureSelection()
 
 	return m, nil
+}
+
+func isSortColumnShortcut(key string) bool {
+	return len(key) == 1 && key[0] >= '0' && key[0] <= '9'
+}
+
+func (m model) mainListScope() string {
+	if m.mainListFiltered() {
+		return "filtered"
+	}
+
+	return "all"
 }
 
 func (component *mainScreenComponent) applyMainNavigation(action navigationAction) {
@@ -190,7 +269,7 @@ func (component mainScreenComponent) renderShortcutsPopup() string {
 	m := component.model
 	lines := strings.Split(m.shortcutsText(), "\n")
 
-	return m.renderPopupBoxWithActions("Shortcuts", lines, "Esc close")
+	return m.renderPopupBoxWithActions("Shortcuts", lines, renderFooter(closeShortcut))
 }
 
 // renderLoading renders a centered loading overlay while the initial background scan is running.

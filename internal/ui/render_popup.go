@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -11,8 +12,8 @@ type popupRenderer struct {
 	width      int
 	height     int
 	innerWidth int
-	layers     []popupKind
-	render     func(popupKind) string
+	layers     []blockKind
+	render     func(blockKind) string
 }
 
 func newPopupRenderer(m model) popupRenderer {
@@ -22,7 +23,7 @@ func newPopupRenderer(m model) popupRenderer {
 		height:     m.height,
 		innerWidth: m.boxInnerWidth(),
 		layers:     m.popupLayers(),
-		render: func(kind popupKind) string {
+		render: func(kind blockKind) string {
 			switch kind {
 			case popupNone:
 				return ""
@@ -48,27 +49,75 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderValueActionsPopup()
 			case popupPoliciesActions:
 				return m.renderPoliciesActionsPopup()
+			case popupDescriptionActions:
+				return m.renderDescriptionActionsPopup()
 			case popupFileAction:
 				return m.renderFileActionPopup()
 			case popupFileWriteConfirm:
 				return m.renderFileWriteConfirmPopup()
 			case popupUnsavedChanges:
 				return m.renderUnsavedChangesPopup()
+			case popupQuitConfirm:
+				return m.renderQuitConfirmPopup()
 			case popupRandomValue:
 				return m.renderRandomValuePopup()
-			default:
+			case popupEditor:
+				return m.renderEditorPopup()
+			case popupImportFile:
+				return m.renderImportFilePopup()
+			case popupImportKeyField:
+				return m.renderImportKeyFieldPopup()
+			case popupImportFormat:
+				return m.renderImportFormatPopup()
+			case popupImportFilePicker:
+				return m.renderImportFilePickerPopup()
+			case popupImportMapFields:
+				return m.renderImportMapFieldsPopup()
+			case popupImportMapPaths:
+				return m.renderImportMapPathsPopup()
+			case popupImportDefaults:
+				return m.renderImportDefaultsPopup()
+			case popupExportFile:
+				return m.renderExportFilePopup()
+			case popupExportKeyField:
+				return m.renderExportKeyFieldPopup()
+			case popupExportFormat:
+				return m.renderExportFormatPopup()
+			case popupExportOutputFields:
+				return m.renderExportOutputFieldsPopup()
+			case popupExportMapFields:
+				return m.renderExportMapFieldsPopup()
+			case popupExportMapPaths:
+				return m.renderExportMapPathsPopup()
+			case popupExportOverwriteConfirm:
+				return m.renderExportOverwriteConfirmPopup()
+			case parameterListBlock,
+				selectedParameterBlock,
+				filterBlock,
+				editorBlock,
+				columnsBlock,
+				confirmBlock,
+				regionSelectBlock,
+				typeSelectBlock,
+				loadingBlock:
 				return ""
 			}
+
+			return ""
 		},
 	}
 }
 
 func (renderer popupRenderer) renderPopupBoxWithActions(title string, lines []string, actions string) string {
+	return renderer.renderPopupBoxWithActionsMinWidth(title, lines, actions, 0)
+}
+
+func (renderer popupRenderer) renderPopupBoxWithActionsMinWidth(title string, lines []string, actions string, minInnerWidth int) string {
 	if strings.TrimSpace(actions) != "" {
 		lines = append(append([]string(nil), lines...), "", renderer.popupActionLine(actions))
 	}
 
-	return renderer.renderPopupBox(title, lines)
+	return renderer.renderPopupBoxMinWidth(title, lines, minInnerWidth)
 }
 
 func (renderer popupRenderer) popupActionLine(actions string) string {
@@ -102,6 +151,10 @@ func (renderer popupRenderer) popupActionLine(actions string) string {
 }
 
 func (renderer popupRenderer) renderPopupBox(title string, lines []string) string {
+	return renderer.renderPopupBoxMinWidth(title, lines, 0)
+}
+
+func (renderer popupRenderer) renderPopupBoxMinWidth(title string, lines []string, minInnerWidth int) string {
 	lines = popupPaddedLines(lines)
 
 	maxLineWidth := 0
@@ -114,8 +167,7 @@ func (renderer popupRenderer) renderPopupBox(title string, lines []string) strin
 		availableInner = renderer.innerWidth
 	}
 
-	innerWidth := max(20, maxLineWidth)
-	innerWidth = min(innerWidth, 80)
+	innerWidth := max(20, maxLineWidth, minInnerWidth)
 	innerWidth = min(innerWidth, max(10, availableInner))
 	out := make([]string, 0, 1+len(lines)+1)
 
@@ -141,8 +193,19 @@ func popupPaddedLines(lines []string) []string {
 	}
 
 	pad := strings.Repeat(" ", horizontalPadding)
+
 	for _, line := range lines {
-		out = append(out, pad+line+pad)
+		rawLeft := strings.HasPrefix(line, rawLeftLinePrefix)
+		if rawLeft {
+			line = strings.TrimPrefix(line, rawLeftLinePrefix)
+		}
+
+		line = pad + line + pad
+		if rawLeft {
+			line = rawLeftLinePrefix + line
+		}
+
+		out = append(out, line)
 	}
 
 	for i := 0; i < verticalPadding; i++ {
@@ -185,6 +248,12 @@ func (renderer popupRenderer) popupBoxBottom(innerWidth int) string {
 }
 
 func (renderer popupRenderer) popupBoxLine(content string, innerWidth int) string {
+	rawLeft := strings.HasPrefix(content, rawLeftLinePrefix)
+	if rawLeft {
+		content = strings.TrimPrefix(content, rawLeftLinePrefix)
+		innerWidth++
+	}
+
 	visible := lipgloss.Width(content)
 	if visible > innerWidth {
 		content = truncateStyled(content, innerWidth)
@@ -196,7 +265,12 @@ func (renderer popupRenderer) popupBoxLine(content string, innerWidth int) strin
 		padWidth = 0
 	}
 
-	return renderer.popupFrame("│") + content + strings.Repeat(" ", padWidth) + renderer.popupFrame("│")
+	leftFrame := renderer.popupFrame("│")
+	if rawLeft {
+		leftFrame = ""
+	}
+
+	return leftFrame + content + strings.Repeat(" ", padWidth) + renderer.popupFrame("│")
 }
 
 func (renderer popupRenderer) popupFrame(s string) string {
@@ -215,7 +289,7 @@ func (renderer popupRenderer) renderPopupStack(body string) string {
 	return body
 }
 
-func (renderer popupRenderer) renderPopup(kind popupKind) string {
+func (renderer popupRenderer) renderPopup(kind blockKind) string {
 	return renderer.render(kind)
 }
 
@@ -271,7 +345,7 @@ func (renderer popupRenderer) overlayPopupOnBody(body, popup string) string {
 }
 
 func overlayPopupLine(baseLine, popupLine string, left, popupWidth, viewWidth int) string {
-	base := stripANSI(baseLine)
+	base := baseLine
 	if viewWidth <= 0 {
 		viewWidth = max(lipgloss.Width(base), left+popupWidth)
 	}
@@ -301,8 +375,26 @@ func takeVisibleColumns(s string, width int) string {
 
 	out := strings.Builder{}
 	used := 0
+	index := 0
+	sawANSI := false
 
-	for _, r := range s {
+	for index < len(s) {
+		if s[index] == '\x1b' {
+			sequence, next := ansiSequence(s, index)
+			out.WriteString(sequence)
+
+			sawANSI = true
+			index = next
+
+			continue
+		}
+
+		if used >= width {
+			break
+		}
+
+		r, size := utf8.DecodeRuneInString(s[index:])
+
 		rw := lipgloss.Width(string(r))
 		if used+rw > width {
 			break
@@ -311,10 +403,23 @@ func takeVisibleColumns(s string, width int) string {
 		out.WriteRune(r)
 
 		used += rw
+		index += size
+	}
+
+	for index < len(s) && s[index] == '\x1b' {
+		sequence, next := ansiSequence(s, index)
+		out.WriteString(sequence)
+
+		sawANSI = true
+		index = next
 	}
 
 	if used < width {
 		out.WriteString(strings.Repeat(" ", width-used))
+	}
+
+	if sawANSI {
+		out.WriteString("\x1b[0m")
 	}
 
 	return out.String()
@@ -325,19 +430,71 @@ func dropVisibleColumns(s string, start int) string {
 		return s
 	}
 
+	out := strings.Builder{}
 	used := 0
+	index := 0
+	reached := false
+	activeANSI := ""
 
-	for idx, r := range s {
-		rw := lipgloss.Width(string(r))
-		if used+rw > start {
-			return s[idx:]
+	for index < len(s) {
+		if s[index] == '\x1b' {
+			sequence, next := ansiSequence(s, index)
+			if reached || used >= start {
+				out.WriteString(sequence)
+			} else {
+				activeANSI = activeANSISequence(activeANSI, sequence)
+			}
+
+			index = next
+
+			continue
 		}
 
+		r, size := utf8.DecodeRuneInString(s[index:])
+		rw := lipgloss.Width(string(r))
+
+		if !reached {
+			if used+rw <= start {
+				used += rw
+				index += size
+
+				continue
+			}
+
+			reached = true
+		}
+
+		if out.Len() == 0 && activeANSI != "" {
+			out.WriteString(activeANSI)
+		}
+
+		out.WriteRune(r)
+
 		used += rw
-		if used >= start {
-			return s[idx+len(string(r)):]
+		index += size
+	}
+
+	return out.String()
+}
+
+func ansiSequence(s string, start int) (sequence string, next int) {
+	next = start + 1
+	for next < len(s) {
+		b := s[next]
+		next++
+
+		if b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' {
+			break
 		}
 	}
 
-	return ""
+	return s[start:next], next
+}
+
+func activeANSISequence(current, next string) string {
+	if !strings.HasSuffix(next, "m") {
+		return current
+	}
+
+	return next
 }

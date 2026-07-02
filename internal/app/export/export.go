@@ -4,11 +4,11 @@ package export
 import (
 	"context"
 	"io"
-	"strings"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/biptec/aws-ssm-params/internal/app"
+	"github.com/biptec/aws-ssm-params/internal/app/exportplan"
 	"github.com/biptec/aws-ssm-params/internal/filter"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	ssmclient "github.com/biptec/aws-ssm-params/internal/ssm/client"
@@ -83,7 +83,7 @@ func newRunner(ctx context.Context, opts *Options, output io.Writer) (*runner, e
 		regions:      regions,
 		keyField:     opts.KeyField,
 		scalarField:  opts.ScalarField,
-		recordFields: opts.recordFields(),
+		recordFields: exportplan.RecordFields(opts.Fields, opts.ScalarField, opts.KeyField),
 		statusSort:   ui.ParseStatusSort(opts.SortColumns),
 		pathMappings: opts.PathMappings,
 		fieldMaps:    opts.FieldMappings,
@@ -96,16 +96,10 @@ func (r *runner) run(ctx context.Context) error {
 
 	records := r.records(statuses)
 
-	if r.scalarField != "" {
-		return errors.Wrap(
-			r.writer.ExportScalar(records, r.scalarField, r.keyField),
-			"write scalar export",
-		)
-	}
-
-	mappings := r.fieldMaps.WithDefaults().ForFields(r.recordFields)
-
-	return errors.Wrap(r.writer.Export(records, mappings, r.keyField), "write export")
+	return errors.Wrap(
+		exportplan.Write(r.writer, records, r.fieldMaps, r.recordFields, r.keyField, r.scalarField),
+		"write export",
+	)
 }
 
 func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {
@@ -207,32 +201,4 @@ func (r *runner) record(status *ui.Status) textio.Record {
 	}
 
 	return record
-}
-
-func (opts *Options) recordFields() textio.Fields {
-	fields := append(textio.Fields(nil), opts.Fields...)
-	if len(fields) == 0 {
-		fields = append(fields, exportFields...)
-	}
-
-	return fields.With(
-		strings.TrimSpace(opts.ScalarField),
-		strings.TrimSpace(opts.KeyField),
-	)
-}
-
-var exportFields = textio.Fields{
-	textio.FieldName,
-	textio.FieldRegion,
-	textio.FieldType,
-	textio.FieldTier,
-	textio.FieldDataType,
-	textio.FieldPolicies,
-	textio.FieldDescription,
-	textio.FieldValue,
-	textio.FieldDate,
-	textio.FieldVersion,
-	textio.FieldLen,
-	textio.FieldSHA256,
-	textio.FieldUser,
 }

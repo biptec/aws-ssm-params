@@ -31,6 +31,10 @@ func (renderer *boxRenderer) renderFieldPairs(fields [][2]string, labelWidth int
 		}
 
 		renderedValue := renderer.value(value)
+		if value == "" || value == "-" {
+			renderedValue = renderer.muted("(none)")
+		}
+
 		if f[0] == "Value" && value == encryptedPlaceholderText {
 			renderedValue = renderer.encryptedPlaceholder()
 		}
@@ -117,20 +121,17 @@ func (renderer *boxRenderer) popupInputLine(label string, input *textinput.Model
 	return renderer.label(label) + separator + inputText
 }
 
-func (renderer *boxRenderer) popupInputLinePlainPrefix(prefix string, input *textinput.Model, inputWidth int) string {
-	value := input.Value()
-	pos := min(max(0, input.Position()), len([]rune(value)))
-
-	return prefix + renderer.inputValueWithCursor(value, pos, inputWidth)
+func (renderer *boxRenderer) inputValueWithCursor(value string, pos, width int) string {
+	return renderInputValueWithCursor(value, pos, width, renderer.value, renderer.noColor)
 }
 
-func (renderer *boxRenderer) inputValueWithCursor(value string, pos, width int) string {
+func renderInputValueWithCursor(value string, pos, width int, render func(string) string, noColor bool) string {
 	runes := []rune(value)
 	pos = min(max(0, pos), len(runes))
 	width = max(1, width)
 
 	if len(runes) == 0 {
-		return renderer.value(renderer.inputCursor())
+		return render(inputCursor(noColor))
 	}
 
 	start := 0
@@ -143,7 +144,7 @@ func (renderer *boxRenderer) inputValueWithCursor(value string, pos, width int) 
 
 		end := min(len(runes), start+textWidth)
 
-		return renderer.value(string(runes[start:end]) + renderer.inputCursor())
+		return render(string(runes[start:end]) + inputCursor(noColor))
 	}
 
 	if len(runes) > width {
@@ -163,26 +164,26 @@ func (renderer *boxRenderer) inputValueWithCursor(value string, pos, width int) 
 
 	for i := start; i < end; i++ {
 		if i == pos {
-			b.WriteString(renderer.inputCursorForRune(runes[i]))
+			b.WriteString(inputCursorForRune(runes[i], noColor))
 			continue
 		}
 
 		b.WriteRune(runes[i])
 	}
 
-	return renderer.value(b.String())
+	return render(b.String())
 }
 
-func (renderer *boxRenderer) inputCursor() string {
-	if renderer.noColor {
+func inputCursor(noColor bool) string {
+	if noColor {
 		return "█"
 	}
 
 	return cursorStyle.Render(" ")
 }
 
-func (renderer *boxRenderer) inputCursorForRune(r rune) string {
-	if renderer.noColor {
+func inputCursorForRune(r rune, noColor bool) string {
+	if noColor {
 		return "█"
 	}
 

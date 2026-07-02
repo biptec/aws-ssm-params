@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -14,66 +13,140 @@ type editorViewComponent struct {
 	model model
 }
 
+type editorExpandableFieldView struct {
+	field editField
+	label string
+	area  *textarea.Model
+}
+
 func (component editorViewComponent) renderTextAreaScreen() string {
 	m := component.model
 
-	title := "Edit Parameter"
+	title, lines := component.editorFormLines(m.textAreaBodyHeight() - 2)
+
+	return m.renderBox(title, lines, m.textAreaBodyHeight())
+}
+
+func (component editorViewComponent) renderEditorPopup() string {
+	m := component.model
+	title, lines := component.editorFormLines(max(1, m.popupContentLineBudget()-2))
+	lines = append(lines, "", component.editorActionButtonsLine())
+
+	return m.renderPopupBoxMinWidth(title, lines, editorPopupMinInnerWidth())
+}
+
+func (component editorViewComponent) editorFormLines(innerHeight int) (title string, lines []string) {
+	m := component.model
+
+	title = "Edit Parameter"
 	if m.editNewParameter || !m.currentStatus().Exists {
 		title = "New Parameter"
 	}
 
 	labelWidth := 11
 
-	lines := []string{m.editTextInputFieldLine(editFieldSSMPath, "Name", &m.editPathInput, labelWidth)}
+	lines = []string{m.editTextInputFieldLine(editFieldSSMPath, "Name", &m.editPathInput, labelWidth)}
 	if m.editFieldAllowed(editFieldRegion) {
-		lines = append(lines, m.editFieldLine(editFieldRegion, "Region", m.editOptionValue(editFieldRegion, valueOrDash(m.editRegion)), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldRegion, "Region", m.editOptionValue(valueOrDash(m.editRegion)), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldType) {
-		lines = append(lines, m.editFieldLine(editFieldType, "Type", m.editOptionValue(editFieldType, m.normalizedEditType().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldType, "Type", m.editOptionValue(m.normalizedEditType().String()), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldTier) {
-		lines = append(lines, m.editFieldLine(editFieldTier, "Tier", m.editOptionValue(editFieldTier, m.normalizedEditTier().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldTier, "Tier", m.editOptionValue(m.normalizedEditTier().String()), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldDataType) {
-		lines = append(lines, m.editFieldLine(editFieldDataType, "DataType", m.editOptionValue(editFieldDataType, m.normalizedEditDataType().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldDataType, "DataType", m.editOptionValue(m.normalizedEditDataType().String()), labelWidth))
 	}
 
 	if m.shouldShowOverwriteField() {
-		lines = append(lines, m.editFieldLine(editFieldOverwrite, "Overwrite", m.editOptionValue(editFieldOverwrite, strconv.FormatBool(m.editOverwrite)), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldOverwrite, "Overwrite", m.editOptionValue(strconv.FormatBool(m.editOverwrite)), labelWidth))
 	}
 
-	preferredHeight := m.textAreaBodyHeight()
-	innerHeight := max(1, preferredHeight-2)
-	remaining := max(1, innerHeight-len(lines))
+	expandableFields := component.editorExpandableFieldViews()
+	expandedFields := component.expandedEditorTextareaItems(expandableFields)
 
-	if m.editFieldAllowed(editFieldDescription) {
-		descriptionArea := m.editDescriptionArea
-		if descriptionArea.Value() == "" && m.editDescriptionInput.Value() != "" {
-			descriptionArea.SetValue(m.editDescriptionInput.Value())
+	fixedLines := len(lines) + len(expandableFields) + component.editorExpandableSeparatorCount(expandableFields)
+	if m.shouldShowEncryptedEditPlaceholder() {
+		fixedLines++
+	}
+
+	rowLimits := formTextareaRowLimits(expandedFields, max(1, innerHeight-fixedLines))
+
+	for _, field := range expandableFields {
+		maxRows := rowLimits[int(field.field)]
+		if maxRows == 0 {
+			maxRows = 1
 		}
 
-		descriptionLines := m.renderExpandableField(editFieldDescription, "Description", &descriptionArea, labelWidth, max(1, remaining-1), m.hasVisibleFieldAfter(editFieldDescription))
-		lines = append(lines, descriptionLines...)
-		remaining = max(1, innerHeight-len(lines))
-	}
-
-	if m.shouldShowPoliciesField() {
-		policyLines := m.renderExpandableField(editFieldPolicies, "Policies", &m.editPoliciesArea, labelWidth, max(1, remaining-1), m.hasVisibleFieldAfter(editFieldPolicies))
-		lines = append(lines, policyLines...)
-		remaining = max(1, innerHeight-len(lines))
+		lines = append(lines, m.renderExpandableField(field.field, field.label, field.area, labelWidth, maxRows, m.hasVisibleFieldAfter(field.field))...)
 	}
 
 	if m.shouldShowEncryptedEditPlaceholder() {
 		lines = append(lines, m.editFieldLine(editFieldValue, "Value", m.encryptedPlaceholder(), labelWidth))
-	} else if m.editFieldAllowed(editFieldValue) {
-		valueLines := m.renderExpandableField(editFieldValue, "Value", &m.textArea, labelWidth, max(1, remaining-1), false)
-		lines = append(lines, valueLines...)
 	}
 
-	return m.renderBox(title, lines, preferredHeight)
+	return title, lines
+}
+
+func (component editorViewComponent) editorExpandableFieldViews() []editorExpandableFieldView {
+	m := component.model
+	fields := make([]editorExpandableFieldView, 0, 3)
+
+	if m.editFieldAllowed(editFieldDescription) {
+		descriptionArea := m.editDescriptionArea
+		fields = append(fields, editorExpandableFieldView{field: editFieldDescription, label: "Description", area: &descriptionArea})
+	}
+
+	if m.shouldShowPoliciesField() {
+		fields = append(fields, editorExpandableFieldView{field: editFieldPolicies, label: "Policies", area: &m.editPoliciesArea})
+	}
+
+	if !m.shouldShowEncryptedEditPlaceholder() && m.editFieldAllowed(editFieldValue) {
+		fields = append(fields, editorExpandableFieldView{field: editFieldValue, label: "Value", area: &m.textArea})
+	}
+
+	return fields
+}
+
+func (component editorViewComponent) expandedEditorTextareaItems(fields []editorExpandableFieldView) []formTextareaLayoutItem {
+	m := component.model
+	items := make([]formTextareaLayoutItem, 0, len(fields))
+
+	for _, field := range fields {
+		if field.area == nil || !m.shouldRenderExpandedField(field.field, field.area, 11) {
+			continue
+		}
+
+		items = append(items, formTextareaLayoutItem{
+			key:          int(field.field),
+			area:         field.area,
+			focused:      m.editField == field.field && field.area.Focused(),
+			contentWidth: component.editorTextareaContentWidth(field.area),
+		})
+	}
+
+	return items
+}
+
+func (component editorViewComponent) editorExpandableSeparatorCount(fields []editorExpandableFieldView) int {
+	m := component.model
+	count := 0
+
+	for _, field := range fields {
+		if field.area == nil || !m.shouldRenderExpandedField(field.field, field.area, 11) {
+			continue
+		}
+
+		if m.hasVisibleFieldAfter(field.field) {
+			count++
+		}
+	}
+
+	return count
 }
 
 func (component editorViewComponent) renderTextAreaValueLines(maxRows int) []string {
@@ -87,7 +160,7 @@ func (component editorViewComponent) renderExpandableField(field editField, labe
 		return []string{m.editFieldLine(field, label, m.singleLineAreaView(field, area, labelWidth), labelWidth)}
 	}
 
-	lines := []string{m.label(m.editFieldLabel(field, label) + ":")}
+	lines := []string{m.formStandaloneLabel(m.editFieldLabel(field, label)+":", component.editorFieldFocused(field))}
 
 	lines = append(lines, m.renderMultilineFieldLines(field, area, maxRows)...)
 	if hasNext {
@@ -110,22 +183,14 @@ func (component editorViewComponent) singleLineFieldWidth(labelWidth int) int {
 	m := component.model
 	labelText := padMin("", labelWidth+1)
 
-	return max(1, m.boxInnerWidth()-lipgloss.Width(labelText)-3)
+	return max(1, m.editorLineWidth()-lipgloss.Width(labelText)-3)
 }
 
 func (component editorViewComponent) singleLineAreaView(field editField, area *textarea.Model, labelWidth int) string {
 	m := component.model
-	width := m.singleLineFieldWidth(labelWidth)
-	value := strings.ReplaceAll(area.Value(), "\n", " ")
+	focused := component.editorFieldFocused(field) && area.Focused()
 
-	focused := m.editField == field && area.Focused()
-	if !focused {
-		return m.value(truncateStyled(value, width))
-	}
-
-	_, offset := textAreaCursorLineOffset(area)
-
-	return m.value(m.inputValueWithCursor(value, offset, width))
+	return m.formSingleLineAreaView(area, focused, labelWidth, m.editorLineWidth())
 }
 
 func (component editorViewComponent) expandableFieldValue(field editField) string {
@@ -218,71 +283,9 @@ func (component editorViewComponent) isCurrentExpandableFieldExpanded() bool {
 
 func (component editorViewComponent) renderMultilineFieldLines(field editField, area *textarea.Model, maxRows int) []string {
 	m := component.model
-	maxRows = max(1, maxRows)
-	wrapWidth := m.multilineContentWidth()
-	logicalLines, segments := multilineVisualSegments(area.Value(), wrapWidth)
-	lineCount := max(1, len(logicalLines))
-	lineNumberWidth := len(strconv.Itoa(lineCount))
-	cursorLine := min(max(0, area.Line()), lineCount-1)
-	lineInfo := area.LineInfo()
-	cursorOffset := min(max(0, lineInfo.StartColumn+lineInfo.ColumnOffset), len([]rune(logicalLines[cursorLine])))
-	focused := m.editField == field && area.Focused()
+	focused := component.editorFieldFocused(field) && area.Focused()
 
-	cursorVisual := 0
-	if focused {
-		cursorVisual = cursorVisualSegmentIndex(logicalLines, segments, cursorLine, cursorOffset, wrapWidth)
-	}
-
-	type visualLine struct {
-		text string
-	}
-
-	visual := make([]visualLine, 0, lineCount)
-
-	for visualIndex, segment := range segments {
-		runes := []rune(logicalLines[segment.logical])
-
-		piece := ""
-		if segment.start < segment.end {
-			piece = string(runes[segment.start:segment.end])
-		}
-
-		ownsCursor := focused && visualIndex == cursorVisual
-		if ownsCursor {
-			piece = m.withCursorMarker(piece, cursorOffset-segment.start)
-		}
-
-		prefix := ""
-		if m.showGutters {
-			prefix = fmt.Sprintf("%*d │ ", lineNumberWidth, segment.logical+1)
-			if segment.start > 0 {
-				prefix = fmt.Sprintf("%*s | ", lineNumberWidth, "")
-			}
-		}
-
-		if !m.showGutters {
-			piece = rawLeftLinePrefix + piece
-		}
-
-		visual = append(visual, visualLine{text: prefix + piece})
-	}
-
-	start := 0
-
-	if len(visual) > maxRows {
-		if focused {
-			start = min(max(0, cursorVisual-maxRows+1), len(visual)-maxRows)
-		}
-	}
-
-	end := min(len(visual), start+maxRows)
-
-	lines := make([]string, 0, end-start)
-	for _, line := range visual[start:end] {
-		lines = append(lines, line.text)
-	}
-
-	return lines
+	return m.formMultilineAreaLines(area, maxRows, component.editorTextareaContentWidth(area), focused)
 }
 
 type multilineVisualSegment struct {
@@ -342,38 +345,6 @@ func cursorVisualSegmentIndex(lines []string, segments []multilineVisualSegment,
 	return 0
 }
 
-func (component editorViewComponent) multilineContentWidth() int {
-	m := component.model
-	if !m.showGutters {
-		return max(8, m.boxInnerWidth()-2)
-	}
-
-	lineNumberWidth := 4
-	prefixWidth := lineNumberWidth + lipgloss.Width(" │ ")
-
-	return max(8, m.boxInnerWidth()-prefixWidth-2)
-}
-
-func (component editorViewComponent) withCursorMarker(line string, offset int) string {
-	m := component.model
-	runes := []rune(line)
-
-	offset = min(max(0, offset), len(runes))
-	if offset == len(runes) {
-		if m.opts.NoColor {
-			return string(runes) + "█"
-		}
-
-		return string(runes) + cursorStyle.Render(" ")
-	}
-
-	if m.opts.NoColor {
-		return string(runes[:offset]) + "█" + string(runes[offset+1:])
-	}
-
-	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
-}
-
 func (component editorViewComponent) textAreaBodyHeight() int {
 	m := component.model
 	if m.height <= 0 {
@@ -387,25 +358,114 @@ func (component editorViewComponent) textAreaBodyHeight() int {
 
 func (component editorViewComponent) editFieldLine(field editField, name, renderedValue string, labelWidth int) string {
 	m := component.model
-	return m.fieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth)
+	return m.formFieldLine(m.editFieldLabel(field, name), renderedValue, labelWidth, component.editorFieldFocused(field))
 }
 
 func (component editorViewComponent) editTextInputFieldLine(field editField, name string, input *textinput.Model, labelWidth int) string {
 	m := component.model
 	label := m.editFieldLabel(field, name)
-	labelText := padMin(label+":", labelWidth+1)
-	// Bubbles textinput renders the focused cursor as one visible cell in addition to
-	// its configured width. Reserve that extra cell so the final styled line does not
-	// overflow the box and lose ANSI styling during truncation.
-	available := m.boxInnerWidth() - lipgloss.Width(labelText) - 2
-	input.Width = max(1, available)
+	invalid := field == editFieldSSMPath && !parameterNameIsValid(strings.TrimSpace(input.Value()))
 
-	return m.fieldLine(label, input.View(), labelWidth)
+	return m.formTextInputFieldLineWithValidation(label, input, labelWidth, m.editorLineWidth(), invalid)
+}
+
+func (component editorViewComponent) editorLineWidth() int {
+	m := component.model
+	if m.editorPopupActiveOrStack() {
+		return component.editorPopupLineWidth()
+	}
+
+	return m.boxInnerWidth()
+}
+
+func (component editorViewComponent) editorPopupLineWidth() int {
+	m := component.model
+	labelWidth := 11
+	valueWidth := importMinimumValueWidth(labelWidth)
+
+	valueWidth = max(valueWidth, lipgloss.Width(m.editPathInput.Value())+1)
+	if m.editFieldAllowed(editFieldRegion) {
+		valueWidth = max(valueWidth, lipgloss.Width(valueOrDash(m.editRegion))+1)
+	}
+
+	if m.editFieldAllowed(editFieldType) {
+		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditType().String())+1)
+	}
+
+	if m.editFieldAllowed(editFieldTier) {
+		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditTier().String())+1)
+	}
+
+	if m.editFieldAllowed(editFieldDataType) {
+		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditDataType().String())+1)
+	}
+
+	if m.shouldShowOverwriteField() {
+		valueWidth = max(valueWidth, lipgloss.Width(strconv.FormatBool(m.editOverwrite))+1)
+	}
+
+	lineWidth := max(editorPopupMinContentLineWidth(), importInputLineWidth(labelWidth, valueWidth))
+	for _, area := range component.editorPopupTextareasForWidth() {
+		areaWidth := formTextareaLogicalContentWidth(area, importMinimumValueWidth(labelWidth), m.popupAvailableLineWidth())
+		if m.showGutters {
+			areaWidth += formTextareaGutterWidth(area)
+		}
+
+		lineWidth = max(lineWidth, areaWidth)
+	}
+
+	return min(m.popupAvailableLineWidth(), lineWidth)
+}
+
+func (component editorViewComponent) editorPopupTextareasForWidth() []*textarea.Model {
+	m := component.model
+
+	areas := []*textarea.Model{}
+	if m.editFieldAllowed(editFieldDescription) {
+		areas = append(areas, &m.editDescriptionArea)
+	}
+
+	if m.shouldShowPoliciesField() {
+		areas = append(areas, &m.editPoliciesArea)
+	}
+
+	if !m.shouldShowEncryptedEditPlaceholder() && m.editFieldAllowed(editFieldValue) {
+		areas = append(areas, &m.textArea)
+	}
+
+	return areas
+}
+
+func (component editorViewComponent) editorTextareaContentWidth(area *textarea.Model) int {
+	m := component.model
+	if !m.editorPopupActiveOrStack() {
+		return m.multilineContentWidth()
+	}
+
+	maxWidth := component.editorLineWidth()
+	if m.showGutters {
+		maxWidth = max(1, maxWidth-formTextareaGutterWidth(area))
+	}
+
+	return formTextareaLogicalContentWidth(area, importMinimumValueWidth(11), maxWidth)
+}
+
+func (component editorViewComponent) editorActionButtonsLine() string {
+	m := component.model
+	return m.formActionButtonsLine("Save", m.activePopup == popupEditor && m.editorButtonsFocused, m.editorButtonCursor)
+}
+
+func editorPopupMinInnerWidth() int {
+	return max(72, importPopupMinInnerWidth(11))
+}
+
+func editorPopupMinContentLineWidth() int {
+	return max(1, editorPopupMinInnerWidth()-4)
 }
 
 func (component editorViewComponent) editFieldLabel(field editField, name string) string {
 	m := component.model
-	if m.keymapStyle() == keymapVi && m.viInsertMode && m.editField == field && isEditableTextField(field) {
+	if m.keymapStyle() == keymapVi && m.viInsertMode && component.editorFieldFocused(field) && isEditableTextField(field) {
 		return name + " [INSERT]"
 	}
 
@@ -433,13 +493,18 @@ func (component editorViewComponent) shouldTypePrintableQInEditField() bool {
 	return m.keymapStyle() == keymapEmacs || m.viInsertMode
 }
 
-func (component editorViewComponent) editOptionValue(field editField, value string) string {
+func (component editorViewComponent) editOptionValue(value string) string {
 	m := component.model
-	if m.editField == field {
-		value += " <"
+	return m.formOptionValue(value)
+}
+
+func (component editorViewComponent) editorFieldFocused(field editField) bool {
+	m := component.model
+	if m.editorButtonsFocused || m.editField != field {
+		return false
 	}
 
-	return m.value(value)
+	return m.activePopup == popupEditor || !m.editorPopupActiveOrStack()
 }
 
 func (component *editorViewComponent) moveActiveMultilinePage(direction int) {
@@ -464,47 +529,5 @@ func (component *editorViewComponent) moveActiveMultilinePage(direction int) {
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (component editorViewComponent) textAreaFooterText() string {
 	m := component.model
-	valueAction := ""
-
-	switch m.editField {
-	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldDescription, editFieldFilePath:
-	case editFieldValue:
-		valueAction = " • alt+e value actions"
-	case editFieldPolicies:
-		valueAction = " • alt+e policies actions"
-
-	default:
-	}
-
-	lineAction := ""
-	if isExpandableEditField(m.editField) {
-		lineAction = " • ctrl+l lines"
-	}
-
-	if m.usesViEditMode() {
-		if m.viInsertMode {
-			return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + " • esc normal"
-		}
-
-		return "ctrl+/ help • i insert • ctrl+s save" + lineAction + valueAction + " • esc back"
-	}
-
-	suffix := " • esc back"
-
-	switch m.editField {
-	case editFieldValue, editFieldSSMPath, editFieldDescription, editFieldPolicies, editFieldFilePath:
-		return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + suffix
-	case editFieldRegion:
-		return "ctrl+/ help • enter choose region • ctrl+s save" + suffix
-	case editFieldType:
-		return "ctrl+/ help • enter choose type • ctrl+s save" + suffix
-	case editFieldTier:
-		return "ctrl+/ help • enter choose tier • ctrl+s save" + suffix
-	case editFieldDataType:
-		return "ctrl+/ help • enter choose data type • ctrl+s save" + suffix
-	case editFieldOverwrite:
-		return "ctrl+/ help • enter choose overwrite • ctrl+s save" + suffix
-	default:
-		return "ctrl+/ help • ctrl+s save" + lineAction + valueAction + suffix
-	}
+	return renderFooterBindings(editorTextAreaFooterBindings(m.keymapStyle(), m.viInsertMode, m.editField))
 }

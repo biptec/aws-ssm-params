@@ -56,7 +56,7 @@
       <div class="cards four">
         <article class="card">
           <h3>Browse and edit</h3>
-          <p>Use the TUI to audit, search, sort, create, edit, and delete parameters.</p>
+          <p>Use the TUI to audit, filter, sort, create, edit, import, export, and delete parameters.</p>
         </article>
         <article class="card">
           <h3>Import and export</h3>
@@ -161,7 +161,7 @@ go build -o aws-ssm-params ./cmd/aws-ssm-params</code></pre></div>
           <tbody>
             <tr>
               <td><code>tui</code></td>
-              <td>Interactive auditing, editing, creating, sorting, searching, and deletion.</td>
+              <td>Interactive auditing, editing, creating, sorting, filtering, import/export, and deletion.</td>
               <td><code>aws-ssm-params --region eu-north-1 tui</code></td>
             </tr>
             <tr>
@@ -399,15 +399,12 @@ aws-ssm-params \
             <tr><td><code>--with-decryption</code></td><td><code>AWS_SSM_PARAMS_WITH_DECRYPTION</code></td><td>Load real SecureString values.</td></tr>
             <tr><td><code>--show-column</code></td><td><code>AWS_SSM_PARAMS_SHOW_COLUMN</code></td><td>Show optional table columns such as <code>type</code>, <code>value</code>, <code>region</code>, <code>sha256</code>.</td></tr>
             <tr><td><code>--sort-by</code></td><td><code>AWS_SSM_PARAMS_SORT_BY</code></td><td>Initial sort, repeated in priority order.</td></tr>
-            <tr><td><code>--no-confirm-overwrite-file</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE</code></td><td>Skip local overwrite confirmation.</td></tr>
-            <tr><td><code>--no-confirm-write-securestring</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING</code></td><td>Skip confirmation before writing secrets to local files.</td></tr>
-            <tr><td><code>--no-confirm-delete-one</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE</code></td><td>Skip confirmation for deleting one selected parameter.</td></tr>
-            <tr><td><code>--no-confirm-delete-all</code></td><td><code>AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL</code></td><td>Skip confirmation for deleting all visible parameters.</td></tr>
+            <tr><td><code>--apply-immediately</code></td><td><code>AWS_SSM_PARAMS_APPLY_IMMEDIATELY</code></td><td>Apply TUI create, update, and delete operations directly to AWS instead of staging local changes.</td></tr>
           </tbody>
         </table>
       </div>
-      <div class="code-block"><pre><code># Load an explicit expected inventory from stdin.
-cat expected-params.txt | aws-ssm-params --region eu-north-1 tui
+      <div class="code-block"><pre><code># Open Import from stdin after AWS data is loaded.
+cat prod-params.json | aws-ssm-params --region eu-north-1 tui
 
 # Show metadata columns and start sorted by type, then name.
 aws-ssm-params \

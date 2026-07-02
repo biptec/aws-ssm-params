@@ -8,17 +8,25 @@ import (
 type tableSorter struct {
 	*tableState
 	*listState
-	columnAllowedFn func(columnName) bool
-	cellValueFn     func(columnName, int, *Status) string
+	applyImmediately bool
+	columnAllowedFn  func(columnName) bool
+	cellValueFn      func(columnName, int, *Status) string
 }
 
 func newTableSorter(m *model) tableSorter {
 	return tableSorter{
-		tableState:      &m.tableState,
-		listState:       &m.listState,
-		columnAllowedFn: m.columnAllowed,
-		cellValueFn:     m.tableCellValue,
+		tableState:       &m.tableState,
+		listState:        &m.listState,
+		applyImmediately: m.opts.ApplyImmediately,
+		columnAllowedFn:  m.columnAllowed,
+		cellValueFn:      m.tableCellValue,
 	}
+}
+
+func (component *tableSorter) openSortPopup() {
+	m := component
+	m.sortCursor = m.sortCursorForCurrentSort()
+	m.sortButtonsFocused = false
 }
 
 func (component tableSorter) columnAllowed(column columnName) bool {
@@ -141,6 +149,10 @@ func parseInitialSortOptions(values []string) sortRules {
 
 func columnByFieldName(name string) (columnName, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "state" {
+		return columnState, true
+	}
+
 	if name == "name" || name == "path" {
 		return columnPath, true
 	}
@@ -160,6 +172,7 @@ func columnByFieldName(name string) (columnName, bool) {
 
 func sortItems() []sortItem {
 	return []sortItem{
+		{hotkey: "m", column: columnState, label: "State"},
 		{hotkey: "n", column: columnPath, label: "Name"},
 		{hotkey: "v", column: columnValue, label: "Value"},
 		{hotkey: "t", column: columnType, label: "Type"},
@@ -176,7 +189,11 @@ func sortItems() []sortItem {
 
 func (component tableSorter) popupSortItems() []sortItem {
 	m := component
+
 	visible := map[columnName]bool{columnPath: true}
+	if m.hasLocalChanges() && !m.applyImmediately {
+		visible[columnState] = true
+	}
 
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -207,7 +224,11 @@ func (component tableSorter) popupSortColumnByLetterHotkey(key string) (columnNa
 
 func (component tableSorter) visibleSortItems() []sortItem {
 	m := component
+
 	cols := []columnName{columnPath}
+	if m.hasLocalChanges() && !m.applyImmediately {
+		cols = []columnName{columnState, columnPath}
+	}
 
 	for _, col := range columnItems() {
 		if m.columnAllowed(col) && m.columns[col] {
@@ -374,6 +395,15 @@ func (component tableSorter) columnHeader(c columnName) string {
 
 	if c == columnIndex {
 		return "#"
+	}
+
+	if c == columnState {
+		header := "STS"
+		if rule, ok := m.sortRules.find(c); ok {
+			header += " " + rule.directionArrow()
+		}
+
+		return header
 	}
 
 	header := strings.ToUpper(c.Label())

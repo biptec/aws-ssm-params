@@ -7,26 +7,22 @@ import (
 )
 
 type styleRenderer struct {
-	noColor        bool
-	query          string
-	effectiveQuery string
-	searchInvalid  bool
-	message        string
-	warningMessage string
-	errMessage     string
-	busyMessage    string
+	noColor         bool
+	effectiveFilter string
+	message         string
+	warningMessage  string
+	errMessage      string
+	busyMessage     string
 }
 
 func newStyleRenderer(m model) *styleRenderer {
 	return &styleRenderer{
-		noColor:        m.opts.NoColor,
-		query:          m.query,
-		effectiveQuery: m.effectiveQuery,
-		searchInvalid:  m.searchInvalid,
-		message:        m.message,
-		warningMessage: m.warningMessage,
-		errMessage:     m.errMessage,
-		busyMessage:    m.busyMessage,
+		noColor:         m.opts.NoColor,
+		effectiveFilter: m.effectiveFilter,
+		message:         m.message,
+		warningMessage:  m.warningMessage,
+		errMessage:      m.errMessage,
+		busyMessage:     m.busyMessage,
 	}
 }
 
@@ -52,6 +48,14 @@ func (renderer *styleRenderer) muted(s string) string {
 	}
 
 	return mutedStyle.Render(s)
+}
+
+func (renderer *styleRenderer) focusMarker() string {
+	if renderer.noColor {
+		return "> "
+	}
+
+	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
 }
 
 func (renderer *styleRenderer) encryptedPlaceholder() string {
@@ -82,25 +86,16 @@ func (renderer *styleRenderer) selectedMarker() string {
 	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
 }
 
-func (renderer *styleRenderer) searchLine() string {
-	line := "Search > " + renderer.query
-	if renderer.searchInvalid {
-		return renderer.applyErr(line)
-	}
-
-	return renderer.searchPrompt() + renderer.value(renderer.query)
-}
-
 func (renderer *styleRenderer) filteredLine() string {
-	return renderer.filteredPrompt() + renderer.value(renderer.effectiveQuery)
+	return renderer.filteredPrompt() + renderer.value(renderer.effectiveFilter)
 }
 
-func (renderer *styleRenderer) searchPrompt() string {
+func (renderer *styleRenderer) filterPrompt() string {
 	if renderer.noColor {
-		return "Search > "
+		return "Filter > "
 	}
 
-	return searchStyle.Render("Search > ")
+	return searchStyle.Render("Filter > ")
 }
 
 func (renderer *styleRenderer) filteredPrompt() string {
@@ -108,7 +103,7 @@ func (renderer *styleRenderer) filteredPrompt() string {
 		return "Filtered > "
 	}
 
-	return searchStyle.Render("Filtered > ")
+	return tableHeaderStyle.Render("Filtered > ")
 }
 
 func (renderer *styleRenderer) applyErr(s string) string {
@@ -119,16 +114,50 @@ func (renderer *styleRenderer) applyErr(s string) string {
 	return errorStyle.Render(s)
 }
 
+func (renderer *styleRenderer) stateValue(state parameterState) string {
+	value := string(state)
+	if renderer.noColor || value == "" {
+		return value
+	}
+
+	switch state {
+	case parameterStateModified:
+		return lipgloss.NewStyle().Foreground(stateModifiedFg).Render(value)
+	case parameterStateNew:
+		return lipgloss.NewStyle().Foreground(stateNewFg).Render(value)
+	case parameterStateDeleted:
+		return lipgloss.NewStyle().Foreground(stateDeletedFg).Render(value)
+	case parameterStateError:
+		return lipgloss.NewStyle().Foreground(stateErrorFg).Render(value)
+	case parameterStateClean:
+		return value
+	}
+
+	return value
+}
+
+func (renderer *styleRenderer) diffCloudValue(s string) string {
+	if renderer.noColor {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(diffCloudFg).Render(s)
+}
+
+func (renderer *styleRenderer) diffLocalValue(s string) string {
+	if renderer.noColor {
+		return s
+	}
+
+	return lipgloss.NewStyle().Foreground(diffLocalFg).Render(s)
+}
+
 func (renderer *styleRenderer) applyWarning(s string) string {
 	if renderer.noColor {
 		return s
 	}
 
 	return warningStyle.Render(s)
-}
-
-func quitConfirmationMessage() string {
-	return `Are you sure you want to quit? Press "y" to confirm.`
 }
 
 func (renderer *styleRenderer) renderStatusMessage() string {

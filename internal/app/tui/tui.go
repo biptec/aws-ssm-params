@@ -18,16 +18,14 @@ import (
 type Options struct {
 	*app.Options
 
-	NoColor                   bool
-	Keymap                    string
-	ShowColumns               []string
-	SortColumns               []string
-	Fields                    textio.Fields
-	NoConfirmOverwriteFile    bool
-	NoConfirmWriteSecureValue bool
-	NoConfirmDeleteOne        bool
-	NoConfirmDeleteAll        bool
-	UseInputTTY               bool
+	NoColor          bool
+	Keymap           string
+	ShowColumns      []string
+	SortColumns      []string
+	Fields           textio.Fields
+	ApplyImmediately bool
+	UseInputTTY      bool
+	ImportStdin      []byte
 }
 
 // runner owns the configuration and input mode of one TUI invocation.
@@ -104,21 +102,19 @@ func (r runner) uiOptions(regionLabel string, regions []string) *ui.Options {
 	opts := r.opts
 
 	return &ui.Options{
-		Region:                    regionLabel,
-		Regions:                   regions,
-		Profile:                   opts.Profile,
-		FilterGroups:              opts.FilterGroups,
-		NoColor:                   opts.NoColor,
-		Keymap:                    opts.Keymap,
-		ShowColumns:               opts.ShowColumns,
-		Sort:                      opts.SortColumns,
-		Fields:                    opts.Fields,
-		IncludeValues:             opts.WithDecryption || opts.Fields.RequiresValues() || opts.FilterGroups.HasField(filter.FieldValue),
-		ShowSecureValues:          opts.WithDecryption,
-		NoConfirmOverwriteFile:    opts.NoConfirmOverwriteFile,
-		NoConfirmWriteSecureValue: opts.NoConfirmWriteSecureValue,
-		NoConfirmDeleteOne:        opts.NoConfirmDeleteOne,
-		NoConfirmDeleteAll:        opts.NoConfirmDeleteAll,
-		UseInputTTY:               opts.UseInputTTY,
+		Region:           regionLabel,
+		Regions:          regions,
+		Profile:          opts.Profile,
+		FilterGroups:     opts.FilterGroups,
+		NoColor:          opts.NoColor,
+		Keymap:           opts.Keymap,
+		ShowColumns:      opts.ShowColumns,
+		Sort:             opts.SortColumns,
+		Fields:           opts.Fields,
+		IncludeValues:    opts.WithDecryption || opts.Fields.RequiresValues() || opts.FilterGroups.HasField(filter.FieldValue),
+		ShowSecureValues: opts.WithDecryption,
+		ApplyImmediately: opts.ApplyImmediately,
+		UseInputTTY:      opts.UseInputTTY,
+		ImportStdin:      opts.ImportStdin,
 	}
 }

@@ -8,12 +8,14 @@ import (
 )
 
 type tableState struct {
-	columns        map[columnName]bool
-	columnCursor   int
-	sortBy         columnName
-	sortDescending bool
-	sortRules      sortRules
-	sortCursor     int
+	columns              map[columnName]bool
+	columnCursor         int
+	columnButtonsFocused bool
+	sortBy               columnName
+	sortDescending       bool
+	sortRules            sortRules
+	sortCursor           int
+	sortButtonsFocused   bool
 }
 
 type tableColumnsComponent struct {
@@ -24,6 +26,7 @@ type columnName string
 
 const (
 	columnIndex       columnName = "index"
+	columnState       columnName = "state"
 	columnRegion      columnName = "region"
 	columnDate        columnName = "date"
 	columnType        columnName = "type"
@@ -40,6 +43,7 @@ const (
 func (component *tableColumnsComponent) openColumnsPopup() {
 	m := &component.model
 	m.columnCursor = 0
+	m.columnButtonsFocused = false
 	m.pushPopup(popupColumns)
 }
 
@@ -62,28 +66,30 @@ func (component tableColumnsComponent) updateColumns(msg tea.KeyMsg) (tea.Model,
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openShortcuts(screenColumns)
-	case "q", "esc", "ctrl+g":
+	case isBackKeyMsg(msg):
 		m.screen = m.returnScreen
-	case " ", "enter":
+	case isToggleKeyMsg(msg) || isEnterKeyMsg(msg):
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
 			m.columns[key] = !m.columns[key]
 		}
-	case "a":
-		for _, c := range cols {
-			m.columns[c] = true
-		}
-	case "x":
-		for _, c := range cols {
-			m.columns[c] = false
+	default:
+		switch {
+		case bindingMatchesString(columnsShowAllShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = true
+			}
+		case bindingMatchesString(columnsHideOptionalShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = false
+			}
 		}
 	}
 
@@ -95,6 +101,28 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	cols := m.allowedColumnItems()
 
 	key := msg.String()
+	if (&m).navigateColumnPopupButtons(key) {
+		return m, nil
+	}
+
+	if m.columnButtonsFocused {
+		if isPrimaryActionMsg(msg) {
+			m.closeColumnsPopup()
+			return m, nil
+		}
+
+		switch {
+		case isHelpKeyMsg(msg):
+			m.openPopupShortcuts(screenColumns, popupColumns)
+		case isCloseKeyMsg(msg):
+			m.closeColumnsPopup()
+		case isEnterKeyMsg(msg):
+			m.closeColumnsPopup()
+		}
+
+		return m, nil
+	}
+
 	if action, ok, consumed := (&m).handlePendingNavigationSequence(key); consumed {
 		if ok {
 			m.columnCursor = cursorFromNavigation(m.columnCursor, len(cols), action)
@@ -108,32 +136,65 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenColumns, popupColumns)
-	case "q", "esc", "ctrl+g", "enter", "ctrl+j":
-		m.popPopup()
-	case " ":
+	case isCloseKeyMsg(msg):
+		m.closeColumnsPopup()
+	case isEnterKeyMsg(msg):
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
 			m.columns[key] = !m.columns[key]
 		}
-	case "a":
-		for _, c := range cols {
-			m.columns[c] = true
+	case isToggleKeyMsg(msg):
+		if len(cols) > 0 {
+			key := cols[m.columnCursor]
+			m.columns[key] = !m.columns[key]
 		}
-	case "x":
-		for _, c := range cols {
-			m.columns[c] = false
+	default:
+		switch {
+		case bindingMatchesString(columnsShowAllShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = true
+			}
+		case bindingMatchesString(columnsHideOptionalShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = false
+			}
 		}
 	}
 
+	if isPrimaryActionMsg(msg) {
+		m.closeColumnsPopup()
+	}
+
 	return m, nil
+}
+
+func (m *model) navigateColumnPopupButtons(key string) bool {
+	if isTabNavigationKeyString(key) {
+		m.columnButtonsFocused = !m.columnButtonsFocused
+
+		return true
+	}
+
+	if !m.columnButtonsFocused {
+		return false
+	}
+
+	if isLeftKeyString(key) || isRightKeyString(key) {
+		return true
+	}
+
+	return false
+}
+
+func (m *model) closeColumnsPopup() {
+	m.popPopup()
 }
 
 // renderColumnsScreen renders the legacy full-screen table-column chooser.
@@ -146,7 +207,9 @@ func (component tableColumnsComponent) renderColumnsScreen() string {
 
 func (component tableColumnsComponent) renderColumnsPopup() string {
 	m := component.model
-	return m.renderPopupBoxWithActions("Columns", m.columnOptionLines(), "Esc close")
+	lines := append(m.columnOptionLines(), "", m.formSingleActionButtonLine("Close", m.columnButtonsFocused))
+
+	return m.renderPopupBox("Columns", lines)
 }
 
 func (component tableColumnsComponent) columnOptionLines() []string {
@@ -158,7 +221,7 @@ func (component tableColumnsComponent) columnOptionLines() []string {
 
 	for i, c := range cols {
 		checked := visible[c]
-		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor))
+		lines = append(lines, m.multiSelectLine(c.Label(), checked, i == m.columnCursor && !m.columnButtonsFocused))
 	}
 
 	return lines
@@ -189,6 +252,8 @@ func (column columnName) Field() string {
 	switch column {
 	case columnIndex:
 		return string(column)
+	case columnState:
+		return "state"
 	case columnPath:
 		return "name"
 	case columnRegion:
@@ -234,6 +299,8 @@ func (column columnName) Label() string {
 	switch column {
 	case columnIndex:
 		return "Index"
+	case columnState:
+		return "State"
 	case columnPath:
 		return "Name"
 	case columnRegion:
