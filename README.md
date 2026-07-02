@@ -4,7 +4,7 @@ Terminal UI and automation-friendly CLI for AWS Systems Manager Parameter Store.
 
 `aws-ssm-params` helps you inspect, filter, edit, import, and export SSM parameters across one or many AWS regions. It is designed for two workflows:
 
-- **interactive maintenance** with a fast TUI for auditing, editing, creating, deleting, sorting, and searching parameters;
+- **interactive maintenance** with a fast TUI for auditing, editing, creating, deleting, sorting, filtering, importing, and exporting parameters;
 - **scriptable automation** with stable stdout formats for backup, migration, CI/CD, and environment generation.
 
 <p align="center">
@@ -38,17 +38,19 @@ Terminal UI and automation-friendly CLI for AWS Systems Manager Parameter Store.
 ## Features
 
 - Browse SSM parameters in a terminal UI.
-- Discover parameters from AWS or provide an explicit inventory through stdin.
+- Discover parameters from AWS and optionally stage imports from a file or stdin inside the TUI.
 - Work with one region, several regions, or all enabled regions.
 - Filter by name/path, region, type, tier, data type, description, policies, and value.
 - Use SSM-aware glob and extglob patterns such as `/prod/**` and `/prod/@(api|worker)/*`.
-- Export to dotenv, JSON, or YAML.
-- Import from dotenv, JSON, or YAML.
+- Export to dotenv, JSON, or YAML from both CLI and TUI.
+- Import from dotenv, JSON, or YAML from CLI stdin, TUI file picker, or TUI stdin.
 - Delete parameters described by dotenv, JSON, or YAML input.
 - Rename fields during import/export with `--map-field`.
 - Export scalar values for scripts.
 - Keep stdout clean for automation; logs go to stderr.
 - Avoid showing SecureString values by default.
+- Stage TUI creates, edits, deletes, and imports locally, then push or revert them when ready.
+- Use `--apply-immediately` when you want the TUI to write changes directly to AWS.
 - Generate random values, load values from files, and write values to files from the TUI.
 - Delete one selected parameter or all visible filtered parameters from the TUI.
 - Publish release binaries and update the Homebrew formula through GoReleaser.
@@ -424,8 +426,7 @@ In the TUI:
 - existing SecureString values are hidden unless decryption is enabled;
 - editing a hidden SecureString does not reveal the old value;
 - if you leave the hidden value unchanged, the tool does not send a replacement value;
-- if you type a new value, the new value is saved as the parameter value;
-- writing SecureString values to local files asks for confirmation unless disabled with `--no-confirm-write-securestring`.
+- if you type a new value, the new value is saved as the parameter value when the change is pushed or applied.
 
 ## Command: `tui`
 
@@ -439,8 +440,11 @@ Use the TUI when you want to:
 
 - audit parameters visually;
 - inspect metadata and values;
-- create parameters that are missing from an expected inventory;
+- create parameters;
 - edit values or metadata;
+- stage local changes before pushing them to AWS;
+- import records from a file or stdin;
+- export the current visible list to a file;
 - sort and filter quickly;
 - delete selected or visible filtered parameters.
 
@@ -451,10 +455,7 @@ Use the TUI when you want to:
 | `--with-decryption`<br>`AWS_SSM_PARAMS_WITH_DECRYPTION` | Decrypt SecureString values. |
 | `--show-column value`<br>`AWS_SSM_PARAMS_SHOW_COLUMN` | Optional column to show. Repeat or use comma-separated env values. |
 | `--sort-by value`<br>`AWS_SSM_PARAMS_SORT_BY` | Initial sort as `field:asc` or `field:desc`. Repeat for multi-column sort priority. |
-| `--no-confirm-overwrite-file`<br>`AWS_SSM_PARAMS_NO_CONFIRM_OVERWRITE_FILE` | Skip confirmation before overwriting local files from TUI actions. |
-| `--no-confirm-write-securestring`<br>`AWS_SSM_PARAMS_NO_CONFIRM_WRITE_SECURESTRING` | Skip confirmation before writing SecureString plaintext to local files. |
-| `--no-confirm-delete-one`<br>`AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ONE` | Skip confirmation for deleting one parameter. |
-| `--no-confirm-delete-all`<br>`AWS_SSM_PARAMS_NO_CONFIRM_DELETE_ALL` | Skip confirmation for deleting all visible parameters. |
+| `--apply-immediately`<br>`AWS_SSM_PARAMS_APPLY_IMMEDIATELY` | Apply TUI create, update, and delete operations directly to AWS instead of staging local changes. |
 
 Accepted optional columns for `--show-column`:
 
@@ -507,21 +508,46 @@ Audit all enabled regions:
 aws-ssm-params --profile production --all-regions tui --show-column region
 ```
 
-Use an explicit expected inventory from stdin:
+Pipe import data into the TUI:
 
 ```bash
-cat expected-params.txt | aws-ssm-params --region eu-north-1 tui
+cat prod-params.json | aws-ssm-params --region eu-north-1 tui
 ```
 
-`expected-params.txt` is newline-based:
+After AWS data is loaded, the TUI opens an `Import from stdin` popup. The imported records are merged into the visible list as local changes; push them when ready.
 
-```text
-/app/prod/api/token
-/app/prod/db/password
-/app/prod/public/base-url
+Example JSON input:
+
+```json
+[
+  {
+    "name": "/app/prod/api/token",
+    "type": "SecureString",
+    "value": "secret"
+  }
+]
 ```
 
-Names that are missing in AWS are still shown in the TUI so they can be created.
+Use `--apply-immediately` only when you want TUI changes to write directly to AWS instead of being staged first.
+
+### TUI change workflow
+
+By default, TUI changes are local first:
+
+1. create, edit, delete, or import records;
+2. review the `STS` column and details panel;
+3. push selected or visible changes with `p` / `P`, or revert them with `r` / `R`.
+
+Local states:
+
+| State | Meaning |
+| --- | --- |
+| `NEW` | Parameter exists locally and will be created on push. |
+| `MOD` | Parameter exists in AWS and has local changes. |
+| `DEL` | Parameter is marked for deletion. |
+| `ERR` | Last push failed for this parameter. |
+
+When no local changes exist, the `STS` column is hidden. With `--apply-immediately`, the TUI writes creates, updates, and deletes directly to AWS and the staging workflow is disabled.
 
 ### Main TUI shortcuts
 
@@ -529,14 +555,22 @@ Names that are missing in AWS are still shown in the TUI so they can be created.
 | --- | --- |
 | `enter` | Edit selected parameter. |
 | `n` | Create a new parameter. |
+| `i` | Import from file. |
+| `e` | Export to file. |
 | `d` | Show or hide details. |
-| `/` | Search within loaded rows. |
+| `/`, `f` | Filter within loaded rows. |
 | `c` | Open columns popup. |
 | `s` | Open sort popup. |
 | `x` | Delete selected parameter. |
 | `X` | Delete all visible/filtered parameters. |
+| `r` | Revert the selected local change. |
+| `R` | Revert all visible/filtered local changes. |
+| `p` | Push the selected local change. |
+| `P` | Push all visible/filtered local changes. |
 | `ctrl+/` | Show context-sensitive help. |
 | `esc`, `q` | Quit or go back. |
+
+`p`, `P`, `r`, and `R` are hidden when `--apply-immediately` is enabled because changes are written directly instead of staged.
 
 Default navigation uses Emacs-style keys: `ctrl+n`, `ctrl+p`, `ctrl+v`, `alt+v`, `alt+<`, `alt+>`. With `--keymap vi`, use `j`, `k`, `gg`, `G`, and related vi-style movement keys.
 
@@ -930,8 +964,7 @@ aws-ssm-params [global options] delete [command options] < input-file
 | --- | --- |
 | `--format value`<br>`AWS_SSM_PARAMS_FORMAT` | Input format: `dotenv`, `json`, or `yaml`. Default is `dotenv`. |
 | `--key-field value`<br>`AWS_SSM_PARAMS_KEY_FIELD` | Treat JSON/YAML object keys as `name` or `region`. |
-| `--map-field value`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `name` as `name:file_field`. |
-| `--map-field value`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map a custom input field to `region` as `region:file_field`. |
+| `--map-field value`<br>`AWS_SSM_PARAMS_MAP_FIELD` | Map custom input fields to deletion identity fields: `name:file_field` or `region:file_field`. |
 | `--map-path value`<br>`AWS_SSM_PARAMS_MAP_PATH` | Map input file path prefixes to AWS path prefixes as `aws_path:file_path`. Repeat for multiple mappings. |
 | `--no-confirm`<br>`AWS_SSM_PARAMS_NO_CONFIRM` | Delete every filtered input record without prompting. |
 | `--dry-run`<br>`AWS_SSM_PARAMS_DRY_RUN` | Print deletion candidates without deleting or prompting. |
@@ -1221,7 +1254,7 @@ aws-ssm-params \
   --show-column date
 ```
 
-Use the TUI search and delete-visible flow carefully after reviewing the filtered rows.
+Use TUI filtering and the filtered delete action carefully after reviewing the rows.
 
 ### Generate a local `.env` for development
 
