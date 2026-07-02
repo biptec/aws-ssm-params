@@ -441,11 +441,6 @@ func (m model) saveValue(value string) (tea.Model, tea.Cmd) {
 	return component.saveValue(value)
 }
 
-func (m model) usesViEditMode() bool {
-	component := editorKeybindingsComponent{model: m}
-	return component.usesViEditMode()
-}
-
 func (m model) updateEmacsTextFieldKey(key string) (model, bool) {
 	component := editorKeybindingsComponent{model: m}
 	return component.updateEmacsTextFieldKey(key)
@@ -748,9 +743,9 @@ func (m model) shouldTypePrintableQInEditField() bool {
 	return component.shouldTypePrintableQInEditField()
 }
 
-func (m model) editOptionValue(field editField, value string) string {
+func (m model) editOptionValue(value string) string {
 	component := editorViewComponent{model: m}
-	return component.editOptionValue(field, value)
+	return component.editOptionValue(value)
 }
 
 func (m *model) moveActiveMultilinePage(direction int) {
@@ -784,14 +779,15 @@ func (m model) handlePendingNavigationSequence(key string) (navigationAction, bo
 	return newKeymap(m).resolvePendingNavigationSequence(pending, key)
 }
 
-func (m *model) interpretNavigationKey(key string, allowTab bool) (navigationAction, bool) {
-	if !allowTab && (key == "tab" || key == "shift+tab") {
+func (m *model) interpretNavigationKey(key string) (navigationAction, bool) {
+	if isTabNavigationKeyString(key) {
 		return navNone, false
 	}
 
 	if m.pendingKeySequence != "" {
 		pending := m.pendingKeySequence
 		m.pendingKeySequence = ""
+
 		action, ok, consumed := newKeymap(*m).resolvePendingNavigationSequence(pending, key)
 		if consumed {
 			return action, ok
@@ -799,15 +795,15 @@ func (m *model) interpretNavigationKey(key string, allowTab bool) (navigationAct
 	}
 
 	if action, ok := newKeymap(*m).navigationAction(key); ok {
-		if !allowTab && (key == "tab" || key == "shift+tab") {
+		if isTabNavigationKeyString(key) {
 			return navNone, false
 		}
 
 		return action, true
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if m.keymapStyle() == keymapVi && isViFirstNavigationPrefixString(key) {
+		m.pendingKeySequence = firstBindingKey(viFirstNavigationPrefixShortcut)
 		return navNone, true
 	}
 
@@ -1192,11 +1188,6 @@ func (m model) renderBox(title string, lines []string, preferredHeight int) stri
 	return component.renderBox(title, lines, preferredHeight)
 }
 
-func (m model) renderBoxWithInnerWidth(title string, lines []string, innerWidth, preferredHeight int) string {
-	component := newBoxRenderer(m)
-	return component.renderBoxWithInnerWidth(title, lines, innerWidth, preferredHeight)
-}
-
 func (m model) stateValue(state parameterState) string {
 	component := newStyleRenderer(m)
 	return component.stateValue(state)
@@ -1225,11 +1216,6 @@ func (m model) multiSelectLine(label string, checked, focused bool) string {
 func (m model) popupInputLine(label string, input *textinput.Model, inputWidth int) string {
 	component := newBoxRenderer(m)
 	return component.popupInputLine(label, input, inputWidth)
-}
-
-func (m model) popupInputLinePlainPrefix(prefix string, input *textinput.Model, inputWidth int) string {
-	component := newBoxRenderer(m)
-	return component.popupInputLinePlainPrefix(prefix, input, inputWidth)
 }
 
 func (m model) inputValueWithCursor(value string, pos, width int) string {
@@ -1298,8 +1284,8 @@ func (m model) errorValue(s string) string {
 	return newStyleRenderer(m).applyErr(s)
 }
 
-func (m model) focusMarker(s string) string {
-	return newStyleRenderer(m).focusMarker(s)
+func (m model) focusMarker() string {
+	return newStyleRenderer(m).focusMarker()
 }
 
 func (m model) encryptedPlaceholder() string {
@@ -1321,12 +1307,14 @@ func (m model) selectedMarker() string {
 func (m model) filterLine() string {
 	renderer := newStyleRenderer(m)
 	input := m.filterInput
+
 	value := input.Value()
 	if value != m.filterQuery {
 		value = m.filterQuery
 	}
 
 	width := max(1, m.width-lipgloss.Width("Filter > ")-4)
+
 	renderedValue := renderInputValueWithCursor(value, input.Position(), width, renderer.value, renderer.noColor)
 	if m.filterInvalid {
 		renderedValue = renderInputValueWithCursor(value, input.Position(), width, renderer.applyErr, renderer.noColor)
@@ -1383,7 +1371,7 @@ func (m *model) clearTransientStatus() {
 	m.pendingFileWrite = fileWriteConfirmationNone
 }
 
-func (m model) popupFooterText(kind popupKind) string {
+func (m model) popupFooterText(kind blockKind) string {
 	component := newShortcuts(m)
 	return component.popupFooterText(kind)
 }
@@ -1458,11 +1446,6 @@ func (m model) visibleSortItems() []sortItem {
 func (m model) visibleSortColumnByHotkey(key string) (columnName, bool) {
 	component := newTableSorter(&m)
 	return component.visibleSortColumnByHotkey(key)
-}
-
-func (m model) sortCursorForCurrentSort() int {
-	component := newTableSorter(&m)
-	return component.sortCursorForCurrentSort()
 }
 
 func (m model) sortRulesOrDefault() sortRules {
@@ -1677,6 +1660,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.busyMessage = ""
 		m.loadingTitle = ""
 		m.ensureSelection()
+
 		if len(bytes.TrimSpace(m.opts.ImportStdin)) > 0 && !m.importStdinOpened {
 			m.openImportStdinPopup()
 		}
@@ -1739,18 +1723,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		failed := 0
 		warnings := []string{}
 
-		for _, result := range msg.results {
+		for i := range msg.results {
+			result := &msg.results[i]
 			if result.warning != "" {
 				warnings = append(warnings, result.warning)
 			}
 
 			if result.err != nil {
 				failed++
+
 				m.markPushError(result.localKey, result.cloudKey, result.operation, result.err)
+
 				continue
 			}
 
 			pushed++
+
 			switch result.operation {
 			case parameterStateDeleted:
 				if result.removeRow {
@@ -1760,16 +1748,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case parameterStateNew, parameterStateModified:
 				m.replaceStatusByKey(result.localKey, &result.status)
+			case parameterStateClean, parameterStateError:
 			}
 		}
 
 		m.applySortWithRules(m.sortRulesOrDefault())
 		m.ensureSelection()
+
 		if m.opts.ApplyImmediately {
 			m.message = fmt.Sprintf("Applied %d change(s).", pushed)
 		} else {
 			m.message = fmt.Sprintf("Pushed %d local change(s).", pushed)
 		}
+
 		if failed > 0 {
 			if m.opts.ApplyImmediately {
 				m.errMessage = fmt.Sprintf("Failed to apply %d change(s).", failed)
@@ -1779,14 +1770,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.errMessage = ""
 		}
+
 		m.warningMessage = strings.Join(warnings, "; ")
 
 		return m, nil
 
 	case tea.KeyMsg:
-		key := msg.String()
-
-		if key == "ctrl+c" || key == "ctrl+q" {
+		if isQuitConfirmKeyMsg(msg) {
 			if m.activePopup != popupQuitConfirm {
 				m.openQuitConfirmPopup()
 			}
@@ -1794,7 +1784,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		fileWriteConfirmKey := m.pendingFileWrite != fileWriteConfirmationNone && (key == "y" || key == "enter" || key == "ctrl+j" || key == "esc" || key == "q" || key == "ctrl+g" || m.activePopup == popupFileWriteConfirm)
+		fileWriteConfirmKey := m.pendingFileWrite != fileWriteConfirmationNone &&
+			(isPrimaryActionMsg(msg) || isEnterKeyMsg(msg) || isCancelKeyMsg(msg) || m.activePopup == popupFileWriteConfirm)
 		if !fileWriteConfirmKey {
 			m.clearTransientStatus()
 		}
@@ -1866,6 +1857,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m.updateExportMapPathsPopup(msg)
 			case popupExportOverwriteConfirm:
 				return m.updateExportOverwriteConfirmPopup(msg)
+			case parameterListBlock,
+				selectedParameterBlock,
+				filterBlock,
+				editorBlock,
+				columnsBlock,
+				confirmBlock,
+				regionSelectBlock,
+				typeSelectBlock,
+				loadingBlock:
+				return m, nil
 			}
 		}
 
@@ -1891,6 +1892,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.activePopup == popupImportFilePicker {
 		var cmd tea.Cmd
+
 		m.importFilePicker.Height = m.importFilePickerHeight()
 		m.importFilePicker, cmd = m.importFilePicker.Update(msg)
 		m.focusImportFilePickerTarget()
@@ -1916,7 +1918,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.screen {
 	case screenLoading:
-		return m.renderPage("ctrl+/ help • esc quit", func(content model) string { return content.renderLoading() })
+		return m.renderPage(renderBlockFooter(loadingBlock), func(content model) string { return content.renderLoading() })
 	case screenMain:
 		footer := mainFooterText(m.selectedExpanded && m.currentStatus().Item.Path != "", m.mainListFiltered(), m.opts.ApplyImmediately)
 		if m.filterMode {
@@ -1927,15 +1929,15 @@ func (m model) View() string {
 	case screenTextArea:
 		return m.renderPage(m.textAreaFooterText(), func(content model) string { return content.renderTextAreaScreen() })
 	case screenColumns:
-		return m.renderPage("ctrl+/ help • space/enter toggle • a show all • x hide all • esc back", func(content model) string { return content.renderColumnsScreen() })
+		return m.renderPage(renderBlockFooter(columnsBlock), func(content model) string { return content.renderColumnsScreen() })
 	case screenConfirm:
-		return m.renderPage("ctrl+/ help • enter confirm • esc back", func(content model) string { return content.renderConfirmScreen() })
+		return m.renderPage(renderBlockFooter(confirmBlock), func(content model) string { return content.renderConfirmScreen() })
 	case screenRegionSelect:
-		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderRegionSelectScreen() })
+		return m.renderPage(renderBlockFooter(regionSelectBlock), func(content model) string { return content.renderRegionSelectScreen() })
 	case screenTypeSelect:
-		return m.renderPage("ctrl+/ help • enter choose • esc back", func(content model) string { return content.renderTypeSelectScreen() })
+		return m.renderPage(renderBlockFooter(typeSelectBlock), func(content model) string { return content.renderTypeSelectScreen() })
 	case screenHelp:
-		return m.renderPage("esc back", func(content model) string { return content.renderHelpScreen() })
+		return m.renderPage(renderFooter(backShortcut), func(content model) string { return content.renderHelpScreen() })
 	default:
 		return ""
 	}
@@ -1964,11 +1966,11 @@ func (m model) renderPage(footerText string, renderBody func(model) string) stri
 }
 
 func (m model) updateLoading(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openShortcuts(screenLoading)
 		return m, nil
-	case "q", "esc":
+	case isQuitKeyMsg(msg):
 		return m, tea.Quit
 	}
 

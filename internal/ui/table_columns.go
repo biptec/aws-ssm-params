@@ -8,18 +8,14 @@ import (
 )
 
 type tableState struct {
-	columns               map[columnName]bool
-	columnCursor          int
-	columnButtonsFocused  bool
-	columnButtonCursor    int
-	columnSnapshot        map[columnName]bool
-	sortBy                columnName
-	sortDescending        bool
-	sortRules             sortRules
-	sortCursor            int
-	sortButtonsFocused    bool
-	sortButtonCursor      int
-	sortSnapshot          sortRules
+	columns              map[columnName]bool
+	columnCursor         int
+	columnButtonsFocused bool
+	sortBy               columnName
+	sortDescending       bool
+	sortRules            sortRules
+	sortCursor           int
+	sortButtonsFocused   bool
 }
 
 type tableColumnsComponent struct {
@@ -48,8 +44,6 @@ func (component *tableColumnsComponent) openColumnsPopup() {
 	m := &component.model
 	m.columnCursor = 0
 	m.columnButtonsFocused = false
-	m.columnButtonCursor = importActionPrimary
-	m.columnSnapshot = nil
 	m.pushPopup(popupColumns)
 }
 
@@ -72,28 +66,30 @@ func (component tableColumnsComponent) updateColumns(msg tea.KeyMsg) (tea.Model,
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openShortcuts(screenColumns)
-	case "q", "esc", "ctrl+g":
+	case isBackKeyMsg(msg):
 		m.screen = m.returnScreen
-	case " ", "enter":
+	case isToggleKeyMsg(msg) || isEnterKeyMsg(msg):
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
 			m.columns[key] = !m.columns[key]
 		}
-	case "a":
-		for _, c := range cols {
-			m.columns[c] = true
-		}
-	case "x":
-		for _, c := range cols {
-			m.columns[c] = false
+	default:
+		switch {
+		case bindingMatchesString(columnsShowAllShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = true
+			}
+		case bindingMatchesString(columnsHideOptionalShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = false
+			}
 		}
 	}
 
@@ -110,17 +106,17 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 	}
 
 	if m.columnButtonsFocused {
-		if isPrimaryActionKey(key) {
+		if isPrimaryActionMsg(msg) {
 			m.closeColumnsPopup()
 			return m, nil
 		}
 
-		switch key {
-		case "ctrl+_", "ctrl+/":
+		switch {
+		case isHelpKeyMsg(msg):
 			m.openPopupShortcuts(screenColumns, popupColumns)
-		case "q", "esc", "ctrl+g":
+		case isCloseKeyMsg(msg):
 			m.closeColumnsPopup()
-		case "enter", "ctrl+j":
+		case isEnterKeyMsg(msg):
 			m.closeColumnsPopup()
 		}
 
@@ -140,36 +136,39 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if (&m).startViFirstNavigationSequence(key) {
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenColumns, popupColumns)
-	case "q", "esc", "ctrl+g":
+	case isCloseKeyMsg(msg):
 		m.closeColumnsPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
 			m.columns[key] = !m.columns[key]
 		}
-	case " ":
+	case isToggleKeyMsg(msg):
 		if len(cols) > 0 {
 			key := cols[m.columnCursor]
 			m.columns[key] = !m.columns[key]
 		}
-	case "a":
-		for _, c := range cols {
-			m.columns[c] = true
-		}
-	case "x":
-		for _, c := range cols {
-			m.columns[c] = false
+	default:
+		switch {
+		case bindingMatchesString(columnsShowAllShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = true
+			}
+		case bindingMatchesString(columnsHideOptionalShortcut, key):
+			for _, c := range cols {
+				m.columns[c] = false
+			}
 		}
 	}
-	if isPrimaryActionKey(key) {
+
+	if isPrimaryActionMsg(msg) {
 		m.closeColumnsPopup()
 	}
 
@@ -177,16 +176,8 @@ func (component tableColumnsComponent) updateColumnsPopup(msg tea.KeyMsg) (tea.M
 }
 
 func (m *model) navigateColumnPopupButtons(key string) bool {
-	if key == "tab" {
+	if isTabNavigationKeyString(key) {
 		m.columnButtonsFocused = !m.columnButtonsFocused
-		m.columnButtonCursor = importActionPrimary
-
-		return true
-	}
-
-	if key == "shift+tab" {
-		m.columnButtonsFocused = !m.columnButtonsFocused
-		m.columnButtonCursor = importActionPrimary
 
 		return true
 	}
@@ -195,25 +186,14 @@ func (m *model) navigateColumnPopupButtons(key string) bool {
 		return false
 	}
 
-	switch key {
-	case "left", "right":
-		m.columnButtonCursor = importActionPrimary
+	if isLeftKeyString(key) || isRightKeyString(key) {
 		return true
 	}
 
 	return false
 }
 
-func (m *model) applyColumnsPopup() {
-	m.closeColumnsPopup()
-}
-
-func (m *model) cancelColumnsPopup() {
-	m.closeColumnsPopup()
-}
-
 func (m *model) closeColumnsPopup() {
-	m.columnSnapshot = nil
 	m.popPopup()
 }
 
@@ -245,15 +225,6 @@ func (component tableColumnsComponent) columnOptionLines() []string {
 	}
 
 	return lines
-}
-
-func cloneColumnVisibility(columns map[columnName]bool) map[columnName]bool {
-	out := make(map[columnName]bool, len(columns))
-	for column, visible := range columns {
-		out[column] = visible
-	}
-
-	return out
 }
 
 // columnItems returns optional table columns in the order presented to the user.

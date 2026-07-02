@@ -11,6 +11,7 @@ func (m model) updateTextInput(input *textinput.Model, msg tea.KeyMsg) tea.Cmd {
 	}
 
 	var cmd tea.Cmd
+
 	*input, cmd = input.Update(msg)
 
 	return cmd
@@ -21,25 +22,23 @@ func (m model) applyTextInputNavigation(input *textinput.Model, key string) bool
 		return false
 	}
 
-	switch m.keymapStyle() {
-	case keymapEmacs:
-		switch key {
-		case "alt+f":
-			moveTextInputWordForward(input)
-			return true
-		case "alt+b":
-			moveTextInputWordBackward(input)
-			return true
-		}
-	case keymapVi:
-		switch key {
-		case "alt+f":
-			moveTextInputWordForward(input)
-			return true
-		case "alt+b":
-			moveTextInputWordBackward(input)
-			return true
-		}
+	if m.keymapStyle() != keymapEmacs {
+		return false
+	}
+
+	action, ok := newKeymap(m).emacsTextEditAction(key)
+	if !ok {
+		return false
+	}
+
+	if action == textEditWordForward {
+		moveTextInputWordForward(input)
+		return true
+	}
+
+	if action == textEditWordBackward {
+		moveTextInputWordBackward(input)
+		return true
 	}
 
 	return false

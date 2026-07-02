@@ -3,8 +3,8 @@ package ui
 import "github.com/biptec/aws-ssm-params/internal/inventory"
 
 type popupState struct {
-	activePopup popupKind
-	popupStack  []popupKind
+	activePopup blockKind
+	popupStack  []blockKind
 
 	regionCursor      int
 	typeCursor        int
@@ -25,14 +25,23 @@ type popupState struct {
 	confirmStateFilterSelected map[parameterState]bool
 
 	shortcutsFor       screen
-	shortcutsPopupFor  popupKind
+	shortcutsPopupFor  blockKind
 	pendingKeySequence string
 }
 
-type popupKind int
+type blockKind int
 
 const (
-	popupNone popupKind = iota
+	popupNone blockKind = iota
+	parameterListBlock
+	selectedParameterBlock
+	filterBlock
+	editorBlock
+	columnsBlock
+	confirmBlock
+	regionSelectBlock
+	typeSelectBlock
+	loadingBlock
 	popupColumns
 	popupShortcuts
 	popupConfirm
@@ -85,19 +94,19 @@ func (m *popupState) openShortcuts(from screen) {
 	m.pushPopup(popupShortcuts)
 }
 
-func (m *popupState) openPopupShortcuts(from screen, popup popupKind) {
+func (m *popupState) openPopupShortcuts(from screen, popup blockKind) {
 	m.shortcutsFor = from
 	m.shortcutsPopupFor = popup
 	m.pushNestedPopup(popupShortcuts)
 }
 
-func (m *popupState) pushPopup(kind popupKind) {
+func (m *popupState) pushPopup(kind blockKind) {
 	m.popupStack = nil
 	m.activePopup = kind
 	m.pendingKeySequence = ""
 }
 
-func (m *popupState) pushNestedPopup(kind popupKind) {
+func (m *popupState) pushNestedPopup(kind blockKind) {
 	if m.activePopup != popupNone {
 		m.popupStack = append(m.popupStack, m.activePopup)
 	}
@@ -126,8 +135,8 @@ func (m *popupState) clearPopupStack() {
 	m.pendingKeySequence = ""
 }
 
-func (m *popupState) popupLayers() []popupKind {
-	layers := append([]popupKind(nil), m.popupStack...)
+func (m *popupState) popupLayers() []blockKind {
+	layers := append([]blockKind(nil), m.popupStack...)
 	if m.activePopup != popupNone {
 		layers = append(layers, m.activePopup)
 	}

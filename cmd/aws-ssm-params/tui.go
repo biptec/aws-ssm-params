@@ -17,15 +17,15 @@ import (
 const (
 	tuiCommandName = "tui"
 
-	tuiFlagWithDecryption            = "with-decryption"
-	tuiFlagShowColumn                = "show-column"
-	tuiFlagSortBy                    = "sort-by"
-	tuiFlagApplyImmediately          = "apply-immediately"
+	tuiFlagWithDecryption   = "with-decryption"
+	tuiFlagShowColumn       = "show-column"
+	tuiFlagSortBy           = "sort-by"
+	tuiFlagApplyImmediately = "apply-immediately"
 
-	tuiEnvWithDecryption            = envVarPrefix + "WITH_DECRYPTION"
-	tuiEnvShowColumn                = envVarPrefix + "SHOW_COLUMN"
-	tuiEnvSortBy                    = envVarPrefix + "SORT_BY"
-	tuiEnvApplyImmediately          = envVarPrefix + "APPLY_IMMEDIATELY"
+	tuiEnvWithDecryption   = envVarPrefix + "WITH_DECRYPTION"
+	tuiEnvShowColumn       = envVarPrefix + "SHOW_COLUMN"
+	tuiEnvSortBy           = envVarPrefix + "SORT_BY"
+	tuiEnvApplyImmediately = envVarPrefix + "APPLY_IMMEDIATELY"
 )
 
 func tuiFlags() []cli.Flag {
@@ -89,18 +89,18 @@ func tuiOptionsFromCLI(ctx context.Context, cmd *cli.Command) (*tuicmd.Options, 
 	)
 
 	return &tuicmd.Options{
-		Options:                   global.Options,
-		NoColor:                   global.NoColor,
-		Keymap:                    global.Keymap,
-		ShowColumns:               showColumns,
-		SortColumns:               compactStrings(stringSliceFlagValue(cmd, tuiFlagSortBy, tuiEnvSortBy)),
-		ApplyImmediately:          boolFlagValueAny(cmd, tuiFlagApplyImmediately, tuiEnvApplyImmediately),
-		UseInputTTY:               useInputTTY,
-		ImportStdin:               stdinImport,
+		Options:          global.Options,
+		NoColor:          global.NoColor,
+		Keymap:           global.Keymap,
+		ShowColumns:      showColumns,
+		SortColumns:      compactStrings(stringSliceFlagValue(cmd, tuiFlagSortBy, tuiEnvSortBy)),
+		ApplyImmediately: boolFlagValueAny(cmd, tuiFlagApplyImmediately, tuiEnvApplyImmediately),
+		UseInputTTY:      useInputTTY,
+		ImportStdin:      stdinImport,
 	}, nil
 }
 
-func loadTUIImportFromStdin() ([]byte, bool, error) {
+func loadTUIImportFromStdin() (data []byte, hasInput bool, err error) {
 	info, err := os.Stdin.Stat()
 	if err != nil {
 		return nil, false, errors.Wrap(err, "stat stdin")
@@ -110,7 +110,7 @@ func loadTUIImportFromStdin() ([]byte, bool, error) {
 		return nil, false, nil
 	}
 
-	data, err := io.ReadAll(os.Stdin)
+	data, err = io.ReadAll(os.Stdin)
 	if err != nil {
 		return nil, true, errors.Wrap(err, "read TUI import from stdin")
 	}

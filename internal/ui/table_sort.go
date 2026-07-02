@@ -9,17 +9,17 @@ type tableSorter struct {
 	*tableState
 	*listState
 	applyImmediately bool
-	columnAllowedFn func(columnName) bool
-	cellValueFn     func(columnName, int, *Status) string
+	columnAllowedFn  func(columnName) bool
+	cellValueFn      func(columnName, int, *Status) string
 }
 
 func newTableSorter(m *model) tableSorter {
 	return tableSorter{
-		tableState:      &m.tableState,
-		listState:       &m.listState,
+		tableState:       &m.tableState,
+		listState:        &m.listState,
 		applyImmediately: m.opts.ApplyImmediately,
-		columnAllowedFn: m.columnAllowed,
-		cellValueFn:     m.tableCellValue,
+		columnAllowedFn:  m.columnAllowed,
+		cellValueFn:      m.tableCellValue,
 	}
 }
 
@@ -27,8 +27,6 @@ func (component *tableSorter) openSortPopup() {
 	m := component
 	m.sortCursor = m.sortCursorForCurrentSort()
 	m.sortButtonsFocused = false
-	m.sortButtonCursor = importActionPrimary
-	m.sortSnapshot = nil
 }
 
 func (component tableSorter) columnAllowed(column columnName) bool {
@@ -191,6 +189,7 @@ func sortItems() []sortItem {
 
 func (component tableSorter) popupSortItems() []sortItem {
 	m := component
+
 	visible := map[columnName]bool{columnPath: true}
 	if m.hasLocalChanges() && !m.applyImmediately {
 		visible[columnState] = true
@@ -225,6 +224,7 @@ func (component tableSorter) popupSortColumnByLetterHotkey(key string) (columnNa
 
 func (component tableSorter) visibleSortItems() []sortItem {
 	m := component
+
 	cols := []columnName{columnPath}
 	if m.hasLocalChanges() && !m.applyImmediately {
 		cols = []columnName{columnState, columnPath}

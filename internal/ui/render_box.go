@@ -34,6 +34,7 @@ func (renderer *boxRenderer) renderFieldPairs(fields [][2]string, labelWidth int
 		if value == "" || value == "-" {
 			renderedValue = renderer.muted("(none)")
 		}
+
 		if f[0] == "Value" && value == encryptedPlaceholderText {
 			renderedValue = renderer.encryptedPlaceholder()
 		}
@@ -120,13 +121,6 @@ func (renderer *boxRenderer) popupInputLine(label string, input *textinput.Model
 	return renderer.label(label) + separator + inputText
 }
 
-func (renderer *boxRenderer) popupInputLinePlainPrefix(prefix string, input *textinput.Model, inputWidth int) string {
-	value := input.Value()
-	pos := min(max(0, input.Position()), len([]rune(value)))
-
-	return prefix + renderer.inputValueWithCursor(value, pos, inputWidth)
-}
-
 func (renderer *boxRenderer) inputValueWithCursor(value string, pos, width int) string {
 	return renderInputValueWithCursor(value, pos, width, renderer.value, renderer.noColor)
 }
@@ -178,14 +172,6 @@ func renderInputValueWithCursor(value string, pos, width int, render func(string
 	}
 
 	return render(b.String())
-}
-
-func (renderer *boxRenderer) inputCursor() string {
-	return inputCursor(renderer.noColor)
-}
-
-func (renderer *boxRenderer) inputCursorForRune(r rune) string {
-	return inputCursorForRune(r, renderer.noColor)
 }
 
 func inputCursor(noColor bool) string {

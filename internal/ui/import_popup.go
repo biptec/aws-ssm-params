@@ -18,11 +18,11 @@ import (
 	"github.com/biptec/aws-ssm-params/internal/ssm"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/charmbracelet/bubbles/filepicker"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	crerr "github.com/cockroachdb/errors"
 )
 
 type importState struct {
@@ -63,20 +63,20 @@ type importState struct {
 	importMapPathBackup  [][2]string
 	importDefaultsBackup importDefaultsSnapshot
 
-	exportFilePathInput textinput.Model
-	exportMainCursor    int
-	exportFormatCursor  int
-	exportKeyFieldCursor int
-	exportOutputCursor   int
+	exportFilePathInput   textinput.Model
+	exportMainCursor      int
+	exportFormatCursor    int
+	exportKeyFieldCursor  int
+	exportOutputCursor    int
 	exportMapFieldsCursor int
-	exportMapPathsCursor int
+	exportMapPathsCursor  int
 
-	exportFormat   string
-	exportKeyField string
-	exportScalar   bool
+	exportFormat      string
+	exportKeyField    string
+	exportScalar      bool
 	exportScalarField int
 
-	exportOutputFields  []bool
+	exportOutputFields   []bool
 	exportMapFieldInputs []textinput.Model
 	exportMapPathRows    []importMapPathRow
 
@@ -261,19 +261,25 @@ func newImportTextInput(opts *Options) textinput.Model {
 
 func newImportFilePicker(opts *Options) filepicker.Model {
 	picker := filepicker.New()
+
+	style := keymapEmacs
+	if opts != nil {
+		style = normalizeKeymapStyle(opts.Keymap)
+	}
+
 	picker.ShowHidden = true
 	picker.AutoHeight = false
 	picker.Height = 12
 	picker.Cursor = ">"
-	picker.KeyMap.Back = key.NewBinding(key.WithKeys("left", "backspace"), key.WithHelp("left", "parent"))
-	picker.KeyMap.GoToTop = key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "first"))
-	picker.KeyMap.GoToLast = key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "last"))
-	picker.KeyMap.Down = key.NewBinding(key.WithKeys("down"), key.WithHelp("down", "next"))
-	picker.KeyMap.Up = key.NewBinding(key.WithKeys("up"), key.WithHelp("up", "previous"))
-	picker.KeyMap.PageUp = key.NewBinding(key.WithKeys("pgup", "pageup"), key.WithHelp("pgup", "page up"))
-	picker.KeyMap.PageDown = key.NewBinding(key.WithKeys("pgdown", "pagedown"), key.WithHelp("pgdown", "page down"))
-	picker.KeyMap.Open = key.NewBinding(key.WithKeys("right", "enter"), key.WithHelp("right", "open"))
-	picker.KeyMap.Select = key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select"))
+	picker.KeyMap.Back = filePickerParentShortcut(style)
+	picker.KeyMap.GoToTop = filePickerFirstShortcut(style)
+	picker.KeyMap.GoToLast = filePickerLastShortcut(style)
+	picker.KeyMap.Down = filePickerNextShortcut(style)
+	picker.KeyMap.Up = filePickerPreviousShortcut(style)
+	picker.KeyMap.PageUp = filePickerPageUpShortcut(style)
+	picker.KeyMap.PageDown = filePickerPageDownShortcut(style)
+	picker.KeyMap.Open = filePickerOpenShortcut(style)
+	picker.KeyMap.Select = filePickerSelectShortcut
 
 	if opts != nil && !opts.NoColor {
 		picker.Styles.Cursor = lipgloss.NewStyle().Foreground(selectedFg)
@@ -313,6 +319,7 @@ func importCompactDirectoryPath(path string, segments int) string {
 	}
 
 	parts := strings.Split(filepath.ToSlash(path), "/")
+
 	kept := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if part != "" {
@@ -396,6 +403,7 @@ func (m *model) ensureExportState() {
 	m.exportScalarField = indexOf(importMapFieldKeys, textio.FieldValue)
 
 	m.exportOutputFields = make([]bool, len(importMapFieldLabels))
+
 	m.exportMapFieldInputs = make([]textinput.Model, len(importMapFieldLabels))
 	for i := range importMapFieldLabels {
 		m.exportOutputFields[i] = true
@@ -526,6 +534,7 @@ func (state *importState) focusExportOutputField() {
 func (state *importState) focusExportMapField() {
 	state.importButtonsFocused = false
 	state.blurImportInputs()
+
 	if len(state.exportMapFieldInputs) == 0 {
 		return
 	}
@@ -538,12 +547,14 @@ func (state *importState) focusExportMapPath() {
 	state.importButtonsFocused = false
 	state.blurImportInputs()
 	state.normalizeExportMapPathRows(nil)
+
 	if len(state.exportMapPathRows) == 0 {
 		return
 	}
 
 	maxCursor := len(state.exportMapPathRows)*2 - 1
 	state.exportMapPathsCursor = min(max(0, state.exportMapPathsCursor), maxCursor)
+
 	row, side := state.exportMapPathCursorPosition()
 	if side == 0 {
 		state.exportMapPathRows[row].awsPath.Focus()
@@ -597,6 +608,7 @@ func (state *importState) normalizeExportMapPathRows(opts *Options) {
 
 	for len(state.exportMapPathRows) > 1 {
 		last := &state.exportMapPathRows[len(state.exportMapPathRows)-1]
+
 		previous := &state.exportMapPathRows[len(state.exportMapPathRows)-2]
 		if !importMapPathRowEmpty(last) || !importMapPathRowEmpty(previous) {
 			break
@@ -642,6 +654,7 @@ func (component popupViewComponent) renderImportFilePopup() string {
 	m := component.model
 	title := "Import from file"
 	lines := []string{}
+
 	if m.importFromStdin {
 		title = "Import from stdin"
 	} else {
@@ -715,6 +728,7 @@ func (component popupViewComponent) renderImportMapPathsPopup() string {
 	leftInputWidth, rightInputWidth := m.importMapPathInputWidths()
 
 	lines := make([]string, 0, len(m.importMapPathRows))
+
 	focusedRow, _ := m.importMapPathCursorPosition()
 	for i := range m.importMapPathRows {
 		row := &m.importMapPathRows[i]
@@ -751,6 +765,7 @@ func (component popupViewComponent) renderImportDefaultsPopup() string {
 func (component popupViewComponent) renderImportFilePickerPopup() string {
 	m := component.model
 	picker := m.importFilePicker
+
 	picker.Height = m.importFilePickerHeight()
 	if m.importFilePickerCurrentFocused || m.importFilePickerParentFocused || m.importFilePickerButtonsFocused {
 		picker.Cursor = " "
@@ -759,15 +774,15 @@ func (component popupViewComponent) renderImportFilePickerPopup() string {
 	}
 
 	directory := m.value(importCompactDirectoryPath(picker.CurrentDirectory, 3))
-	lines := []string{m.label("Directory: ") + directory, ""}
-	lines = append(lines, m.importFilePickerCurrentLine())
-	lines = append(lines, m.importFilePickerParentLine())
-	lines = append(lines, strings.Split(strings.TrimRight(picker.View(), "\n"), "\n")...)
+	pickerLines := strings.Split(strings.TrimRight(picker.View(), "\n"), "\n")
+	lines := make([]string, 0, 5+len(pickerLines))
+	lines = append(lines, m.label("Directory: ")+directory, "", m.importFilePickerCurrentLine(), m.importFilePickerParentLine())
+	lines = append(lines, pickerLines...)
 	lines = append(lines, "", m.importFilePickerActionButtonsLine())
 
 	minInnerWidth := m.importFilePickerMinInnerWidth
 	if minInnerWidth == 0 {
-		minInnerWidth = importFilePickerStableMinInnerWidth(picker)
+		minInnerWidth = importFilePickerStableMinInnerWidth(&picker)
 	}
 
 	return m.renderPopupBoxMinWidth("Open Path", lines, importPopupWideMinInnerWidthForContent(minInnerWidth))
@@ -838,6 +853,7 @@ func (component popupViewComponent) renderExportOutputFieldsPopup() string {
 	labelWidth := max(maxStringWidth(importMapFieldLabels), lipgloss.Width("Scalar"))
 
 	lines := make([]string, 0, len(importMapFieldLabels)+3)
+
 	lines = append(lines, m.exportOutputFieldLine("Scalar", m.exportScalarBox(), 0, labelWidth), "")
 	for i, label := range importMapFieldLabels {
 		lines = append(lines, m.exportOutputFieldLine(label, m.exportOutputFieldMark(i), i+1, labelWidth))
@@ -901,6 +917,7 @@ func (component popupViewComponent) renderExportMapPathsPopup() string {
 
 	leftInputWidth, rightInputWidth := m.exportMapPathInputWidths()
 	lines := make([]string, 0, len(m.exportMapPathRows))
+
 	focusedRow, _ := m.exportMapPathCursorPosition()
 	for i := range m.exportMapPathRows {
 		row := &m.exportMapPathRows[i]
@@ -917,22 +934,13 @@ func (component popupViewComponent) renderExportMapPathsPopup() string {
 
 func (m model) exportChoiceLine(label, value string, cursor int) string {
 	focused := m.activePopup == popupExportFile && !m.importButtonsFocused && m.exportMainCursor == cursor
+
 	renderedValue := m.importMainSimpleValue(m.importSummaryValue(value))
 	if value == "" {
 		renderedValue = m.muted(nonePlaceholderText)
 	}
 
 	return m.exportMainFieldLine(label, renderedValue, focused)
-}
-
-func (m model) exportCheckboxLine(label string, checked bool, cursor int) string {
-	value := "[ ]"
-	if checked {
-		value = "[x]"
-	}
-
-	focused := m.activePopup == popupExportFile && !m.importButtonsFocused && m.exportMainCursor == cursor
-	return m.exportMainFieldLine(label, m.value(value), focused)
 }
 
 func (m model) exportMainTextInputLine(label string, input *textinput.Model, innerWidth int) string {
@@ -972,7 +980,7 @@ func (m model) exportMainFieldLineWithWidth(label, renderedValue string, focused
 
 func (m model) importFilePickerCurrentLine() string {
 	if m.importFilePickerCurrentFocused && !m.importFilePickerButtonsFocused {
-		return m.focusMarker("> ") + m.value(importFilePickerCurrentEntry)
+		return m.focusMarker() + m.value(importFilePickerCurrentEntry)
 	}
 
 	return "  " + m.value(importFilePickerCurrentEntry)
@@ -980,7 +988,7 @@ func (m model) importFilePickerCurrentLine() string {
 
 func (m model) importFilePickerParentLine() string {
 	if m.importFilePickerParentFocused && !m.importFilePickerButtonsFocused {
-		return m.focusMarker("> ") + m.value(importFilePickerParentEntry)
+		return m.focusMarker() + m.value(importFilePickerParentEntry)
 	}
 
 	return "  " + m.value(importFilePickerParentEntry)
@@ -992,7 +1000,7 @@ func (m model) importFilePickerActionButtonsLine() string {
 		m.importActionButton("Cancel", m.importFilePickerButtonsFocused && m.importButtonCursor == importActionCancel)
 }
 
-func importFilePickerStableMinInnerWidth(picker filepicker.Model) int {
+func importFilePickerStableMinInnerWidth(picker *filepicker.Model) int {
 	const popupHorizontalPadding = 4
 
 	directoryWidth := lipgloss.Width("Directory: " + importCompactDirectoryPath(picker.CurrentDirectory, 3))
@@ -1003,9 +1011,10 @@ func importFilePickerStableMinInnerWidth(picker filepicker.Model) int {
 	return max(directoryWidth, currentWidth, parentWidth, actionsWidth, importFilePickerMaxEntryLineWidth(picker)) + popupHorizontalPadding
 }
 
-func importFilePickerMaxEntryLineWidth(picker filepicker.Model) int {
+func importFilePickerMaxEntryLineWidth(picker *filepicker.Model) int {
 	entries := importFilePickerSortedEntries(picker.CurrentDirectory, picker.ShowHidden)
 	maxWidth := 0
+
 	for _, entry := range entries {
 		info, err := entry.Info()
 		if err != nil {
@@ -1037,6 +1046,7 @@ func importFilePickerMaxEntryLineWidth(picker filepicker.Model) int {
 
 func (m model) importChoiceLine(label, value string, cursor int) string {
 	focused := m.importFilePopupFocused() && m.importMainCursor == cursor
+
 	renderedValue := m.importMainSimpleValue(m.importSummaryValue(value))
 	if value == "" {
 		renderedValue = m.muted(nonePlaceholderText)
@@ -1109,6 +1119,7 @@ type importSummaryPair struct {
 
 func (m model) appendImportSummarySection(lines []string, label string, pairs []importSummaryPair, cursor int, previousSummaryLines *int) []string {
 	section := m.importSummaryLines(label, pairs, cursor)
+
 	if previousSummaryLines != nil && *previousSummaryLines > 1 {
 		lines = append(lines, "")
 	}
@@ -1133,6 +1144,7 @@ func (m model) importSummaryLines(label string, pairs []importSummaryPair, curso
 	for i, pair := range pairs {
 		lineLabel := ""
 		lineFocused := false
+
 		if i == 0 {
 			lineLabel = label
 			lineFocused = focused
@@ -1154,6 +1166,7 @@ func (m model) importSummaryPairValue(pair importSummaryPair, valueWidth int) st
 	}
 
 	key := pair.key + ": "
+
 	value := truncateInline(pair.value, max(1, valueWidth-lipgloss.Width(key)))
 	if m.opts.NoColor {
 		return key + value
@@ -1178,6 +1191,7 @@ func (m model) importMapFieldSummaryPairs() []importSummaryPair {
 
 func (m model) appendExportSummarySection(lines []string, label string, pairs []importSummaryPair, cursor int, previousSummaryLines *int) []string {
 	section := m.exportSummaryLines(label, pairs, cursor)
+
 	if previousSummaryLines != nil && *previousSummaryLines > 1 {
 		lines = append(lines, "")
 	}
@@ -1197,10 +1211,12 @@ func (m model) exportSummaryLines(label string, pairs []importSummaryPair, curso
 	}
 
 	valueWidth := m.exportParentValueWidth()
+
 	lines := make([]string, 0, len(pairs))
 	for i, pair := range pairs {
 		lineLabel := ""
 		lineFocused := false
+
 		if i == 0 {
 			lineLabel = label
 			lineFocused = focused
@@ -1256,6 +1272,7 @@ func (m model) exportMapPathSummaryPairs() []importSummaryPair {
 	for i := range m.exportMapPathRows {
 		row := &m.exportMapPathRows[i]
 		awsPath := strings.TrimSpace(row.awsPath.Value())
+
 		filePath := strings.TrimSpace(row.filePath.Value())
 		if awsPath == "" && filePath == "" {
 			continue
@@ -1342,6 +1359,7 @@ func (m model) importParentMapPathSummaryPairs() []importSummaryPair {
 	parts := make([]importSummaryPair, 0, len(m.importMapPathBackup))
 	for _, pair := range m.importMapPathBackup {
 		awsPath := strings.TrimSpace(pair[0])
+
 		filePath := strings.TrimSpace(pair[1])
 		if awsPath == "" && filePath == "" {
 			continue
@@ -1387,10 +1405,10 @@ func (m model) importParentDefaultSummaryPairs() []importSummaryPair {
 		return m.importDefaultSummaryPairs()
 	}
 
-	return importDefaultSnapshotSummaryPairs(m.importDefaultsBackup)
+	return importDefaultSnapshotSummaryPairs(&m.importDefaultsBackup)
 }
 
-func importDefaultSnapshotSummaryPairs(snapshot importDefaultsSnapshot) []importSummaryPair {
+func importDefaultSnapshotSummaryPairs(snapshot *importDefaultsSnapshot) []importSummaryPair {
 	parts := make([]importSummaryPair, 0, 6)
 	if snapshot.region != "" {
 		parts = append(parts, importSummaryPair{key: textio.FieldRegion, value: snapshot.region})
@@ -1419,7 +1437,7 @@ func importDefaultSnapshotSummaryPairs(snapshot importDefaultsSnapshot) []import
 	return parts
 }
 
-func (m model) importPopupActiveOrStack(kind popupKind) bool {
+func (m model) importPopupActiveOrStack(kind blockKind) bool {
 	if m.activePopup == kind {
 		return true
 	}
@@ -1449,29 +1467,6 @@ func (m model) importActionButton(label string, focused bool) string {
 	return m.formActionButton(label, focused)
 }
 
-func (m model) importFileActions() string {
-	if importMainField(m.importMainCursor) == importMainFieldFilePath {
-		return "Enter load   Esc cancel"
-	}
-
-	return "Enter open   Esc cancel"
-}
-
-func (m model) importDefaultsActions() string {
-	switch {
-	case m.importDefaultsCursor >= 0 && m.importDefaultsCursor <= 3:
-		return "Enter select   Esc cancel"
-	case m.importDefaultsCursor == 4 || m.importDefaultsCursor == 5:
-		if m.importDefaultAreaExpanded(m.importFocusedDefaultArea()) {
-			return "Enter newline   Esc cancel"
-		}
-
-		return "Enter expand/newline   Esc cancel"
-	default:
-		return "Enter apply   Esc cancel"
-	}
-}
-
 func (m model) importFocusedDefaultArea() *textarea.Model {
 	switch m.importDefaultsCursor {
 	case 4:
@@ -1484,7 +1479,7 @@ func (m model) importFocusedDefaultArea() *textarea.Model {
 }
 
 func (m model) importDefaultOptionLine(label, value string, cursor int) string {
-	line := m.formFieldLine(label, m.formOptionValue(m.importDefaultsCursor == cursor, value), importDefaultsLabelWidth, m.importDefaultsCursor == cursor && !m.importButtonsFocused)
+	line := m.formFieldLine(label, m.formOptionValue(value), importDefaultsLabelWidth, m.importDefaultsCursor == cursor && !m.importButtonsFocused)
 
 	return padVisible(line, importBaseLineWidth(importDefaultsLabelWidth))
 }
@@ -1808,20 +1803,16 @@ func importFieldCursorFromNavigation(cursor, count int, action navigationAction)
 }
 
 func importEnterKey(key string) bool {
-	return key == "enter" || key == "ctrl+j"
+	return bindingMatchesString(enterSelectShortcut, key)
 }
 
 func importPrimaryActionKey(key string) bool {
-	return isPrimaryActionKey(key)
-}
-
-func importCancelKey(key string) bool {
-	return key == "q" || key == "esc" || key == "ctrl+g"
+	return bindingMatchesString(primarySelectShortcut, key)
 }
 
 func (m *model) navigateImportSelectorButtons(key string) bool {
-	switch key {
-	case "tab":
+	switch {
+	case isForwardTabKeyString(key):
 		if m.importButtonsFocused {
 			if m.importButtonCursor == importActionPrimary {
 				m.importButtonCursor = importActionCancel
@@ -1833,8 +1824,9 @@ func (m *model) navigateImportSelectorButtons(key string) bool {
 		}
 
 		m.focusImportButton(importActionPrimary)
+
 		return true
-	case "shift+tab":
+	case isBackwardTabKeyString(key):
 		if m.importButtonsFocused {
 			if m.importButtonCursor == importActionCancel {
 				m.importButtonCursor = importActionPrimary
@@ -1846,13 +1838,14 @@ func (m *model) navigateImportSelectorButtons(key string) bool {
 		}
 
 		m.focusImportButton(importActionCancel)
+
 		return true
-	case "left":
+	case isLeftKeyString(key):
 		if m.importButtonsFocused {
 			m.importButtonCursor = importActionPrimary
 			return true
 		}
-	case "right":
+	case isRightKeyString(key):
 		if m.importButtonsFocused {
 			m.importButtonCursor = importActionCancel
 			return true
@@ -1867,6 +1860,7 @@ func (m *model) moveImportMainTabFocus(reverse bool) {
 	if count == 0 {
 		return
 	}
+
 	first := int(importMainFieldFilePath)
 	if m.importFromStdin {
 		first = int(importMainFieldFormat)
@@ -1881,6 +1875,7 @@ func (m *model) moveImportMainTabFocus(reverse bool) {
 
 			m.importMainCursor = count - 1
 			m.focusImportMain()
+
 			return
 		}
 
@@ -1891,6 +1886,7 @@ func (m *model) moveImportMainTabFocus(reverse bool) {
 
 		m.importMainCursor = first
 		m.focusImportMain()
+
 		return
 	}
 
@@ -1902,6 +1898,7 @@ func (m *model) moveImportMainTabFocus(reverse bool) {
 
 		m.importMainCursor--
 		m.focusImportMain()
+
 		return
 	}
 
@@ -1915,110 +1912,78 @@ func (m *model) moveImportMainTabFocus(reverse bool) {
 }
 
 func (m *model) moveExportMainTabFocus(reverse bool) {
-	if reverse {
-		if m.importButtonsFocused {
-			if m.importButtonCursor == importActionCancel {
-				m.importButtonCursor = importActionPrimary
-				return
-			}
-
-			m.exportMainCursor = int(exportMainFieldsCount) - 1
-			m.focusExportMain()
-			return
-		} else if m.exportMainCursor == 0 {
-			m.focusImportButton(importActionCancel)
-		} else {
-			m.exportMainCursor--
-		}
-	} else {
-		if m.importButtonsFocused {
-			if m.importButtonCursor == importActionPrimary {
-				m.importButtonCursor = importActionCancel
-				return
-			}
-
-			m.exportMainCursor = 0
-			m.focusExportMain()
-			return
-		} else if m.exportMainCursor >= int(exportMainFieldsCount)-1 {
-			m.focusImportButton(importActionPrimary)
-		} else {
-			m.exportMainCursor++
-		}
-	}
-
-	if !m.importButtonsFocused {
+	switch {
+	case reverse && m.importButtonsFocused && m.importButtonCursor == importActionCancel:
+		m.importButtonCursor = importActionPrimary
+	case reverse && m.importButtonsFocused:
+		m.exportMainCursor = int(exportMainFieldsCount) - 1
+		m.focusExportMain()
+	case reverse && m.exportMainCursor == 0:
+		m.focusImportButton(importActionCancel)
+	case reverse:
+		m.exportMainCursor--
+		m.focusExportMain()
+	case m.importButtonsFocused && m.importButtonCursor == importActionPrimary:
+		m.importButtonCursor = importActionCancel
+	case m.importButtonsFocused:
+		m.exportMainCursor = 0
+		m.focusExportMain()
+	case m.exportMainCursor >= int(exportMainFieldsCount)-1:
+		m.focusImportButton(importActionPrimary)
+	default:
+		m.exportMainCursor++
 		m.focusExportMain()
 	}
 }
 
 func (m *model) moveExportFieldTabFocus(reverse bool, cursor *int, count int, focus func()) {
-	if reverse {
-		if m.importButtonsFocused {
-			m.importButtonsFocused = false
-			*cursor = count - 1
-		} else if *cursor == 0 {
-			m.focusImportButton(importActionCancel)
-		} else {
-			*cursor--
-		}
-	} else {
-		if m.importButtonsFocused {
-			m.importButtonCursor = nextCursor(m.importButtonCursor, importActionCount)
-		} else if *cursor >= count-1 {
-			m.focusImportButton(importActionPrimary)
-		} else {
-			*cursor++
-		}
-	}
+	switch {
+	case reverse && m.importButtonsFocused:
+		m.importButtonsFocused = false
+		*cursor = count - 1
 
-	if !m.importButtonsFocused {
+		focus()
+	case reverse && *cursor == 0:
+		m.focusImportButton(importActionCancel)
+	case reverse:
+		*cursor--
+
+		focus()
+	case m.importButtonsFocused:
+		m.importButtonCursor = nextCursor(m.importButtonCursor, importActionCount)
+	case *cursor >= count-1:
+		m.focusImportButton(importActionPrimary)
+	default:
+		*cursor++
+
 		focus()
 	}
 }
 
 func (m *model) moveExportOutputFieldsTabFocus(reverse bool) {
 	count := len(importMapFieldLabels) + 1
-	if reverse {
-		if m.importButtonsFocused {
-			if m.importButtonCursor == importActionCancel {
-				m.importButtonCursor = importActionPrimary
-				return
-			}
-
-			m.exportOutputCursor = count - 1
-			m.focusExportOutputField()
-			return
-		}
-
-		if m.exportOutputCursor == 0 {
-			m.focusImportButton(importActionCancel)
-			return
-		}
-
+	switch {
+	case reverse && m.importButtonsFocused && m.importButtonCursor == importActionCancel:
+		m.importButtonCursor = importActionPrimary
+	case reverse && m.importButtonsFocused:
+		m.exportOutputCursor = count - 1
+		m.focusExportOutputField()
+	case reverse && m.exportOutputCursor == 0:
+		m.focusImportButton(importActionCancel)
+	case reverse:
 		m.exportOutputCursor--
 		m.focusExportOutputField()
-		return
-	}
-
-	if m.importButtonsFocused {
-		if m.importButtonCursor == importActionPrimary {
-			m.importButtonCursor = importActionCancel
-			return
-		}
-
+	case m.importButtonsFocused && m.importButtonCursor == importActionPrimary:
+		m.importButtonCursor = importActionCancel
+	case m.importButtonsFocused:
 		m.exportOutputCursor = 0
 		m.focusExportOutputField()
-		return
-	}
-
-	if m.exportOutputCursor >= count-1 {
+	case m.exportOutputCursor >= count-1:
 		m.focusImportButton(importActionPrimary)
-		return
+	default:
+		m.exportOutputCursor++
+		m.focusExportOutputField()
 	}
-
-	m.exportOutputCursor++
-	m.focusExportOutputField()
 }
 
 func (m *model) toggleExportOutputField() {
@@ -2052,6 +2017,7 @@ func (m *model) toggleExportOutputField() {
 
 func (m model) exportSelectedOutputFieldCount() int {
 	count := 0
+
 	for _, selected := range m.exportOutputFields {
 		if selected {
 			count++
@@ -2076,6 +2042,7 @@ func (m *model) moveImportMapFieldsTabFocus(reverse bool) {
 
 			m.importMapFieldsCursor = count - 1
 			m.focusImportMapField()
+
 			return
 		}
 
@@ -2086,6 +2053,7 @@ func (m *model) moveImportMapFieldsTabFocus(reverse bool) {
 
 		m.importMapFieldsCursor = 0
 		m.focusImportMapField()
+
 		return
 	}
 
@@ -2097,6 +2065,7 @@ func (m *model) moveImportMapFieldsTabFocus(reverse bool) {
 
 		m.importMapFieldsCursor--
 		m.focusImportMapField()
+
 		return
 	}
 
@@ -2111,6 +2080,7 @@ func (m *model) moveImportMapFieldsTabFocus(reverse bool) {
 
 func (m *model) moveImportMapPathsTabFocus(reverse bool) {
 	m.normalizeMapPathRows(&m.opts)
+
 	count := len(m.importMapPathRows)
 	if count == 0 {
 		return
@@ -2125,6 +2095,7 @@ func (m *model) moveImportMapPathsTabFocus(reverse bool) {
 
 			m.importMapPathsCursor = (count - 1) * 2
 			m.focusImportMapPath()
+
 			return
 		}
 
@@ -2135,6 +2106,7 @@ func (m *model) moveImportMapPathsTabFocus(reverse bool) {
 
 		m.importMapPathsCursor = 0
 		m.focusImportMapPath()
+
 		return
 	}
 
@@ -2147,6 +2119,7 @@ func (m *model) moveImportMapPathsTabFocus(reverse bool) {
 
 		m.importMapPathsCursor = (row - 1) * 2
 		m.focusImportMapPath()
+
 		return
 	}
 
@@ -2171,6 +2144,7 @@ func (m *model) moveImportDefaultsTabFocus(reverse bool) {
 
 			m.importDefaultsCursor = count - 1
 			m.focusImportDefaults()
+
 			return
 		}
 
@@ -2181,6 +2155,7 @@ func (m *model) moveImportDefaultsTabFocus(reverse bool) {
 
 		m.importDefaultsCursor = 0
 		m.focusImportDefaults()
+
 		return
 	}
 
@@ -2192,6 +2167,7 @@ func (m *model) moveImportDefaultsTabFocus(reverse bool) {
 
 		m.importDefaultsCursor--
 		m.focusImportDefaults()
+
 		return
 	}
 
@@ -2302,6 +2278,7 @@ func restoreMapPathRows(rows *[]importMapPathRow, values [][2]string, opts *Opti
 
 func (m *model) closeExportChildPopup() {
 	m.popPopup()
+
 	if m.activePopup == popupExportFile {
 		m.focusExportMain()
 	}
@@ -2336,7 +2313,7 @@ func (m model) snapshotImportDefaults() importDefaultsSnapshot {
 	}
 }
 
-func (m *model) restoreImportDefaults(snapshot importDefaultsSnapshot) {
+func (m *model) restoreImportDefaults(snapshot *importDefaultsSnapshot) {
 	m.importDefaultRegion = snapshot.region
 	m.importDefaultType = snapshot.typ
 	m.importDefaultTier = snapshot.tier
@@ -2347,6 +2324,7 @@ func (m *model) restoreImportDefaults(snapshot importDefaultsSnapshot) {
 
 func (m *model) closeImportChildPopup() {
 	m.popPopup()
+
 	if m.activePopup == popupImportFile {
 		m.focusImportMain()
 	}
@@ -2355,12 +2333,17 @@ func (m *model) closeImportChildPopup() {
 func (m *model) closeFilePickerPopup() {
 	m.popPopup()
 
-	switch m.activePopup {
-	case popupImportFile:
+	if m.activePopup == popupImportFile {
 		m.focusImportMain()
-	case popupExportFile:
+		return
+	}
+
+	if m.activePopup == popupExportFile {
 		m.focusExportMain()
-	case popupFileAction:
+		return
+	}
+
+	if m.activePopup == popupFileAction {
 		m.editorButtonsFocused = false
 		m.input.Focus()
 	}
@@ -2378,7 +2361,7 @@ func (m *model) openImportFilePickerPopup() tea.Cmd {
 	m.importFilePickerParentFocused = false
 	m.importFilePickerButtonsFocused = false
 	m.importFilePickerTargetName = importFilePickerTargetName(path)
-	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(&picker)
 	m.importButtonsFocused = false
 	m.pushNestedPopup(popupImportFilePicker)
 
@@ -2397,7 +2380,7 @@ func (m *model) openPopupFileActionPicker() tea.Cmd {
 	m.importFilePickerParentFocused = false
 	m.importFilePickerButtonsFocused = false
 	m.importFilePickerTargetName = importFilePickerTargetName(path)
-	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(&picker)
 	m.editorButtonsFocused = false
 	m.input.Blur()
 	m.pushNestedPopup(popupImportFilePicker)
@@ -2418,7 +2401,7 @@ func (m *model) openExportFilePickerPopup() tea.Cmd {
 	m.importFilePickerParentFocused = false
 	m.importFilePickerButtonsFocused = false
 	m.importFilePickerTargetName = importFilePickerTargetName(path)
-	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(&picker)
 	m.importButtonsFocused = false
 	m.pushNestedPopup(popupImportFilePicker)
 
@@ -2436,7 +2419,7 @@ func (m *model) cancelImportMapPathsPopup() {
 }
 
 func (m *model) cancelImportDefaultsPopup() {
-	m.restoreImportDefaults(m.importDefaultsBackup)
+	m.restoreImportDefaults(&m.importDefaultsBackup)
 	m.closeImportChildPopup()
 }
 
@@ -2464,9 +2447,11 @@ func detectedImportFormatFromBytes(data []byte) string {
 	}
 
 	firstLine := strings.TrimSpace(strings.SplitN(string(trimmed), "\n", 2)[0])
-	if strings.HasPrefix(firstLine, "---") ||
+	looksLikeYAML := strings.HasPrefix(firstLine, "---") ||
 		strings.HasPrefix(firstLine, "- ") ||
-		strings.Contains(firstLine, ":") && !strings.Contains(firstLine, "=") {
+		strings.Contains(firstLine, ":") && !strings.Contains(firstLine, "=")
+
+	if looksLikeYAML {
 		return importFormatYAML
 	}
 
@@ -2543,6 +2528,7 @@ func importAbsolutePath(path string) string {
 
 func importShortestDisplayPath(path string) string {
 	absolute := importAbsolutePath(path)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return absolute
@@ -2552,14 +2538,16 @@ func importShortestDisplayPath(path string) string {
 	if err != nil {
 		return absolute
 	}
+
 	if relative == "." {
 		return "."
 	}
 
 	parentPrefix := ".." + string(os.PathSeparator)
+
 	currentPrefix := "." + string(os.PathSeparator)
 	if relative != ".." && !strings.HasPrefix(relative, parentPrefix) && !strings.HasPrefix(relative, currentPrefix) {
-		relative = "." + string(os.PathSeparator) + relative
+		relative = filepath.Join(".", relative)
 	}
 
 	if len([]rune(relative)) <= len([]rune(absolute)) {
@@ -2570,12 +2558,12 @@ func importShortestDisplayPath(path string) string {
 }
 
 func importFormatHotkeyIndex(key string) (int, bool) {
-	switch key {
-	case "d":
+	switch {
+	case bindingMatchesString(dotenvFormatShortcut, key):
 		return indexOf(importFormatOptions, importFormatDotenv), true
-	case "j":
+	case bindingMatchesString(jsonFormatShortcut, key):
 		return indexOf(importFormatOptions, importFormatJSON), true
-	case "y":
+	case bindingMatchesString(yamlFormatShortcut, key):
 		return indexOf(importFormatOptions, importFormatYAML), true
 	default:
 		return 0, false
@@ -2600,8 +2588,8 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveImportMainTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveImportMainTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -2622,12 +2610,12 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportFile)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.popPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		switch importMainField(m.importMainCursor) {
 		case importMainFieldKeyField:
 			m.importKeyFieldCursor = indexOf(importKeyFieldOptions, m.importKeyField)
@@ -2658,6 +2646,7 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 			}
 
 			cmd := (&m).openImportFilePickerPopup()
+
 			return m, cmd
 		}
 	default:
@@ -2670,6 +2659,7 @@ func (component popupUpdateComponent) updateImportFilePopup(msg tea.KeyMsg) (tea
 func (component popupUpdateComponent) updateExportFilePopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 	m.ensureExportState()
+
 	key := msg.String()
 
 	if importPrimaryActionKey(key) {
@@ -2686,8 +2676,8 @@ func (component popupUpdateComponent) updateExportFilePopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportMainTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveExportMainTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -2703,16 +2693,17 @@ func (component popupUpdateComponent) updateExportFilePopup(msg tea.KeyMsg) (tea
 		if cursor, moved := importFieldCursorFromNavigation(m.exportMainCursor, int(exportMainFieldsCount), action); moved {
 			m.exportMainCursor = cursor
 			m.focusExportMain()
+
 			return m, nil
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportFile)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.popPopup()
-	case " ", "enter", "ctrl+j":
+	case isToggleKeyMsg(msg), isEnterKeyMsg(msg):
 		switch exportMainField(m.exportMainCursor) {
 		case exportMainFieldFormat:
 			m.exportFormatCursor = indexOf(importFormatOptions, m.exportFormat)
@@ -2751,13 +2742,17 @@ func (component popupUpdateComponent) updateExportFilePopup(msg tea.KeyMsg) (tea
 }
 
 func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
-	source := "file"
-	reader := bytes.NewReader(m.opts.ImportStdin)
-	if !m.importFromStdin {
+	var source string
+
+	var reader *bytes.Reader
+
+	switch {
+	case !m.importFromStdin:
 		path := strings.TrimSpace(m.importFilePathInput.Value())
 		if path == "" {
 			m.errMessage = "Import file path is required."
 			m.message = ""
+
 			return m, nil
 		}
 
@@ -2765,22 +2760,27 @@ func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
 		if err != nil {
 			m.errMessage = fmt.Sprintf("Read import file: %v", err)
 			m.message = ""
+
 			return m, nil
 		}
+
 		source = "file"
 		reader = bytes.NewReader(data)
-	} else if len(bytes.TrimSpace(m.opts.ImportStdin)) == 0 {
+	case len(bytes.TrimSpace(m.opts.ImportStdin)) == 0:
 		m.errMessage = "Import stdin is empty."
 		m.message = ""
+
 		return m, nil
-	} else {
+	default:
 		source = "stdin"
+		reader = bytes.NewReader(m.opts.ImportStdin)
 	}
 
 	options, err := m.importPlanOptions()
 	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
+
 		return m, nil
 	}
 
@@ -2788,6 +2788,7 @@ func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.errMessage = fmt.Sprintf("Import %s: %v", source, err)
 		m.message = ""
+
 		return m, nil
 	}
 
@@ -2795,19 +2796,23 @@ func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
 	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
+
 		return m, nil
 	}
 
 	m.applySortWithRules(m.sortRulesOrDefault())
+
 	if len(planned) > 0 {
 		first := planned[0]
-		m.selectItem(inventory.Item{Path: first.Record.Path, Region: first.Region})
+		item := inventory.Item{Path: first.Record.Path, Region: first.Region}
+		m.selectItem(&item)
 	}
 
 	if m.opts.ApplyImmediately {
 		indexes := m.dirtyStatusIndexes()
 		m.popPopup()
 		m.errMessage = ""
+
 		m.warningMessage = ""
 		if len(indexes) > 0 {
 			m.returnScreen = screenMain
@@ -2815,6 +2820,7 @@ func (m model) loadImportFileIntoList() (tea.Model, tea.Cmd) {
 		}
 
 		m.message = m.importLoadedMessage(len(planned), created, modified, unchanged)
+
 		return m, nil
 	}
 
@@ -2852,25 +2858,32 @@ func (m model) exportVisibleToFileConfirmed(overwriteConfirmed bool) (tea.Model,
 	if path == "" {
 		m.errMessage = "Export file path is required."
 		m.message = ""
+
 		return m, nil
 	}
 
 	target := importAbsolutePath(path)
+
 	info, err := os.Stat(target)
 	if err == nil && info.IsDir() {
 		m.errMessage = "Export file path must include a file name."
 		m.message = ""
+
 		return m, nil
 	}
+
 	if err == nil && !overwriteConfirmed {
 		m.importButtonsFocused = true
 		m.importButtonCursor = importActionPrimary
 		m.pushNestedPopup(popupExportOverwriteConfirm)
+
 		return m, nil
 	}
+
 	if err != nil && !os.IsNotExist(err) {
 		m.errMessage = fmt.Sprintf("Check export file: %v", err)
 		m.message = ""
+
 		return m, nil
 	}
 
@@ -2882,11 +2895,14 @@ func (m model) exportVisibleToFileConfirmed(overwriteConfirmed bool) (tea.Model,
 	if err != nil {
 		m.errMessage = err.Error()
 		m.message = ""
+
 		return m, nil
 	}
+
 	if len(records) == 0 {
 		m.errMessage = "No visible parameters to export."
 		m.message = ""
+
 		return m, nil
 	}
 
@@ -2894,15 +2910,25 @@ func (m model) exportVisibleToFileConfirmed(overwriteConfirmed bool) (tea.Model,
 	if err != nil {
 		m.errMessage = fmt.Sprintf("Open export file: %v", err)
 		m.message = ""
+
 		return m, nil
 	}
-	defer file.Close()
 
 	writer := textio.NewWriter(textio.FormatType(m.exportFormat), file)
+
 	err = exportplan.Write(writer, records, mappings, recordFields, keyField, scalarField)
 	if err != nil {
+		_ = file.Close()
 		m.errMessage = fmt.Sprintf("Export file: %v", err)
 		m.message = ""
+
+		return m, nil
+	}
+
+	if err := file.Close(); err != nil {
+		m.errMessage = fmt.Sprintf("Close export file: %v", err)
+		m.message = ""
+
 		return m, nil
 	}
 
@@ -2926,12 +2952,13 @@ func (m model) exportVisibleRecords(recordFields textio.Fields) (textio.Records,
 			continue
 		}
 
-		status := m.statuses[idx]
-		if status.PendingOperation() == parameterStateDeleted {
+		status := &m.statuses[idx]
+		if status.pendingOperation() == parameterStateDeleted {
 			continue
 		}
 
-		record := exportRecordFromStatus(status.localStatus(), recordFields)
+		local := status.localStatus()
+		record := exportRecordFromStatus(&local, recordFields)
 		record.Path = pathMappings.ToFile(record.Path)
 		records = append(records, record)
 	}
@@ -2939,7 +2966,7 @@ func (m model) exportVisibleRecords(recordFields textio.Fields) (textio.Records,
 	return records, nil
 }
 
-func exportRecordFromStatus(status Status, fields textio.Fields) textio.Record {
+func exportRecordFromStatus(status *Status, fields textio.Fields) textio.Record {
 	return textio.Record{
 		Path:        status.Item.Path,
 		Fields:      fields,
@@ -2981,10 +3008,12 @@ func (m model) exportSelection() (textio.Fields, textio.FieldMappings, string) {
 			awsName := importMapFieldKeys[i]
 			seen[awsName] = len(mappings)
 			fields = fields.With(awsName)
+
 			mapping, ok := textio.DefaultFieldMappings().Find(awsName)
 			if !ok {
 				mapping = textio.FieldMapping{AWSName: awsName, FileName: awsName}
 			}
+
 			mappings = append(mappings, mapping)
 		}
 	}
@@ -3031,6 +3060,7 @@ func (m model) exportScalarFieldName() string {
 
 func (m model) exportMapFieldMappings() textio.FieldMappings {
 	mappings := textio.FieldMappings{}
+
 	for i := range m.exportMapFieldInputs {
 		fileName := strings.TrimSpace(m.exportMapFieldInputs[i].Value())
 		if fileName == "" || i >= len(importMapFieldKeys) {
@@ -3049,10 +3079,12 @@ func (m model) exportPathMappings() (app.PathMappings, error) {
 	values := make([]string, 0, len(m.exportMapPathRows))
 	for i := range m.exportMapPathRows {
 		awsPath := strings.TrimSpace(m.exportMapPathRows[i].awsPath.Value())
+
 		filePath := strings.TrimSpace(m.exportMapPathRows[i].filePath.Value())
 		if awsPath == "" && filePath == "" {
 			continue
 		}
+
 		if awsPath == "" {
 			return nil, fmt.Errorf("map path row %d must include an AWS path", i+1)
 		}
@@ -3060,7 +3092,9 @@ func (m model) exportPathMappings() (app.PathMappings, error) {
 		values = append(values, awsPath+":"+filePath)
 	}
 
-	return app.ParsePathMappings(values)
+	pathMappings, err := app.ParsePathMappings(values)
+
+	return pathMappings, crerr.Wrap(err, "parse export path mappings")
 }
 
 func (m model) importPlanOptions() (*importer.Options, error) {
@@ -3136,6 +3170,7 @@ func (m model) importPathMappingsForPlan() (app.PathMappings, error) {
 	values := make([]string, 0, len(m.importMapPathRows))
 	for i := range m.importMapPathRows {
 		awsPath := strings.TrimSpace(m.importMapPathRows[i].awsPath.Value())
+
 		filePath := strings.TrimSpace(m.importMapPathRows[i].filePath.Value())
 		if awsPath == "" && filePath == "" {
 			continue
@@ -3148,7 +3183,9 @@ func (m model) importPathMappingsForPlan() (app.PathMappings, error) {
 		values = append(values, awsPath+":"+filePath)
 	}
 
-	return app.ParsePathMappings(values)
+	pathMappings, err := app.ParsePathMappings(values)
+
+	return pathMappings, crerr.Wrap(err, "parse import path mappings")
 }
 
 func (m model) importDefaultOptionsForPlan() ssm.PutParameterOptions {
@@ -3168,9 +3205,9 @@ func (m *model) applyImportPlan(planned []importer.PlannedRecord) (created, modi
 		}
 
 		switch {
-		case state.PendingOperation() == parameterStateNew:
+		case state.pendingOperation() == parameterStateNew:
 			created++
-		case state.PendingOperation() == parameterStateModified:
+		case state.pendingOperation() == parameterStateModified:
 			modified++
 		case !changed:
 			unchanged++
@@ -3205,11 +3242,11 @@ func (m model) importPlannedStatus(planned *importer.PlannedRecord) (Status, boo
 	}
 
 	current, found := m.importCurrentStatus(key)
-	if found && current.PendingOperation() == parameterStateDeleted {
+	if found && current.pendingOperation() == parameterStateDeleted {
 		return Status{}, false, fmt.Errorf("revert deleted parameter %s before importing over it", item.Path)
 	}
 
-	if found && current.PendingOperation() == parameterStateNew {
+	if found && current.pendingOperation() == parameterStateNew {
 		local.applyLocalCreate(planned.Type, planned.Options)
 		return local, true, nil
 	}
@@ -3224,9 +3261,10 @@ func (m model) importPlannedStatus(planned *importer.PlannedRecord) (Status, boo
 		local.Version = base.Version
 		local.Modified = base.Modified
 		local.User = base.User
-		local.applyLocalModification(cloud, planned.Type, planned.Options)
+		local.applyLocalModification(&cloud, planned.Type, planned.Options)
+		changed := local.HasLocalChanges()
 
-		return local, local.HasLocalChanges(), nil
+		return local, changed, nil
 	}
 
 	cloudStatus := statusFromMetadata(&item, &planned.Existing)
@@ -3234,9 +3272,10 @@ func (m model) importPlannedStatus(planned *importer.PlannedRecord) (Status, boo
 	local.Version = cloudStatus.Version
 	local.Modified = cloudStatus.Modified
 	local.User = cloudStatus.User
-	local.applyLocalModification(cloud, planned.Type, planned.Options)
+	local.applyLocalModification(&cloud, planned.Type, planned.Options)
+	changed := local.HasLocalChanges()
 
-	return local, local.HasLocalChanges(), nil
+	return local, changed, nil
 }
 
 func (m model) importCurrentStatus(key string) (Status, bool) {
@@ -3289,11 +3328,11 @@ func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg
 	m := component.model
 	key := msg.String()
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(m.filePickerShortcutScreen(), popupImportFilePicker)
 		return m, nil
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.closeFilePickerPopup()
 		return m, nil
 	}
@@ -3309,9 +3348,11 @@ func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg
 	}
 
 	var cmd tea.Cmd
+
 	previousDirectory := m.importFilePicker.CurrentDirectory
 	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
 	m.updateImportFilePickerWidthOnDirectoryChange(previousDirectory)
+
 	if selected, path := m.importFilePicker.DidSelectFile(msg); selected {
 		m.applyImportFilePickerPath(path)
 		return m, nil
@@ -3326,8 +3367,8 @@ func (component popupUpdateComponent) updateImportFilePickerPopup(msg tea.KeyMsg
 
 func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 	if m.importFilePickerButtonsFocused {
-		switch key {
-		case "tab":
+		switch {
+		case isForwardTabKeyString(key):
 			if m.importButtonCursor == importActionPrimary {
 				m.importButtonCursor = importActionCancel
 			} else {
@@ -3336,7 +3377,7 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			}
 
 			return nil, true
-		case "shift+tab":
+		case isBackwardTabKeyString(key):
 			if m.importButtonCursor == importActionCancel {
 				m.importButtonCursor = importActionPrimary
 			} else {
@@ -3346,13 +3387,13 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			}
 
 			return nil, true
-		case "left":
+		case isLeftKeyString(key):
 			m.importButtonCursor = importActionPrimary
 			return nil, true
-		case "right":
+		case isRightKeyString(key):
 			m.importButtonCursor = importActionCancel
 			return nil, true
-		case "enter", "ctrl+j":
+		case importEnterKey(key):
 			if m.importButtonCursor == importActionCancel {
 				m.closeFilePickerPopup()
 				return nil, true
@@ -3362,24 +3403,27 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			if next, ok := updated.(model); ok {
 				*m = next
 			}
+
 			return cmd, true
 		}
 
-		if action, ok := m.interpretNavigationKey(key, false); ok {
+		if action, ok := m.interpretNavigationKey(key); ok {
 			return m.applyImportFilePickerButtonNavigation(action), true
 		}
 
 		return nil, true
 	}
 
-	switch key {
-	case "tab":
+	switch {
+	case isForwardTabKeyString(key):
 		m.importFilePickerButtonsFocused = true
 		m.importButtonCursor = importActionPrimary
+
 		return nil, true
-	case "shift+tab":
+	case isBackwardTabKeyString(key):
 		m.importFilePickerButtonsFocused = true
 		m.importButtonCursor = importActionCancel
+
 		return nil, true
 	}
 
@@ -3392,6 +3436,7 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			if next, ok := updated.(model); ok {
 				*m = next
 			}
+
 			return cmd, true
 		}
 	}
@@ -3402,7 +3447,7 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			return nil, true
 		}
 
-		if action, ok := m.interpretNavigationKey(key, false); ok {
+		if action, ok := m.interpretNavigationKey(key); ok {
 			return m.applyImportFilePickerCurrentNavigation(action), true
 		}
 
@@ -3414,14 +3459,14 @@ func (m *model) updateImportFilePickerFocus(key string) (tea.Cmd, bool) {
 			return m.changeImportFilePickerDirectory(filepath.Dir(m.importFilePicker.CurrentDirectory)), true
 		}
 
-		if action, ok := m.interpretNavigationKey(key, false); ok {
+		if action, ok := m.interpretNavigationKey(key); ok {
 			return m.applyImportFilePickerParentNavigation(action), true
 		}
 
 		return nil, false
 	}
 
-	if action, ok := m.interpretNavigationKey(key, false); ok {
+	if action, ok := m.interpretNavigationKey(key); ok {
 		return m.applyImportFilePickerListNavigation(action), true
 	}
 
@@ -3440,7 +3485,9 @@ func (m *model) applyImportFilePickerButtonNavigation(action navigationAction) t
 		m.importFilePickerButtonsFocused = false
 		m.importFilePickerParentFocused = false
 		m.importFilePickerCurrentFocused = false
+
 		return m.updateImportFilePickerNavigation(navLast)
+	case navNone, navNext, navPageUp, navPageDown:
 	}
 
 	return nil
@@ -3454,7 +3501,9 @@ func (m *model) applyImportFilePickerCurrentNavigation(action navigationAction) 
 	case navLast:
 		m.importFilePickerCurrentFocused = false
 		m.importFilePickerParentFocused = false
+
 		return m.updateImportFilePickerNavigation(navLast)
+	case navNone, navPrevious, navPageUp, navFirst:
 	}
 
 	return nil
@@ -3471,11 +3520,14 @@ func (m *model) applyImportFilePickerParentNavigation(action navigationAction) t
 	case navLast:
 		m.importFilePickerParentFocused = false
 		m.importFilePickerCurrentFocused = false
+
 		return m.updateImportFilePickerNavigation(navLast)
 	case navPageDown:
 		m.importFilePickerParentFocused = false
 		m.importFilePickerCurrentFocused = false
+
 		return m.updateImportFilePickerNavigation(navPageDown)
+	case navNone, navPageUp:
 	}
 
 	return nil
@@ -3484,9 +3536,10 @@ func (m *model) applyImportFilePickerParentNavigation(action navigationAction) t
 func (m *model) applyImportFilePickerListNavigation(action navigationAction) tea.Cmd {
 	switch action {
 	case navPrevious:
-		if importFilePickerSelectedIndex(m.importFilePicker) == 0 {
+		if importFilePickerSelectedIndex(&m.importFilePicker) == 0 {
 			m.importFilePickerParentFocused = true
 			m.importFilePickerCurrentFocused = false
+
 			return nil
 		}
 
@@ -3494,9 +3547,11 @@ func (m *model) applyImportFilePickerListNavigation(action navigationAction) tea
 	case navNext, navPageUp, navPageDown, navLast:
 		m.importFilePickerParentFocused = false
 		m.importFilePickerCurrentFocused = false
+
 		return m.updateImportFilePickerNavigation(action)
 	case navFirst:
 		return m.focusImportFilePickerFirst()
+	case navNone:
 	}
 
 	return nil
@@ -3519,7 +3574,7 @@ func (m *model) focusImportFilePickerFirstList() tea.Cmd {
 }
 
 func (m *model) updateImportFilePickerNavigation(action navigationAction) tea.Cmd {
-	if !importFilePickerFilesLoaded(m.importFilePicker) {
+	if !importFilePickerFilesLoaded(&m.importFilePicker) {
 		return nil
 	}
 
@@ -3529,6 +3584,7 @@ func (m *model) updateImportFilePickerNavigation(action navigationAction) tea.Cm
 	}
 
 	var cmd tea.Cmd
+
 	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
 
 	return cmd
@@ -3548,9 +3604,11 @@ func importFilePickerNavigationMsg(action navigationAction) (tea.KeyMsg, bool) {
 		return tea.KeyMsg{Type: tea.KeyHome}, true
 	case navLast:
 		return tea.KeyMsg{Type: tea.KeyEnd}, true
-	default:
+	case navNone:
 		return tea.KeyMsg{}, false
 	}
+
+	return tea.KeyMsg{}, false
 }
 
 type importFilePickerSideAction int
@@ -3561,20 +3619,13 @@ const (
 )
 
 func (m model) importFilePickerSideAction(key string) (importFilePickerSideAction, bool) {
-	switch key {
-	case "left", "backspace":
+	style := m.keymapStyle()
+	if isFilePickerParentKeyString(style, key) {
 		return importFilePickerSideParent, true
-	case "right":
-		return importFilePickerSideOpen, true
 	}
 
-	if m.keymapStyle() == keymapVi {
-		switch key {
-		case "h":
-			return importFilePickerSideParent, true
-		case "l":
-			return importFilePickerSideOpen, true
-		}
+	if isFilePickerOpenKeyString(style, key) {
+		return importFilePickerSideOpen, true
 	}
 
 	return 0, false
@@ -3591,7 +3642,7 @@ func (m *model) chooseImportFilePickerSelection(msg tea.KeyMsg) (tea.Model, tea.
 		return *m, nil
 	}
 
-	if path, ok := importFilePickerSelectedPath(m.importFilePicker); ok {
+	if path, ok := importFilePickerSelectedPath(&m.importFilePicker); ok {
 		m.applyImportFilePickerPath(path)
 		return *m, nil
 	}
@@ -3600,6 +3651,7 @@ func (m *model) chooseImportFilePickerSelection(msg tea.KeyMsg) (tea.Model, tea.
 	m.importFilePicker.Height = m.importFilePickerHeight()
 
 	var cmd tea.Cmd
+
 	previousDirectory := m.importFilePicker.CurrentDirectory
 	m.importFilePicker, cmd = m.importFilePicker.Update(msg)
 	m.updateImportFilePickerWidthOnDirectoryChange(previousDirectory)
@@ -3612,7 +3664,7 @@ func (m *model) updateImportFilePickerWidthOnDirectoryChange(previousDirectory s
 		return
 	}
 
-	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(m.importFilePicker)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(&m.importFilePicker)
 }
 
 func (m *model) applyImportFilePickerPath(path string) {
@@ -3625,12 +3677,14 @@ func (m *model) applyImportFilePickerPath(path string) {
 	case filePickerTargetExportFile:
 		m.exportFilePathInput.SetValue(path)
 		m.exportFilePathInput.SetCursor(len([]rune(path)))
+
 		if detected := detectedImportFormatFromPath(path); detected != "" {
 			m.exportFormat = detected
 		}
-	default:
+	case filePickerTargetImportFile:
 		m.importFilePathInput.SetValue(path)
 		m.importFilePathInput.SetCursor(len([]rune(path)))
+
 		if detected := detectedImportFormatFromPath(path); detected != "" {
 			m.importFormat = detected
 		}
@@ -3639,8 +3693,9 @@ func (m *model) applyImportFilePickerPath(path string) {
 	m.closeFilePickerPopup()
 }
 
-func importFilePickerSelectedPath(picker filepicker.Model) (string, bool) {
+func importFilePickerSelectedPath(picker *filepicker.Model) (string, bool) {
 	entries := importFilePickerSortedEntries(picker.CurrentDirectory, picker.ShowHidden)
+
 	idx := importFilePickerSelectedIndex(picker)
 	if idx < 0 || idx >= len(entries) {
 		return "", false
@@ -3652,6 +3707,7 @@ func importFilePickerSelectedPath(picker filepicker.Model) (string, bool) {
 func importShortestDisplayPathForPicker(path string) string {
 	display := importShortestDisplayPath(path)
 	absolute := importAbsolutePath(path)
+
 	info, err := os.Stat(absolute)
 	if err != nil || !info.IsDir() {
 		return display
@@ -3682,24 +3738,27 @@ func (m *model) changeImportFilePickerDirectory(path string) tea.Cmd {
 	m.importFilePickerParentFocused = false
 	m.importFilePickerButtonsFocused = false
 	m.importFilePickerTargetName = ""
-	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(picker)
+	m.importFilePickerMinInnerWidth = importFilePickerStableMinInnerWidth(&picker)
 
 	return m.importFilePicker.Init()
 }
 
 func (m *model) focusImportFilePickerTarget() {
-	if m.importFilePickerTargetName == "" || !importFilePickerFilesLoaded(m.importFilePicker) {
+	if m.importFilePickerTargetName == "" || !importFilePickerFilesLoaded(&m.importFilePicker) {
 		return
 	}
 
 	index := importFilePickerFileIndex(m.importFilePicker.CurrentDirectory, m.importFilePickerTargetName, m.importFilePicker.ShowHidden)
 	m.importFilePickerTargetName = ""
+
 	if index < 0 {
 		return
 	}
 
 	var cmd tea.Cmd
+
 	m.importFilePicker, cmd = m.importFilePicker.Update(tea.KeyMsg{Type: tea.KeyHome})
+
 	_ = cmd
 	for i := 0; i < index; i++ {
 		m.importFilePicker, cmd = m.importFilePicker.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -3707,9 +3766,10 @@ func (m *model) focusImportFilePickerTarget() {
 	}
 }
 
-func importFilePickerFilesLoaded(picker filepicker.Model) bool {
+func importFilePickerFilesLoaded(picker *filepicker.Model) bool {
 	value := reflect.ValueOf(picker)
 	field := value.FieldByName("files")
+
 	return field.IsValid() && field.Kind() == reflect.Slice && field.Len() > 0
 }
 
@@ -3738,6 +3798,7 @@ func importFilePickerSortedEntries(directory string, showHidden bool) []os.DirEn
 				filtered = append(filtered, entry)
 			}
 		}
+
 		entries = filtered
 	}
 
@@ -3752,8 +3813,9 @@ func importFilePickerSortedEntries(directory string, showHidden bool) []os.DirEn
 	return entries
 }
 
-func importFilePickerSelectedIndex(picker filepicker.Model) int {
+func importFilePickerSelectedIndex(picker *filepicker.Model) int {
 	value := reflect.ValueOf(picker)
+
 	field := value.FieldByName("selected")
 	if !field.IsValid() || field.Kind() != reflect.Int {
 		return -1
@@ -3772,6 +3834,7 @@ func (component popupUpdateComponent) updateImportFormatPopup(msg tea.KeyMsg) (t
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
@@ -3786,6 +3849,7 @@ func (component popupUpdateComponent) updateImportFormatPopup(msg tea.KeyMsg) (t
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
@@ -3805,12 +3869,12 @@ func (component popupUpdateComponent) updateImportFormatPopup(msg tea.KeyMsg) (t
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportFormat)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.closeImportChildPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		if len(importFormatOptions) > 0 {
 			m.importFormat = importFormatOptions[min(m.importFormatCursor, len(importFormatOptions)-1)]
 		}
@@ -3828,6 +3892,7 @@ func (component popupUpdateComponent) updateExportFormatPopup(msg tea.KeyMsg) (t
 	if importPrimaryActionKey(key) || importEnterKey(key) && !m.importButtonsFocused {
 		m.exportFormat = importFormatOptions[m.exportFormatCursor]
 		m.closeExportChildPopup()
+
 		return m, nil
 	}
 
@@ -3842,8 +3907,8 @@ func (component popupUpdateComponent) updateExportFormatPopup(msg tea.KeyMsg) (t
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportFieldTabFocus(key == "shift+tab", &m.exportFormatCursor, len(importFormatOptions), func() {})
+	if isTabNavigationKeyString(key) {
+		m.moveExportFieldTabFocus(isBackwardTabKeyString(key), &m.exportFormatCursor, len(importFormatOptions), func() {})
 		return m, nil
 	}
 
@@ -3851,6 +3916,7 @@ func (component popupUpdateComponent) updateExportFormatPopup(msg tea.KeyMsg) (t
 		m.exportFormatCursor = index
 		m.exportFormat = importFormatOptions[index]
 		m.closeExportChildPopup()
+
 		return m, nil
 	}
 
@@ -3865,10 +3931,10 @@ func (component popupUpdateComponent) updateExportFormatPopup(msg tea.KeyMsg) (t
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportFormat)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.closeExportChildPopup()
 	}
 
@@ -3882,6 +3948,7 @@ func (component popupUpdateComponent) updateExportKeyFieldPopup(msg tea.KeyMsg) 
 	if importPrimaryActionKey(key) || importEnterKey(key) && !m.importButtonsFocused {
 		m.exportKeyField = importKeyFieldOptions[m.exportKeyFieldCursor]
 		m.closeExportChildPopup()
+
 		return m, nil
 	}
 
@@ -3896,8 +3963,8 @@ func (component popupUpdateComponent) updateExportKeyFieldPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportFieldTabFocus(key == "shift+tab", &m.exportKeyFieldCursor, len(importKeyFieldOptions), func() {})
+	if isTabNavigationKeyString(key) {
+		m.moveExportFieldTabFocus(isBackwardTabKeyString(key), &m.exportKeyFieldCursor, len(importKeyFieldOptions), func() {})
 		return m, nil
 	}
 
@@ -3912,10 +3979,10 @@ func (component popupUpdateComponent) updateExportKeyFieldPopup(msg tea.KeyMsg) 
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportKeyField)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.closeExportChildPopup()
 	}
 
@@ -3941,8 +4008,8 @@ func (component popupUpdateComponent) updateExportOutputFieldsPopup(msg tea.KeyM
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportOutputFieldsTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveExportOutputFieldsTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -3950,16 +4017,17 @@ func (component popupUpdateComponent) updateExportOutputFieldsPopup(msg tea.KeyM
 		if cursor, moved := importFieldCursorFromNavigation(m.exportOutputCursor, len(importMapFieldLabels)+1, action); moved {
 			m.exportOutputCursor = cursor
 			m.focusExportOutputField()
+
 			return m, nil
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportOutputFields)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.cancelExportOutputFieldsPopup()
-	case " ", "enter", "ctrl+j":
+	case isToggleKeyMsg(msg), isEnterKeyMsg(msg):
 		m.toggleExportOutputField()
 	}
 
@@ -3971,7 +4039,7 @@ func (component popupUpdateComponent) updateExportMapFieldsPopup(msg tea.KeyMsg)
 	return m.updateExportTextFieldsPopup(msg, popupExportMapFields, &m.exportMapFieldsCursor, m.exportMapFieldInputs, m.focusExportMapField, m.cancelExportMapFieldsPopup, m.closeExportChildPopup)
 }
 
-func (m model) updateExportTextFieldsPopup(msg tea.KeyMsg, kind popupKind, cursor *int, inputs []textinput.Model, focus func(), cancel func(), apply func()) (tea.Model, tea.Cmd) {
+func (m model) updateExportTextFieldsPopup(msg tea.KeyMsg, kind blockKind, cursor *int, inputs []textinput.Model, focus, cancel, apply func()) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
 	if importPrimaryActionKey(key) {
@@ -3989,26 +4057,29 @@ func (m model) updateExportTextFieldsPopup(msg tea.KeyMsg, kind popupKind, curso
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportFieldTabFocus(key == "shift+tab", cursor, len(inputs), focus)
+	if isTabNavigationKeyString(key) {
+		m.moveExportFieldTabFocus(isBackwardTabKeyString(key), cursor, len(inputs), focus)
 		return m, nil
 	}
 
 	if action, ok := m.editorNavigationAction(key); ok {
 		if next, moved := importFieldCursorFromNavigation(*cursor, len(inputs), action); moved {
 			*cursor = next
+
 			focus()
+
 			return m, nil
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, kind)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		cancel()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		*cursor = nextCursor(*cursor, len(inputs))
+
 		focus()
 	default:
 		cmd := m.updateTextInput(&inputs[*cursor], msg)
@@ -4037,8 +4108,8 @@ func (component popupUpdateComponent) updateExportMapPathsPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveExportMapPathsTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveExportMapPathsTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -4046,19 +4117,21 @@ func (component popupUpdateComponent) updateExportMapPathsPopup(msg tea.KeyMsg) 
 		if cursor, moved := importFieldCursorFromNavigation(m.exportMapPathsCursor, len(m.exportMapPathRows)*2, action); moved {
 			m.exportMapPathsCursor = cursor
 			m.focusExportMapPath()
+
 			return m, nil
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportMapPaths)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.cancelExportMapPathsPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.moveExportMapPathCursorToNextInput()
 	default:
 		row, side := m.exportMapPathCursorPosition()
+
 		var cmd tea.Cmd
 		if side == 0 {
 			cmd = m.updateTextInput(&m.exportMapPathRows[row].awsPath, msg)
@@ -4068,6 +4141,7 @@ func (component popupUpdateComponent) updateExportMapPathsPopup(msg tea.KeyMsg) 
 
 		m.normalizeExportMapPathRows(&m.opts)
 		m.focusExportMapPath()
+
 		return m, cmd
 	}
 
@@ -4093,25 +4167,25 @@ func (component popupUpdateComponent) updateExportOverwriteConfirmPopup(msg tea.
 		return m, nil
 	}
 
-	switch key {
-	case "tab":
+	switch {
+	case isForwardTabKeyString(key):
 		m.focusImportButton(nextCursor(m.importButtonCursor, importActionCount))
 		return m, nil
-	case "shift+tab":
+	case isBackwardTabKeyString(key):
 		m.focusImportButton(previousCursor(m.importButtonCursor, importActionCount))
 		return m, nil
-	case "left":
+	case isLeftKeyString(key):
 		m.focusImportButton(importActionPrimary)
 		return m, nil
-	case "right":
+	case isRightKeyString(key):
 		m.focusImportButton(importActionCancel)
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupExportOverwriteConfirm)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.popPopup()
 		m.focusExportMain()
 	}
@@ -4122,6 +4196,7 @@ func (component popupUpdateComponent) updateExportOverwriteConfirmPopup(msg tea.
 func (m *model) moveExportMapPathsTabFocus(reverse bool) {
 	m.normalizeExportMapPathRows(&m.opts)
 	row, _ := m.exportMapPathCursorPosition()
+
 	rowCount := len(m.exportMapPathRows)
 	if rowCount == 0 {
 		return
@@ -4132,6 +4207,7 @@ func (m *model) moveExportMapPathsTabFocus(reverse bool) {
 			m.importButtonsFocused = false
 			m.exportMapPathsCursor = (rowCount - 1) * 2
 			m.focusExportMapPath()
+
 			return
 		}
 
@@ -4142,6 +4218,7 @@ func (m *model) moveExportMapPathsTabFocus(reverse bool) {
 
 		m.exportMapPathsCursor = (row - 1) * 2
 		m.focusExportMapPath()
+
 		return
 	}
 
@@ -4161,6 +4238,7 @@ func (m *model) moveExportMapPathsTabFocus(reverse bool) {
 
 func (m *model) moveExportMapPathCursorToNextInput() {
 	m.normalizeExportMapPathRows(&m.opts)
+
 	if len(m.exportMapPathRows) == 0 {
 		m.exportMapPathRows = append(m.exportMapPathRows, newImportMapPathRow(&m.opts))
 	}
@@ -4188,6 +4266,7 @@ func (component popupUpdateComponent) updateImportKeyFieldPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
@@ -4202,6 +4281,7 @@ func (component popupUpdateComponent) updateImportKeyFieldPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
@@ -4213,12 +4293,12 @@ func (component popupUpdateComponent) updateImportKeyFieldPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportKeyField)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.closeImportChildPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		if len(importKeyFieldOptions) > 0 {
 			m.importKeyField = importKeyFieldOptions[min(m.importKeyFieldCursor, len(importKeyFieldOptions)-1)]
 		}
@@ -4245,11 +4325,12 @@ func (component popupUpdateComponent) updateImportMapFieldsPopup(msg tea.KeyMsg)
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveImportMapFieldsTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveImportMapFieldsTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -4270,12 +4351,12 @@ func (component popupUpdateComponent) updateImportMapFieldsPopup(msg tea.KeyMsg)
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportMapFields)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.cancelImportMapFieldsPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.moveImportMapFieldCursorToNextLine()
 	default:
 		if m.importMapFieldBackspaceMovesPrevious(key) {
@@ -4318,11 +4399,12 @@ func (component popupUpdateComponent) updateImportMapPathsPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveImportMapPathsTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveImportMapPathsTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -4343,12 +4425,12 @@ func (component popupUpdateComponent) updateImportMapPathsPopup(msg tea.KeyMsg) 
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportMapPaths)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.cancelImportMapPathsPopup()
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.moveImportMapPathCursorToNextInput()
 	default:
 		if m.importMapPathBackspaceMovesPrevious(key) {
@@ -4425,7 +4507,7 @@ func (m model) importMapPathBackspaceMovesPrevious(key string) bool {
 }
 
 func importTextInputBackspaceMovesPrevious(key string, input *textinput.Model) bool {
-	if key != "backspace" && key != "ctrl+h" {
+	if !bindingMatchesString(deleteBackwardShortcut, key) {
 		return false
 	}
 
@@ -4448,11 +4530,12 @@ func (component popupUpdateComponent) updateImportDefaultsPopup(msg tea.KeyMsg) 
 		}
 
 		m.closeImportChildPopup()
+
 		return m, nil
 	}
 
-	if key == "tab" || key == "shift+tab" {
-		m.moveImportDefaultsTabFocus(key == "shift+tab")
+	if isTabNavigationKeyString(key) {
+		m.moveImportDefaultsTabFocus(isBackwardTabKeyString(key))
 		return m, nil
 	}
 
@@ -4467,7 +4550,7 @@ func (component popupUpdateComponent) updateImportDefaultsPopup(msg tea.KeyMsg) 
 	if action, ok := m.editorNavigationAction(key); ok {
 		areaExpanded := m.importDefaultFocusedAreaExpanded()
 
-		allowFieldNavigation := !areaExpanded || key == "tab" || key == "shift+tab"
+		allowFieldNavigation := !areaExpanded || isTabNavigationKeyString(key)
 		if !allowFieldNavigation {
 			return m.updateImportDefaultInput(msg)
 		}
@@ -4481,19 +4564,19 @@ func (component popupUpdateComponent) updateImportDefaultsPopup(msg tea.KeyMsg) 
 		}
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupImportDefaults)
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.cancelImportDefaultsPopup()
-	case "alt+e":
+	case isFocusedFieldActionsKeyMsg(msg):
 		switch m.importDefaultsCursor {
 		case 4:
 			m.openImportDefaultActionsPopup(editFieldPolicies)
 		case 5:
 			m.openImportDefaultActionsPopup(editFieldDescription)
 		}
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		switch m.importDefaultsCursor {
 		case 0:
 			return m.openImportDefaultRegionSelect()

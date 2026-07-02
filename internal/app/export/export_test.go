@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/biptec/aws-ssm-params/internal/app"
+	"github.com/biptec/aws-ssm-params/internal/app/exportplan"
 	"github.com/biptec/aws-ssm-params/internal/inventory"
 	"github.com/biptec/aws-ssm-params/internal/textio"
 	"github.com/biptec/aws-ssm-params/internal/ui"
@@ -31,13 +32,13 @@ func TestExportRecordFieldsIncludesScalarAndKeyFields(t *testing.T) {
 		KeyField:    textio.FieldRegion,
 	}
 
-	assert.Equal(t, textio.Fields{textio.FieldValue, textio.FieldRegion}, options.recordFields())
+	assert.Equal(t, textio.Fields{textio.FieldValue, textio.FieldRegion}, exportplan.RecordFields(options.Fields, options.ScalarField, options.KeyField))
 }
 
 func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 	t.Parallel()
 
-	fields := (&Options{}).recordFields()
+	fields := exportplan.RecordFields(nil, "", "")
 
 	assert.Equal(t, textio.Fields{
 		textio.FieldName,
@@ -57,7 +58,7 @@ func TestExportFieldsDefaultsToAllFields(t *testing.T) {
 }
 
 func TestExportDefaultFieldsWithKeyFieldStillRequestValues(t *testing.T) {
-	recordFields := (&Options{KeyField: textio.FieldName}).recordFields()
+	recordFields := exportplan.RecordFields(nil, "", textio.FieldName)
 
 	assert.Contains(t, recordFields, textio.FieldName)
 	assert.Contains(t, recordFields, textio.FieldValue)

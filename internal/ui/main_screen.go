@@ -19,19 +19,21 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 	m.message = ""
 
 	key := msg.String()
+
 	if m.filterMode {
-		switch key {
-		case "ctrl+_", "ctrl+/":
+		switch {
+		case isHelpKeyMsg(msg):
 			m.openShortcuts(screenMain)
 			return m, nil
-		case "esc", "ctrl+g":
+		case isEscapeCloseKeyMsg(msg):
 			m.closeFilterMode()
 			return m, nil
-		case "enter":
+		case isEnterKeyMsg(msg):
 			m.closeFilterMode()
 			return m, nil
 		default:
 			before := m.filterInput.Value()
+
 			cmd := m.updateTextInput(&m.filterInput, msg)
 			if after := m.filterInput.Value(); after != before {
 				m.applyFilterQuery(after)
@@ -58,39 +60,46 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		return m, nil
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if m.keymapStyle() == keymapVi && isViFirstNavigationPrefixString(key) {
+		m.pendingKeySequence = firstBindingKey(viFirstNavigationPrefixShortcut)
 		return m, nil
 	}
 
-	switch key {
-	case "q", "esc":
-		return m, tea.Quit
-	case "enter", "ctrl+j":
+	if isHelpKeyMsg(msg) {
+		m.openShortcuts(screenMain)
+		return m, nil
+	}
+
+	if isEnterKeyMsg(msg) {
 		if len(m.visible()) == 0 {
 			return m, nil
 		}
 
 		return m.startMultiline()
-	case "n":
+	}
+
+	switch {
+	case isQuitKeyMsg(msg):
+		return m, tea.Quit
+	case isNewParameterShortcutMsg(msg):
 		return m.startNewParameter(screenMain)
-	case "i":
+	case isImportShortcutMsg(msg):
 		m.openImportPopup()
-	case "e":
+	case isExportShortcutMsg(msg):
 		m.openExportPopup()
-	case "/", "f":
+	case isFilterShortcutMsg(msg):
 		m.openFilterMode()
-	case "d":
+	case isDetailsShortcutMsg(msg):
 		m.selectedExpanded = !m.selectedExpanded
-	case "c":
+	case isColumnsShortcutMsg(msg):
 		m.openColumnsPopup()
-	case "s":
+	case isSortShortcutMsg(msg):
 		m.openSortPopup()
-	case "0", "1", "2", "3", "4", "5", "6", "7", "8", "9":
+	case isSortColumnShortcut(key):
 		if col, ok := m.visibleSortColumnByHotkey(key); ok {
 			m.applySort(col)
 		}
-	case "x":
+	case isDeleteOneShortcutMsg(msg):
 		if len(m.visible()) > 0 {
 			items := inventory.Items{m.currentItem()}
 			if m.opts.ApplyImmediately {
@@ -101,7 +110,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 				m.ensureSelection()
 			}
 		}
-	case "X":
+	case isDeleteVisibleShortcutMsg(msg):
 		items := m.visibleItems()
 		if len(items) > 0 {
 			scope := m.mainListScope()
@@ -113,7 +122,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 				m.ensureSelection()
 			}
 		}
-	case "r":
+	case isRevertOneShortcutMsg(msg):
 		if m.opts.ApplyImmediately {
 			return m, nil
 		}
@@ -123,6 +132,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 			m.message = "No local change to revert."
 			m.errMessage = ""
 			m.warningMessage = ""
+
 			return m, nil
 		}
 
@@ -130,7 +140,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		m.errMessage = ""
 		m.warningMessage = ""
 		m.applySortWithRules(m.sortRulesOrDefault())
-	case "R":
+	case isRevertVisibleShortcutMsg(msg):
 		if m.opts.ApplyImmediately {
 			return m, nil
 		}
@@ -140,6 +150,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 			m.message = "No visible local changes to revert."
 			m.errMessage = ""
 			m.warningMessage = ""
+
 			return m, nil
 		}
 
@@ -149,7 +160,7 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 		m.errMessage = ""
 		m.warningMessage = ""
 		m.applySortWithRules(m.sortRulesOrDefault())
-	case "p":
+	case isPushOneShortcutMsg(msg):
 		if m.opts.ApplyImmediately {
 			return m, nil
 		}
@@ -159,11 +170,12 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 			m.message = "No local change to push."
 			m.errMessage = ""
 			m.warningMessage = ""
+
 			return m, nil
 		}
 
 		m.startPushConfirm("Push selected local change?", indexes, screenMain, false)
-	case "P":
+	case isPushVisibleShortcutMsg(msg):
 		if m.opts.ApplyImmediately {
 			return m, nil
 		}
@@ -173,17 +185,20 @@ func (component mainScreenComponent) updateMain(msg tea.KeyMsg) (tea.Model, tea.
 			m.message = "No visible local changes to push."
 			m.errMessage = ""
 			m.warningMessage = ""
+
 			return m, nil
 		}
 
 		m.startPushConfirm(fmt.Sprintf("Push %d %s local change(s)?", len(indexes), m.mainListScope()), indexes, screenMain, true)
-	case "ctrl+_", "ctrl+/":
-		m.openShortcuts(screenMain)
 	}
 
 	m.ensureSelection()
 
 	return m, nil
+}
+
+func isSortColumnShortcut(key string) bool {
+	return len(key) == 1 && key[0] >= '0' && key[0] <= '9'
 }
 
 func (m model) mainListScope() string {
@@ -254,7 +269,7 @@ func (component mainScreenComponent) renderShortcutsPopup() string {
 	m := component.model
 	lines := strings.Split(m.shortcutsText(), "\n")
 
-	return m.renderPopupBoxWithActions("Shortcuts", lines, "Esc close")
+	return m.renderPopupBoxWithActions("Shortcuts", lines, renderFooter(closeShortcut))
 }
 
 // renderLoading renders a centered loading overlay while the initial background scan is running.

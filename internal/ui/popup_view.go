@@ -135,8 +135,13 @@ func (component popupViewComponent) renderFileActionPopup() string {
 		fieldLabel := strings.TrimSuffix(label, ":")
 		labelWidth := lipgloss.Width(fieldLabel)
 		lineWidth := importInputLineWidth(labelWidth, inputWidth)
-		lines := []string{m.formTextInputFieldLine(fieldLabel, &m.input, labelWidth, lineWidth)}
-		lines = append(lines, "", m.formActionButtonsLine(titleCaseAction(button), m.editorButtonsFocused, m.editorButtonCursor))
+		lines := make([]string, 0, 3)
+		lines = append(
+			lines,
+			m.formTextInputFieldLine(fieldLabel, &m.input, labelWidth, lineWidth),
+			"",
+			m.formActionButtonsLine(titleCaseAction(button), m.editorButtonsFocused, m.editorButtonCursor),
+		)
 
 		return m.renderPopupBoxMinWidth(title, lines, lineWidth+4)
 	}
@@ -167,7 +172,7 @@ func (component popupViewComponent) renderFileWriteConfirmPopup() string {
 		return m.renderPopupBox("Confirm", lines)
 	}
 
-	return m.renderPopupBoxWithActions("Confirm", []string{message}, "Enter yes   Esc cancel")
+	return m.renderPopupBoxWithActions("Confirm", []string{message}, renderFooterBindings(confirmPopupFooterBindings()))
 }
 
 func (component popupViewComponent) renderUnsavedChangesPopup() string {
@@ -296,9 +301,11 @@ func confirmStateFilterLabel(state parameterState) string {
 		return "Modified"
 	case parameterStateDeleted:
 		return "Deleted"
-	default:
+	case parameterStateClean, parameterStateError:
 		return string(state)
 	}
+
+	return string(state)
 }
 
 // renderRegionSelectScreen renders the region picker used before saving wildcard/all-regions items.

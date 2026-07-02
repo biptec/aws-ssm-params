@@ -21,7 +21,6 @@ type listState struct {
 	effectiveFilter       string
 	effectiveFilterGroups paramfilter.Groups
 	filterInvalid         bool
-	filterError           string
 }
 
 func (m *listState) currentStatus() Status {
@@ -69,7 +68,6 @@ func (m *listState) applyFilterQuery(query string) {
 		m.effectiveFilter = ""
 		m.effectiveFilterGroups = nil
 		m.filterInvalid = false
-		m.filterError = ""
 		m.selected = 0
 
 		return
@@ -78,7 +76,6 @@ func (m *listState) applyFilterQuery(query string) {
 	groups, err := paramfilter.ParseGroups([]string{strings.ToLower(tuiFilterExpression(query))})
 	if err != nil {
 		m.filterInvalid = true
-		m.filterError = err.Error()
 		m.ensureSelection()
 
 		return
@@ -86,7 +83,6 @@ func (m *listState) applyFilterQuery(query string) {
 
 	if len(m.matchesForFilter(groups)) == 0 {
 		m.filterInvalid = true
-		m.filterError = "filter has no matches"
 		m.ensureSelection()
 
 		return
@@ -95,7 +91,6 @@ func (m *listState) applyFilterQuery(query string) {
 	m.effectiveFilter = query
 	m.effectiveFilterGroups = groups
 	m.filterInvalid = false
-	m.filterError = ""
 	m.selected = 0
 }
 
@@ -196,7 +191,6 @@ func (m *listState) openFilterMode() {
 	m.filterInput.SetCursor(len([]rune(m.filterQuery)))
 	m.filterInput.Focus()
 	m.filterInvalid = false
-	m.filterError = ""
 }
 
 func (m *listState) closeFilterMode() {
@@ -205,7 +199,6 @@ func (m *listState) closeFilterMode() {
 		m.filterQuery = m.effectiveFilter
 		m.filterInput.SetValue(m.effectiveFilter)
 		m.filterInvalid = false
-		m.filterError = ""
 	}
 
 	m.filterInput.Blur()
@@ -294,9 +287,9 @@ func (m *listState) replaceStatusByKey(key string, st *Status) {
 	m.statuses = append(m.statuses, *st)
 }
 
-func (m *listState) selectItem(item inventory.Item) {
+func (m *listState) selectItem(item *inventory.Item) {
 	for selected, idx := range m.visible() {
-		if m.statuses[idx].Item.SameIdentity(&item) {
+		if m.statuses[idx].Item.SameIdentity(item) {
 			m.selected = selected
 			return
 		}
@@ -317,6 +310,7 @@ func (m *listState) hasLocalChanges() bool {
 
 func (m *listState) dirtyStatusIndexes() []int {
 	out := []int{}
+
 	for i := range m.statuses {
 		if m.statuses[i].HasLocalChanges() {
 			out = append(out, i)
@@ -328,6 +322,7 @@ func (m *listState) dirtyStatusIndexes() []int {
 
 func (m *listState) visibleDirtyStatusIndexes() []int {
 	out := []int{}
+
 	for _, idx := range m.visible() {
 		if idx >= 0 && idx < len(m.statuses) && m.statuses[idx].HasLocalChanges() {
 			out = append(out, idx)
@@ -366,7 +361,7 @@ func (m *listState) dirtyStatusIndexesByState(indexes []int, allowed map[paramet
 			continue
 		}
 
-		if allowed[m.statuses[idx].PendingOperation()] {
+		if allowed[m.statuses[idx].pendingOperation()] {
 			out = append(out, idx)
 		}
 	}
@@ -385,22 +380,25 @@ func (m *listState) applyLocalDeleteItems(items inventory.Items) int {
 	}
 
 	changed := 0
+
 	kept := m.statuses[:0]
 	for i := range m.statuses {
 		status := m.statuses[i]
+
 		key := itemKey(status.Item.Region, status.Item.Path)
 		if !targets[key] {
 			kept = append(kept, status)
 			continue
 		}
 
-		if status.PendingOperation() == parameterStateNew {
+		if status.pendingOperation() == parameterStateNew {
 			changed++
 			continue
 		}
 
-		if status.PendingOperation() != parameterStateDeleted {
+		if status.pendingOperation() != parameterStateDeleted {
 			status.applyLocalDelete()
+
 			changed++
 		}
 
@@ -427,6 +425,7 @@ func (m *listState) revertCurrentLocalChange() (parameterState, bool) {
 
 func (m *listState) revertLocalChanges(indexes []int) int {
 	changed := 0
+
 	for i := len(indexes) - 1; i >= 0; i-- {
 		if _, ok := m.revertLocalChangeAt(indexes[i]); ok {
 			changed++
@@ -444,7 +443,8 @@ func (m *listState) revertLocalChangeAt(idx int) (parameterState, bool) {
 	}
 
 	status := m.statuses[idx]
-	operation := status.PendingOperation()
+
+	operation := status.pendingOperation()
 	if operation == parameterStateNew {
 		m.statuses = append(m.statuses[:idx], m.statuses[idx+1:]...)
 		return operation, true
@@ -469,6 +469,7 @@ func (m *listState) markPushError(localKey, cloudKey string, operation parameter
 		}
 
 		m.statuses[i].applyPushError(operation, err)
+
 		return
 	}
 }

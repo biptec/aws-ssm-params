@@ -7,26 +7,22 @@ import (
 )
 
 type styleRenderer struct {
-	noColor        bool
-	filterQuery     string
+	noColor         bool
 	effectiveFilter string
-	filterInvalid   bool
-	message        string
-	warningMessage string
-	errMessage     string
-	busyMessage    string
+	message         string
+	warningMessage  string
+	errMessage      string
+	busyMessage     string
 }
 
 func newStyleRenderer(m model) *styleRenderer {
 	return &styleRenderer{
-		noColor:        m.opts.NoColor,
-		filterQuery:     m.filterQuery,
+		noColor:         m.opts.NoColor,
 		effectiveFilter: m.effectiveFilter,
-		filterInvalid:   m.filterInvalid,
-		message:        m.message,
-		warningMessage: m.warningMessage,
-		errMessage:     m.errMessage,
-		busyMessage:    m.busyMessage,
+		message:         m.message,
+		warningMessage:  m.warningMessage,
+		errMessage:      m.errMessage,
+		busyMessage:     m.busyMessage,
 	}
 }
 
@@ -54,12 +50,12 @@ func (renderer *styleRenderer) muted(s string) string {
 	return mutedStyle.Render(s)
 }
 
-func (renderer *styleRenderer) focusMarker(s string) string {
+func (renderer *styleRenderer) focusMarker() string {
 	if renderer.noColor {
-		return s
+		return "> "
 	}
 
-	return lipgloss.NewStyle().Foreground(selectedFg).Render(s)
+	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
 }
 
 func (renderer *styleRenderer) encryptedPlaceholder() string {
@@ -88,15 +84,6 @@ func (renderer *styleRenderer) selectedMarker() string {
 	}
 
 	return lipgloss.NewStyle().Foreground(selectedFg).Render("> ")
-}
-
-func (renderer *styleRenderer) filterLine() string {
-	line := "Filter > " + renderer.filterQuery
-	if renderer.filterInvalid {
-		return renderer.applyErr(line)
-	}
-
-	return renderer.filterPrompt() + renderer.value(renderer.filterQuery)
 }
 
 func (renderer *styleRenderer) filteredLine() string {
@@ -142,9 +129,11 @@ func (renderer *styleRenderer) stateValue(state parameterState) string {
 		return lipgloss.NewStyle().Foreground(stateDeletedFg).Render(value)
 	case parameterStateError:
 		return lipgloss.NewStyle().Foreground(stateErrorFg).Render(value)
-	default:
+	case parameterStateClean:
 		return value
 	}
+
+	return value
 }
 
 func (renderer *styleRenderer) diffCloudValue(s string) string {
@@ -169,10 +158,6 @@ func (renderer *styleRenderer) applyWarning(s string) string {
 	}
 
 	return warningStyle.Render(s)
-}
-
-func quitConfirmationMessage() string {
-	return `Are you sure you want to quit? Press "y" to confirm.`
 }
 
 func (renderer *styleRenderer) renderStatusMessage() string {

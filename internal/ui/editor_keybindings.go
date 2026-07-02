@@ -4,63 +4,24 @@ type editorKeybindingsComponent struct {
 	model model
 }
 
-func (component editorKeybindingsComponent) usesViEditMode() bool {
-	m := component.model
-	return m.keymapStyle() == keymapVi && isEditableTextField(m.editField)
-}
-
 func (component editorKeybindingsComponent) updateEmacsTextFieldKey(key string) (model, bool) {
 	m := component.model
 	if m.keymapStyle() != keymapEmacs || !isEditableTextField(m.editField) {
 		return m, false
 	}
 
-	switch key {
-	case "ctrl+f", "right":
-		m.moveActiveTextCursor(1)
-		return m, true
-	case "ctrl+b", "left":
-		m.moveActiveTextCursor(-1)
-		return m, true
-	case "ctrl+p", "up":
-		m.moveActiveTextLine(-1)
-		return m, true
-	case "ctrl+n", "down":
-		m.moveActiveTextLine(1)
-		return m, true
-	case "ctrl+a", "home":
-		m.activeTextLineStart()
-		return m, true
-	case "ctrl+e", "end":
-		m.activeTextLineEnd()
-		return m, true
-	case "alt+f":
-		m.activeTextWordForward()
-		return m, true
-	case "alt+b":
-		m.activeTextWordBackward()
-		return m, true
-	case "alt+<":
-		m.activeTextStart()
-		return m, true
-	case "alt+>":
-		m.activeTextEnd()
-		return m, true
-	case "ctrl+d":
-		m.activeTextDeleteChar()
-		return m, true
-	case "ctrl+k":
-		m.activeTextDeleteToLineEnd()
-		return m, true
-	case "alt+d":
-		m.activeTextDeleteWordForward()
-		return m, true
-	case "alt+backspace":
-		m.activeTextDeleteWordBackward()
-		return m, true
+	action, ok := newKeymap(m).emacsTextEditAction(key)
+	if !ok {
+		return m, false
 	}
 
-	return m, false
+	if (action == textEditPageUp || action == textEditPageDown) && !isMultilineEditField(m.editField) {
+		return m, false
+	}
+
+	m.applyTextEditAction(action)
+
+	return m, true
 }
 
 func (component editorKeybindingsComponent) updateViTextFieldNormal(key string) (model, bool) {
@@ -69,60 +30,32 @@ func (component editorKeybindingsComponent) updateViTextFieldNormal(key string) 
 		return m, true
 	}
 
-	switch key {
-	case "i":
+	action, ok := newKeymap(m).viTextEditAction(key)
+	if !ok {
+		return m, false
+	}
+
+	if action == textEditEnterInsertMode {
 		m.viInsertMode = true
 		m = m.focusEditField(m.editField)
 
 		return m, true
-	case "h", "left":
-		m.moveActiveTextCursor(-1)
-		return m, true
-	case "l", "right":
-		m.moveActiveTextCursor(1)
-		return m, true
-	case "j", "down":
-		m.moveActiveTextLine(1)
-		return m, true
-	case "pagedown", "pgdown", "ctrl+f":
-		m.moveActiveMultilinePage(1)
-		return m, true
-	case "pageup", "pgup", "ctrl+b":
-		m.moveActiveMultilinePage(-1)
-		return m, true
-	case "k", "up":
-		m.moveActiveTextLine(-1)
-		return m, true
-	case "0", "home":
-		m.activeTextLineStart()
-		return m, true
-	case "$", "end":
-		m.activeTextLineEnd()
-		return m, true
-	case "w":
-		m.activeTextWordForward()
-		return m, true
-	case "b":
-		m.activeTextWordBackward()
-		return m, true
-	case "G":
-		m.activeTextEnd()
-		return m, true
-	case "g":
-		m.pendingKeySequence = "g"
-		return m, true
-	case "d":
-		m.pendingKeySequence = "d"
-		return m, true
-	case "D":
-		m.activeTextDeleteToLineEnd()
-		return m, true
-	case "x":
-		m.activeTextDeleteChar()
+	}
+
+	if action == textEditPendingStart {
+		m.pendingKeySequence = firstBindingKey(viTextStartPrefixShortcut)
+
 		return m, true
 	}
 
-	return m, false
+	if action == textEditPendingDelete {
+		m.pendingKeySequence = firstBindingKey(viTextDeletePrefixShortcut)
+		return m, true
+	}
+
+	m.applyTextEditAction(action)
+
+	return m, true
 }
 
 func (component *editorKeybindingsComponent) handlePendingEditSequence(key string) (handled, consumed bool) {
@@ -134,17 +67,50 @@ func (component *editorKeybindingsComponent) handlePendingEditSequence(key strin
 	pending := m.pendingKeySequence
 	m.pendingKeySequence = ""
 
-	switch pending + key {
-	case "gg":
+	action, handled, consumed := newKeymap(*m).resolvePendingTextEditSequence(pending, key)
+	if handled {
+		m.applyTextEditAction(action)
+
+		return true, true
+	}
+
+	return false, consumed
+}
+
+func (m *model) applyTextEditAction(action textEditAction) {
+	switch action {
+	case textEditForwardChar:
+		m.moveActiveTextCursor(1)
+	case textEditBackwardChar:
+		m.moveActiveTextCursor(-1)
+	case textEditPreviousLine:
+		m.moveActiveTextLine(-1)
+	case textEditNextLine:
+		m.moveActiveTextLine(1)
+	case textEditLineStart:
+		m.activeTextLineStart()
+	case textEditLineEnd:
+		m.activeTextLineEnd()
+	case textEditWordForward:
+		m.activeTextWordForward()
+	case textEditWordBackward:
+		m.activeTextWordBackward()
+	case textEditTextStart:
 		m.activeTextStart()
-		return true, true
-	case "dw":
+	case textEditTextEnd:
+		m.activeTextEnd()
+	case textEditPageUp:
+		m.moveActiveMultilinePage(-1)
+	case textEditPageDown:
+		m.moveActiveMultilinePage(1)
+	case textEditDeleteChar:
+		m.activeTextDeleteChar()
+	case textEditDeleteToLineEnd:
+		m.activeTextDeleteToLineEnd()
+	case textEditDeleteWordForward:
 		m.activeTextDeleteWordForward()
-		return true, true
-	case "db":
+	case textEditDeleteWordBackward:
 		m.activeTextDeleteWordBackward()
-		return true, true
-	default:
-		return false, true
+	case textEditNone, textEditEnterInsertMode, textEditPendingStart, textEditPendingDelete:
 	}
 }

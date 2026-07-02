@@ -21,24 +21,24 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 	}
 
 	if m.sortButtonsFocused {
-		if isPrimaryActionKey(key) {
+		if isPrimaryActionMsg(msg) {
 			m.closeSortPopup()
 			return m, nil
 		}
 
-		switch key {
-		case "ctrl+_", "ctrl+/":
+		switch {
+		case isHelpKeyMsg(msg):
 			m.openPopupShortcuts(screenMain, popupSort)
-		case "q", "esc", "ctrl+g":
+		case isCloseKeyMsg(msg):
 			m.closeSortPopup()
-		case "enter", "ctrl+j":
+		case isEnterKeyMsg(msg):
 			m.closeSortPopup()
 		}
 
 		return m, nil
 	}
 
-	if key != "d" {
+	if !bindingMatchesString(sortDirectionShortcut, key) {
 		if col, ok := m.popupSortColumnByLetterHotkey(key); ok {
 			m.toggleSortColumn(col)
 			return m, nil
@@ -49,23 +49,24 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupSort)
-	case "q", "esc", "ctrl+g":
+	case isCloseKeyMsg(msg):
 		m.closeSortPopup()
-	case " ", "enter", "ctrl+j":
+	case isToggleKeyMsg(msg) || isEnterKeyMsg(msg):
 		if len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
 			m.toggleSortColumn(items[m.sortCursor].column)
 		}
-	case "d":
-		if len(items) > 0 {
+	default:
+		if bindingMatchesString(sortDirectionShortcut, key) && len(items) > 0 {
 			m.sortCursor = min(m.sortCursor, len(items)-1)
 			m.toggleSortDirection(items[m.sortCursor].column)
 		}
 	}
-	if isPrimaryActionKey(key) {
+
+	if isPrimaryActionMsg(msg) {
 		m.closeSortPopup()
 	}
 
@@ -73,16 +74,8 @@ func (component popupUpdateComponent) updateSortPopup(msg tea.KeyMsg) (tea.Model
 }
 
 func (m *model) navigateSortPopupButtons(key string) bool {
-	if key == "tab" {
+	if isTabNavigationKeyString(key) {
 		m.sortButtonsFocused = !m.sortButtonsFocused
-		m.sortButtonCursor = importActionPrimary
-
-		return true
-	}
-
-	if key == "shift+tab" {
-		m.sortButtonsFocused = !m.sortButtonsFocused
-		m.sortButtonCursor = importActionPrimary
 
 		return true
 	}
@@ -91,25 +84,14 @@ func (m *model) navigateSortPopupButtons(key string) bool {
 		return false
 	}
 
-	switch key {
-	case "left", "right":
-		m.sortButtonCursor = importActionPrimary
+	if isLeftKeyString(key) || isRightKeyString(key) {
 		return true
 	}
 
 	return false
 }
 
-func (m *model) applySortPopup() {
-	m.closeSortPopup()
-}
-
-func (m *model) cancelSortPopup() {
-	m.closeSortPopup()
-}
-
 func (m *model) closeSortPopup() {
-	m.sortSnapshot = nil
 	m.popPopup()
 }
 
@@ -152,8 +134,7 @@ func (m *model) handleSelectorNavigation(key string, cursor *int, length int) bo
 		return true
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if m.startViFirstNavigationSequence(key) {
 		return true
 	}
 
@@ -164,20 +145,21 @@ func (m *model) handleSelectorNavigation(key string, cursor *int, length int) bo
 func (component popupUpdateComponent) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 
-	switch msg.String() {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openShortcuts(screenConfirm)
 		return m, nil
-	case "q", "esc", "ctrl+g":
+	case isBackKeyMsg(msg):
 		m.screen = m.returnScreen
 		return m, nil
-	case "enter":
+	case isEnterKeyMsg(msg):
 		if m.input.Value() != m.confirmExpected {
 			m.errMessage = "confirmation phrase does not match"
 			return m, nil
 		}
 
 		component.model = m
+
 		return component.finishConfirmAction()
 	}
 
@@ -201,13 +183,13 @@ func (component popupUpdateComponent) updateRegionSelect(msg tea.KeyMsg) (tea.Mo
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openShortcuts(screenRegionSelect)
-	case "q", "esc", "ctrl+g":
+	case isBackKeyMsg(msg):
 		m.screen = screenTextArea
 		m = m.focusEditField(editFieldRegion)
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.editRegion = regions[m.regionCursor]
 		m.screen = screenTextArea
 		m = m.focusEditField(editFieldRegion)
@@ -232,15 +214,15 @@ func (component popupUpdateComponent) updateTypeSelect(msg tea.KeyMsg) (tea.Mode
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTypeSelect, popupTypeSelect)
-	case "q", "esc", "ctrl+g":
+	case isBackKeyMsg(msg):
 		m.screen = m.typeReturnScreen
 		if m.typeReturnScreen == screenTextArea {
 			m = m.focusEditField(editFieldType)
 		}
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.editType = items[m.typeCursor].value
 
 		m.screen = m.typeReturnScreen
@@ -256,8 +238,7 @@ func (component popupUpdateComponent) updateTypeSelect(msg tea.KeyMsg) (tea.Mode
 func (component popupUpdateComponent) updateHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 
-	switch msg.String() {
-	case "q", "esc", "ctrl+g", "?":
+	if isShortcutPopupCloseKeyMsg(msg) {
 		m.screen = m.shortcutsFor
 	}
 
@@ -267,8 +248,7 @@ func (component popupUpdateComponent) updateHelp(msg tea.KeyMsg) (tea.Model, tea
 func (component popupUpdateComponent) updateShortcutsPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m := component.model
 
-	switch msg.String() {
-	case "q", "esc", "ctrl+g", "?":
+	if isShortcutPopupCloseKeyMsg(msg) {
 		m.popPopup()
 	}
 
@@ -279,16 +259,16 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 	m := component.model
 
 	key := msg.String()
-	if isPrimaryActionKey(key) {
+	if isPrimaryActionMsg(msg) {
 		component.model = m
 		return component.finishConfirmAction()
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenConfirm, popupConfirm)
 		return m, nil
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		m.popPopup()
 		return m, nil
 	}
@@ -309,10 +289,11 @@ func (component popupUpdateComponent) updateConfirmPopup(msg tea.KeyMsg) (tea.Mo
 		}
 
 		component.model = m
+
 		return component.finishConfirmAction()
 	}
 
-	if key == " " && m.confirmFocus >= 0 {
+	if isToggleKeyMsg(msg) && m.confirmFocus >= 0 {
 		m.toggleConfirmStateFilter(m.confirmFocus)
 		return m, nil
 	}
@@ -356,15 +337,15 @@ func (component popupUpdateComponent) updateQuitConfirmPopup(msg tea.KeyMsg) (te
 		return m, nil
 	}
 
-	if isPrimaryActionKey(key) {
+	if isPrimaryActionMsg(msg) {
 		return confirm()
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenMain, popupQuitConfirm)
 		return m, nil
-	case "q", "esc", "ctrl+g":
+	case isCancelKeyMsg(msg):
 		return cancel()
 	}
 
@@ -372,7 +353,7 @@ func (component popupUpdateComponent) updateQuitConfirmPopup(msg tea.KeyMsg) (te
 		return m, nil
 	}
 
-	if importEnterKey(key) {
+	if isEnterKeyMsg(msg) {
 		if m.confirmFocus == confirmFocusCancelButton {
 			return cancel()
 		}
@@ -397,8 +378,7 @@ func (m *model) navigateConfirmButtons(key string) bool {
 		return true
 	}
 
-	if m.keymapStyle() == keymapVi && key == "g" {
-		m.pendingKeySequence = "g"
+	if m.startViFirstNavigationSequence(key) {
 		return true
 	}
 
@@ -419,14 +399,16 @@ func (m *model) applyConfirmButtonNavigation(action navigationAction) {
 			m.confirmFocus = confirmFocusPrimaryButton
 		case navLast:
 			m.confirmFocus = confirmFocusCancelButton
-		default:
+		case navNone:
 		}
 
 		m.syncConfirmButtonCursor()
+
 		return
 	}
 
 	current := m.confirmFocusIndex()
+
 	switch action {
 	case navPrevious, navPageUp:
 		current = (current - 1 + focusCount) % focusCount
@@ -436,7 +418,7 @@ func (m *model) applyConfirmButtonNavigation(action navigationAction) {
 		current = 0
 	case navLast:
 		current = focusCount - 1
-	default:
+	case navNone:
 	}
 
 	m.confirmFocus = m.confirmFocusFromIndex(current)
@@ -513,7 +495,7 @@ func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd)
 		m.clearPopupStack()
 
 		return m, pushLocalChangesCmdWithBackend(m.contextProvider(), backendFor(m), statuses, m.opts.NamesFile, m.opts.AllowNamesFileUpdate)
-	default:
+	case confirmActionDelete:
 		if m.opts.ApplyImmediately {
 			items := append(inventory.Items(nil), m.confirmItems...)
 			m.busyMessage = fmt.Sprintf("Deleting %d parameter(s)...", len(items))
@@ -524,10 +506,12 @@ func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd)
 		}
 
 		changed := m.applyLocalDeleteItems(m.confirmItems)
+
 		m.message = fmt.Sprintf("Marked %d parameter(s) for deletion. Press p to push.", changed)
 		if changed == 0 {
 			m.message = "No parameters marked for deletion."
 		}
+
 		m.errMessage = ""
 		m.warningMessage = ""
 		m.clearPopupStack()
@@ -536,6 +520,8 @@ func (component popupUpdateComponent) finishConfirmAction() (tea.Model, tea.Cmd)
 
 		return m, nil
 	}
+
+	return m, nil
 }
 
 func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -549,11 +535,12 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 	}
 
 	if len(regions) == 0 {
-		if importSelector {
+		switch {
+		case importSelector:
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldRegion)
 		}
@@ -575,6 +562,7 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		}
 
 		m = m.finishImportSelector()
+
 		return m, nil
 	}
 
@@ -591,6 +579,7 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		}
 
 		m = m.finishEditorSelector()
+
 		return m, nil
 	}
 
@@ -606,26 +595,28 @@ func (component popupUpdateComponent) updateRegionSelectPopup(msg tea.KeyMsg) (t
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenRegionSelect, popupRegionSelect)
-	case "q", "esc", "ctrl+g":
-		if importSelector {
+	case isCancelKeyMsg(msg):
+		switch {
+		case importSelector:
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldRegion)
 		}
-	case "enter", "ctrl+j":
-		if importSelector {
+	case isEnterKeyMsg(msg):
+		switch {
+		case importSelector:
 			m.importDefaultRegion = regions[m.regionCursor]
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editRegion = regions[m.regionCursor]
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editRegion = regions[m.regionCursor]
 			m.popPopup()
 			m = m.focusEditField(editFieldRegion)
@@ -664,6 +655,7 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		}
 
 		m = m.finishImportSelector()
+
 		return m, nil
 	}
 
@@ -684,6 +676,7 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		}
 
 		m = m.finishEditorSelector()
+
 		return m, nil
 	}
 
@@ -696,13 +689,14 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 	}
 
 	if idx, ok := items.indexByHotkey(key); ok {
-		if importSelector {
+		switch {
+		case importSelector:
 			m.importDefaultType = items[idx].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editType = items[idx].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editType = items[idx].value
 			m.popPopup()
 
@@ -714,29 +708,31 @@ func (component popupUpdateComponent) updateTypeSelectPopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTypeSelect, popupTypeSelect)
-	case "q", "esc", "ctrl+g":
-		if importSelector {
+	case isCancelKeyMsg(msg):
+		switch {
+		case importSelector:
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 
 			if m.typeReturnScreen == screenTextArea {
 				m = m.focusEditField(editFieldType)
 			}
 		}
-	case "enter", "ctrl+j":
-		if importSelector {
+	case isEnterKeyMsg(msg):
+		switch {
+		case importSelector:
 			m.importDefaultType = items[m.typeCursor].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editType = items[m.typeCursor].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editType = items[m.typeCursor].value
 			m.popPopup()
 
@@ -778,6 +774,7 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		}
 
 		m = m.finishImportSelector()
+
 		return m, nil
 	}
 
@@ -798,6 +795,7 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		}
 
 		m = m.finishEditorSelector()
+
 		return m, nil
 	}
 
@@ -810,13 +808,14 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 	}
 
 	if idx, ok := items.indexByHotkey(key); ok {
-		if importSelector {
+		switch {
+		case importSelector:
 			m.importDefaultTier = items[idx].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editTier = items[idx].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editTier = items[idx].value
 			m.popPopup()
 			m = m.focusEditField(editFieldTier)
@@ -825,26 +824,28 @@ func (component popupUpdateComponent) updateTierSelectPopup(msg tea.KeyMsg) (tea
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTextArea, popupTierSelect)
-	case "q", "esc", "ctrl+g":
-		if importSelector {
+	case isCancelKeyMsg(msg):
+		switch {
+		case importSelector:
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldTier)
 		}
-	case "enter", "ctrl+j":
-		if importSelector {
+	case isEnterKeyMsg(msg):
+		switch {
+		case importSelector:
 			m.importDefaultTier = items[m.tierCursor].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editTier = items[m.tierCursor].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editTier = items[m.tierCursor].value
 			m.popPopup()
 			m = m.focusEditField(editFieldTier)
@@ -883,6 +884,7 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		}
 
 		m = m.finishImportSelector()
+
 		return m, nil
 	}
 
@@ -903,6 +905,7 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		}
 
 		m = m.finishEditorSelector()
+
 		return m, nil
 	}
 
@@ -915,13 +918,14 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 	}
 
 	if idx, ok := items.indexByHotkey(key); ok {
-		if importSelector {
+		switch {
+		case importSelector:
 			m.importDefaultDataType = items[idx].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editDataType = items[idx].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editDataType = items[idx].value
 			m.popPopup()
 			m = m.focusEditField(editFieldDataType)
@@ -930,26 +934,28 @@ func (component popupUpdateComponent) updateDataTypeSelectPopup(msg tea.KeyMsg) 
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTextArea, popupDataTypeSelect)
-	case "q", "esc", "ctrl+g":
-		if importSelector {
+	case isCancelKeyMsg(msg):
+		switch {
+		case importSelector:
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldDataType)
 		}
-	case "enter", "ctrl+j":
-		if importSelector {
+	case isEnterKeyMsg(msg):
+		switch {
+		case importSelector:
 			m.importDefaultDataType = items[m.dataTypeCursor].value
 			m = m.finishImportSelector()
-		} else if editorSelector {
+		case editorSelector:
 			m.editDataType = items[m.dataTypeCursor].value
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.editDataType = items[m.dataTypeCursor].value
 			m.popPopup()
 			m = m.focusEditField(editFieldDataType)
@@ -983,6 +989,7 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 		}
 
 		m = m.finishEditorSelector()
+
 		return m, nil
 	}
 
@@ -996,9 +1003,11 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 
 	if idx, ok := items.indexByHotkey(key); ok {
 		m.editOverwrite = items[idx].value
-		if editorSelector {
+
+		switch {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldOverwrite)
 		}
@@ -1006,21 +1015,24 @@ func (component popupUpdateComponent) updateOverwriteSelectPopup(msg tea.KeyMsg)
 		return m, nil
 	}
 
-	switch key {
-	case "ctrl+_", "ctrl+/":
+	switch {
+	case isHelpKeyMsg(msg):
 		m.openPopupShortcuts(screenTextArea, popupOverwriteSelect)
-	case "q", "esc", "ctrl+g":
-		if editorSelector {
+	case isCancelKeyMsg(msg):
+		switch {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldOverwrite)
 		}
-	case "enter", "ctrl+j":
+	case isEnterKeyMsg(msg):
 		m.editOverwrite = items[m.overwriteCursor].value
-		if editorSelector {
+
+		switch {
+		case editorSelector:
 			m = m.finishEditorSelector()
-		} else {
+		default:
 			m.popPopup()
 			m = m.focusEditField(editFieldOverwrite)
 		}

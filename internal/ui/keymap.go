@@ -28,6 +28,66 @@ const (
 	navLast
 )
 
+type textEditAction int
+
+const (
+	textEditNone textEditAction = iota
+	textEditEnterInsertMode
+	textEditForwardChar
+	textEditBackwardChar
+	textEditPreviousLine
+	textEditNextLine
+	textEditLineStart
+	textEditLineEnd
+	textEditWordForward
+	textEditWordBackward
+	textEditTextStart
+	textEditTextEnd
+	textEditPageUp
+	textEditPageDown
+	textEditDeleteChar
+	textEditDeleteToLineEnd
+	textEditDeleteWordForward
+	textEditDeleteWordBackward
+	textEditPendingStart
+	textEditPendingDelete
+)
+
+type navigationBinding struct {
+	binding keyBindingMatcher
+	action  navigationAction
+}
+
+type keyBindingMatcher interface {
+	Keys() []string
+}
+
+var (
+	commonNavigationBindings = []navigationBinding{
+		{binding: commonPreviousNavigationShortcut, action: navPrevious},
+		{binding: commonNextNavigationShortcut, action: navNext},
+		{binding: commonPageUpShortcut, action: navPageUp},
+		{binding: commonPageDownShortcut, action: navPageDown},
+		{binding: commonFirstShortcut, action: navFirst},
+		{binding: commonLastShortcut, action: navLast},
+	}
+
+	viNavigationBindings = []navigationBinding{
+		{binding: viPreviousNavigationShortcut, action: navPrevious},
+		{binding: viNextNavigationShortcut, action: navNext},
+		{binding: viLastNavigationShortcut, action: navLast},
+	}
+
+	emacsNavigationBindings = []navigationBinding{
+		{binding: emacsPreviousNavigationShortcut, action: navPrevious},
+		{binding: emacsNextNavigationShortcut, action: navNext},
+		{binding: emacsPageUpShortcut, action: navPageUp},
+		{binding: emacsPageDownShortcut, action: navPageDown},
+		{binding: emacsFirstShortcut, action: navFirst},
+		{binding: emacsLastShortcut, action: navLast},
+	}
+)
+
 func normalizeKeymapStyle(value string) keymapStyle {
 	switch keymapStyle(value) {
 	case keymapEmacs:
@@ -44,47 +104,20 @@ func (keys keymap) keymapStyle() keymapStyle {
 }
 
 func (keys keymap) navigationAction(key string) (navigationAction, bool) {
-	switch key {
-	case "up", "shift+tab":
-		return navPrevious, true
-	case "down", "tab":
-		return navNext, true
-	case "pageup":
-		return navPageUp, true
-	case "pagedown":
-		return navPageDown, true
-	case "home":
-		return navFirst, true
-	case "end":
-		return navLast, true
+	if action, ok := matchNavigationBinding(key, commonNavigationBindings); ok {
+		return action, true
 	}
 
 	if keys.keymapStyle() == keymapVi {
-		switch key {
-		case "k":
-			return navPrevious, true
-		case "j":
-			return navNext, true
-		case "G":
-			return navLast, true
+		if action, ok := matchNavigationBinding(key, viNavigationBindings); ok {
+			return action, true
 		}
 
 		return navNone, false
 	}
 
-	switch key {
-	case "ctrl+p":
-		return navPrevious, true
-	case "ctrl+n":
-		return navNext, true
-	case "alt+v":
-		return navPageUp, true
-	case "ctrl+v":
-		return navPageDown, true
-	case "alt+<":
-		return navFirst, true
-	case "alt+>":
-		return navLast, true
+	if action, ok := matchNavigationBinding(key, emacsNavigationBindings); ok {
+		return action, true
 	}
 
 	return navNone, false
@@ -97,8 +130,11 @@ func (keys keymap) editorNavigationAction(key string) (navigationAction, bool) {
 	}
 
 	if keys.keymapStyle() == keymapVi && keys.viInsertMode {
-		switch key {
-		case "j", "k", "G":
+		viNormalMotionKey := bindingMatchesString(viNextNavigationShortcut, key) ||
+			bindingMatchesString(viPreviousNavigationShortcut, key) ||
+			bindingMatchesString(viLastNavigationShortcut, key)
+
+		if viNormalMotionKey {
 			return navNone, false
 		}
 	}
@@ -106,26 +142,120 @@ func (keys keymap) editorNavigationAction(key string) (navigationAction, bool) {
 	return action, true
 }
 
+func matchNavigationBinding(key string, bindings []navigationBinding) (navigationAction, bool) {
+	for _, candidate := range bindings {
+		if bindingMatchesKeys(candidate.binding, key) {
+			return candidate.action, true
+		}
+	}
+
+	return navNone, false
+}
+
 func (keys keymap) resolvePendingNavigationSequence(pending, key string) (navigationAction, bool, bool) {
 	if pending == "" {
 		return navNone, false, false
 	}
 
-	if keys.keymapStyle() == keymapVi && pending == "g" && key == "g" {
+	if keys.keymapStyle() == keymapVi && bindingMatchesString(viFirstNavigationSequence, pending+key) {
 		return navFirst, true, true
 	}
 
 	return navNone, false, true
 }
 
-func isHelpKey(key string) bool {
-	return key == "ctrl+_" || key == "ctrl+/" || key == "ctrl+?"
+func (keys keymap) emacsTextEditAction(key string) (textEditAction, bool) {
+	switch {
+	case bindingMatchesString(emacsTextForwardCharShortcut, key):
+		return textEditForwardChar, true
+	case bindingMatchesString(emacsTextBackwardCharShortcut, key):
+		return textEditBackwardChar, true
+	case bindingMatchesString(emacsTextPreviousLineShortcut, key):
+		return textEditPreviousLine, true
+	case bindingMatchesString(emacsTextNextLineShortcut, key):
+		return textEditNextLine, true
+	case bindingMatchesString(emacsTextLineStartShortcut, key):
+		return textEditLineStart, true
+	case bindingMatchesString(emacsTextLineEndShortcut, key):
+		return textEditLineEnd, true
+	case bindingMatchesString(emacsTextPageDownShortcut, key):
+		return textEditPageDown, true
+	case bindingMatchesString(emacsTextPageUpShortcut, key):
+		return textEditPageUp, true
+	case bindingMatchesString(emacsWordForwardShortcut, key):
+		return textEditWordForward, true
+	case bindingMatchesString(emacsWordBackwardShortcut, key):
+		return textEditWordBackward, true
+	case bindingMatchesString(emacsTextStartShortcut, key):
+		return textEditTextStart, true
+	case bindingMatchesString(emacsTextEndShortcut, key):
+		return textEditTextEnd, true
+	case bindingMatchesString(emacsTextDeleteCharShortcut, key):
+		return textEditDeleteChar, true
+	case bindingMatchesString(emacsTextKillLineShortcut, key):
+		return textEditDeleteToLineEnd, true
+	case bindingMatchesString(emacsTextDeleteNextWord, key):
+		return textEditDeleteWordForward, true
+	case bindingMatchesString(emacsTextDeletePrevWord, key):
+		return textEditDeleteWordBackward, true
+	default:
+		return textEditNone, false
+	}
 }
 
-func isPrimaryActionKey(key string) bool {
-	return key == "ctrl+@" || key == "ctrl+space"
+func (keys keymap) viTextEditAction(key string) (textEditAction, bool) {
+	switch {
+	case bindingMatchesString(viInsertModeShortcut, key):
+		return textEditEnterInsertMode, true
+	case bindingMatchesString(viTextBackwardCharShortcut, key):
+		return textEditBackwardChar, true
+	case bindingMatchesString(viTextForwardCharShortcut, key):
+		return textEditForwardChar, true
+	case bindingMatchesString(viTextNextLineShortcut, key):
+		return textEditNextLine, true
+	case bindingMatchesString(viTextPageDownShortcut, key):
+		return textEditPageDown, true
+	case bindingMatchesString(viTextPageUpShortcut, key):
+		return textEditPageUp, true
+	case bindingMatchesString(viTextPreviousLineShortcut, key):
+		return textEditPreviousLine, true
+	case bindingMatchesString(viTextLineStartShortcut, key):
+		return textEditLineStart, true
+	case bindingMatchesString(viTextLineEndShortcut, key):
+		return textEditLineEnd, true
+	case bindingMatchesString(viWordForwardShortcut, key):
+		return textEditWordForward, true
+	case bindingMatchesString(viWordBackwardShortcut, key):
+		return textEditWordBackward, true
+	case bindingMatchesString(viTextStartShortcut, key):
+		return textEditTextEnd, true
+	case bindingMatchesString(viTextStartPrefixShortcut, key):
+		return textEditPendingStart, true
+	case bindingMatchesString(viTextDeletePrefixShortcut, key):
+		return textEditPendingDelete, true
+	case bindingMatchesString(viTextDeleteToLineEnd, key):
+		return textEditDeleteToLineEnd, true
+	case bindingMatchesString(viTextDeleteCharShortcut, key):
+		return textEditDeleteChar, true
+	default:
+		return textEditNone, false
+	}
 }
 
-func primaryActionHelp() string {
-	return "ctrl+space"
+func (keys keymap) resolvePendingTextEditSequence(pending, key string) (textEditAction, bool, bool) {
+	if pending == "" {
+		return textEditNone, false, false
+	}
+
+	sequence := pending + key
+	switch {
+	case keys.keymapStyle() == keymapVi && bindingMatchesString(viTextStartSequenceShortcut, sequence):
+		return textEditTextStart, true, true
+	case keys.keymapStyle() == keymapVi && bindingMatchesString(viDeleteNextWordShortcut, sequence):
+		return textEditDeleteWordForward, true, true
+	case keys.keymapStyle() == keymapVi && bindingMatchesString(viDeletePrevWordShortcut, sequence):
+		return textEditDeleteWordBackward, true, true
+	default:
+		return textEditNone, false, true
+	}
 }

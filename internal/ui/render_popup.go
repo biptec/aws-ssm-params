@@ -12,8 +12,8 @@ type popupRenderer struct {
 	width      int
 	height     int
 	innerWidth int
-	layers     []popupKind
-	render     func(popupKind) string
+	layers     []blockKind
+	render     func(blockKind) string
 }
 
 func newPopupRenderer(m model) popupRenderer {
@@ -23,7 +23,7 @@ func newPopupRenderer(m model) popupRenderer {
 		height:     m.height,
 		innerWidth: m.boxInnerWidth(),
 		layers:     m.popupLayers(),
-		render: func(kind popupKind) string {
+		render: func(kind blockKind) string {
 			switch kind {
 			case popupNone:
 				return ""
@@ -91,9 +91,19 @@ func newPopupRenderer(m model) popupRenderer {
 				return m.renderExportMapPathsPopup()
 			case popupExportOverwriteConfirm:
 				return m.renderExportOverwriteConfirmPopup()
-			default:
+			case parameterListBlock,
+				selectedParameterBlock,
+				filterBlock,
+				editorBlock,
+				columnsBlock,
+				confirmBlock,
+				regionSelectBlock,
+				typeSelectBlock,
+				loadingBlock:
 				return ""
 			}
+
+			return ""
 		},
 	}
 }
@@ -183,6 +193,7 @@ func popupPaddedLines(lines []string) []string {
 	}
 
 	pad := strings.Repeat(" ", horizontalPadding)
+
 	for _, line := range lines {
 		rawLeft := strings.HasPrefix(line, rawLeftLinePrefix)
 		if rawLeft {
@@ -278,7 +289,7 @@ func (renderer popupRenderer) renderPopupStack(body string) string {
 	return body
 }
 
-func (renderer popupRenderer) renderPopup(kind popupKind) string {
+func (renderer popupRenderer) renderPopup(kind blockKind) string {
 	return renderer.render(kind)
 }
 

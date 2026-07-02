@@ -209,6 +209,7 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 	}
 
 	operation, policyAction := r.policy.operation(planned.Exists)
+
 	shouldWrite, err := r.resolvePolicy(policyAction, operation, planned.Region, record.Path)
 	if err != nil {
 		return r.handleRecordError(operation, planned.Region, record.Path, err)
@@ -257,6 +258,7 @@ func (r *runner) processRecord(ctx context.Context, record *textio.Record) error
 
 func (r *runner) planRecord(record *textio.Record) (PlannedRecord, error) {
 	region, existing, exists, err := r.recordResolver.resolveExisting(record)
+
 	planned := PlannedRecord{Record: *record, Region: region, Existing: existing, Exists: exists}
 	if err != nil {
 		return planned, err

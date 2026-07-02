@@ -165,10 +165,7 @@ func TestCommandHelpShowsEnvironmentVariablesForApplicationFlags(t *testing.T) {
 				tuiEnvWithDecryption,
 				tuiEnvShowColumn,
 				tuiEnvSortBy,
-				tuiEnvNoConfirmOverwriteFile,
-				tuiEnvNoConfirmWriteSecureValue,
-				tuiEnvNoConfirmDeleteOne,
-				tuiEnvNoConfirmDeleteAll,
+				tuiEnvApplyImmediately,
 			},
 		},
 		{

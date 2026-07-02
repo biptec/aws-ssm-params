@@ -18,7 +18,7 @@ type tableViewComponent struct {
 
 const (
 	selectedParameterDetailsContentRows = 13
-	selectedParameterDetailsBoxPadding   = 2
+	selectedParameterDetailsBoxPadding  = 2
 )
 
 type editableDetailField struct {
@@ -80,10 +80,12 @@ func (component tableViewComponent) selectedParameterFields(st *Status, full boo
 	fields := [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 	if full {
 		detailWidth := max(20, m.boxInnerWidth()-20)
+
 		fields = [][2]string{{"Name", st.Item.Path}, {"Region", st.RegionLabel(m.opts.Region)}, {"Type", valueOrDash(st.Type)}, {"Tier", valueOrDash(st.Tier)}, {"DataType", valueOrDash(st.DataType)}, {"Policies", oneLineValuePreview(st.Policies, detailWidth)}, {"Version", intOrDash(st.Version)}, {"Len", intOrDash(int64(st.Length))}, {"SHA256", valueOrDash(st.SHA256Prefix)}, {"Description", oneLineValuePreview(st.Description, detailWidth)}, {"User", valueOrDash(st.User)}, {"Date", valueOrDash(st.Modified)}, {"Value", value}}
 		if st.Error != "" {
 			fields = append(fields, [2]string{"Error", st.Error})
 		}
+
 		if st.PushError != "" {
 			fields = append(fields, [2]string{"Push error", st.PushError})
 		}
@@ -93,27 +95,30 @@ func (component tableViewComponent) selectedParameterFields(st *Status, full boo
 }
 
 func (component tableViewComponent) selectedParameterDetailsTitle(st *Status) string {
-	switch st.PendingOperation() {
+	switch st.pendingOperation() {
 	case parameterStateNew:
 		return "New Parameter"
 	case parameterStateModified:
 		return "Modified Parameter"
 	case parameterStateDeleted:
 		return "Deleted Parameter"
-	default:
+	case parameterStateClean, parameterStateError:
 		return "Selected Parameter"
 	}
+
+	return "Selected Parameter"
 }
 
 func (component tableViewComponent) editableSelectedParameterLines(st *Status) []string {
 	m := component.model
 	fields := component.editableDetailFields(st)
 	lines := make([]string, 0, len(fields)*2)
-	deleted := st.PendingOperation() == parameterStateDeleted
+	deleted := st.pendingOperation() == parameterStateDeleted
 
 	valueWidth := max(4, m.boxInnerWidth()-17)
+
 	for _, field := range fields {
-		localOnly := st.PendingOperation() == parameterStateNew
+		localOnly := st.pendingOperation() == parameterStateNew
 		changed := field.cloud != field.local && st.HasLocalChanges()
 		cloudValue := component.renderEditableDetailValue(field.cloud, valueWidth, changed || localOnly, !localOnly)
 		cloudMarker := component.editableDetailMarker(changed || localOnly, !localOnly)
@@ -135,13 +140,16 @@ func (component tableViewComponent) cleanSelectedParameterDetailsHeight(lines []
 
 func (component tableViewComponent) cleanSelectedParameterLines(fields [][2]string, labelWidth int) []string {
 	m := component.model
+
 	lines := make([]string, 0, len(fields))
 	for _, pair := range fields {
 		value := pair[1]
+
 		renderedValue := m.value(value)
 		if value == "" || value == "-" {
 			renderedValue = m.muted("(none)")
 		}
+
 		if pair[0] == "Value" && value == encryptedPlaceholderText {
 			renderedValue = m.encryptedPlaceholder()
 		}
@@ -159,12 +167,13 @@ func (component tableViewComponent) dirtySelectedParameterDetailsHeight(lines []
 func (component tableViewComponent) editableDetailFields(st *Status) []editableDetailField {
 	m := component.model
 	cloud := st.cloudStatus()
+
 	local := st.localStatus()
-	if st.PendingOperation() == parameterStateDeleted {
+	if st.pendingOperation() == parameterStateDeleted {
 		local = Status{}
 	}
 
-	if st.PendingOperation() == parameterStateNew || !st.HasLocalChanges() {
+	if st.pendingOperation() == parameterStateNew || !st.HasLocalChanges() {
 		cloud = *st
 		local = *st
 	}
@@ -212,6 +221,7 @@ func (component tableViewComponent) renderEditableLocalDetailValue(field editabl
 
 func (component tableViewComponent) editableDetailMarker(changed, cloud bool) string {
 	m := component.model
+
 	if !changed {
 		return "  "
 	}
@@ -234,6 +244,7 @@ func (component tableViewComponent) renderEditableDetailValue(value string, widt
 	}
 
 	value = detailOneLinePreview(value, width)
+
 	if changed {
 		if cloud {
 			return m.diffCloudValue(value)
@@ -450,6 +461,7 @@ type tableColumn struct {
 // It shrinks wide columns until the table fits inside the box without moving headers away from row values.
 func (component tableViewComponent) tableColumns(vis []int) []tableColumn {
 	m := component.model
+
 	keys := []columnName{columnIndex, columnPath}
 	if m.hasLocalChanges() && !m.opts.ApplyImmediately {
 		keys = []columnName{columnIndex, columnState, columnPath}

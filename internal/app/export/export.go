@@ -96,7 +96,10 @@ func (r *runner) run(ctx context.Context) error {
 
 	records := r.records(statuses)
 
-	return exportplan.Write(r.writer, records, r.fieldMaps, r.recordFields, r.keyField, r.scalarField)
+	return errors.Wrap(
+		exportplan.Write(r.writer, records, r.fieldMaps, r.recordFields, r.keyField, r.scalarField),
+		"write export",
+	)
 }
 
 func (r *runner) loadStatuses(ctx context.Context) ui.Statuses {

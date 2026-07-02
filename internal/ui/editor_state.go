@@ -14,7 +14,9 @@ type editorStateComponent struct {
 // startMultiline opens the selected parameter value in the multiline editor.
 func (component editorStateComponent) startMultiline() (tea.Model, tea.Cmd) {
 	m := component.model
-	if m.currentStatus().PendingOperation() == parameterStateDeleted {
+
+	current := m.currentStatus()
+	if current.pendingOperation() == parameterStateDeleted {
 		m.errMessage = "Revert deleted parameter before editing it."
 		m.message = ""
 		m.warningMessage = ""
@@ -382,11 +384,7 @@ func (m model) editorPopupActiveOrStack() bool {
 	return m.popupActiveOrStack(popupEditor)
 }
 
-func (m model) editorChildPopupActive() bool {
-	return m.activePopup != popupEditor && m.editorPopupActiveOrStack()
-}
-
-func (m model) popupActiveOrStack(kind popupKind) bool {
+func (m model) popupActiveOrStack(kind blockKind) bool {
 	if m.activePopup == kind {
 		return true
 	}
@@ -400,7 +398,7 @@ func (m model) popupActiveOrStack(kind popupKind) bool {
 	return false
 }
 
-func (m *model) pushEditorChildPopup(kind popupKind) {
+func (m *model) pushEditorChildPopup(kind blockKind) {
 	m.editorButtonsFocused = false
 	if m.editorPopupActiveOrStack() {
 		m.pushNestedPopup(kind)
@@ -457,8 +455,8 @@ func (m model) finishEditorSelector() model {
 }
 
 func (m *model) navigateEditorPopupButtons(key string) bool {
-	switch key {
-	case "tab":
+	switch {
+	case isForwardTabKeyString(key):
 		if m.editorButtonsFocused {
 			if m.editorButtonCursor == importActionPrimary {
 				m.editorButtonCursor = importActionCancel
@@ -470,8 +468,9 @@ func (m *model) navigateEditorPopupButtons(key string) bool {
 		}
 
 		m.focusEditorButton(importActionPrimary)
+
 		return true
-	case "shift+tab":
+	case isBackwardTabKeyString(key):
 		if m.editorButtonsFocused {
 			if m.editorButtonCursor == importActionCancel {
 				m.editorButtonCursor = importActionPrimary
@@ -483,13 +482,14 @@ func (m *model) navigateEditorPopupButtons(key string) bool {
 		}
 
 		m.focusEditorButton(importActionCancel)
+
 		return true
-	case "left":
+	case isLeftKeyString(key):
 		if m.editorButtonsFocused {
 			m.editorButtonCursor = importActionPrimary
 			return true
 		}
-	case "right":
+	case isRightKeyString(key):
 		if m.editorButtonsFocused {
 			m.editorButtonCursor = importActionCancel
 			return true

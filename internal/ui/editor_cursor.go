@@ -179,6 +179,7 @@ func (component *editorCursor) activeTextDeleteChar() {
 
 func (component *editorCursor) activeTextDeleteBackward() bool {
 	value := []rune(component.activeTextValue())
+
 	pos := component.activeTextCursorAbs()
 	if pos <= 0 || pos > len(value) {
 		return false

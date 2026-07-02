@@ -38,12 +38,12 @@ type Status struct {
 	Value        string
 	Error        string
 
-	State         parameterState
-	PendingState  parameterState
-	Cloud         parameterSnapshot
-	PushError     string
-	DraftType     ssm.ParameterType
-	DraftOptions  ssm.PutParameterOptions
+	State        parameterState
+	PendingState parameterState
+	Cloud        parameterSnapshot
+	PushError    string
+	DraftType    ssm.ParameterType
+	DraftOptions ssm.PutParameterOptions
 }
 
 // Statuses is an ordered collection of parameter statuses.
@@ -304,19 +304,23 @@ func (status *Status) Label() string {
 	return "OK"
 }
 
-func (status Status) StateLabel() string {
+// StateLabel returns the short table label for the current local state.
+func (status *Status) StateLabel() string {
 	return string(status.State)
 }
 
-func (status Status) HasLocalChanges() bool {
+// HasLocalChanges reports whether the local snapshot differs from the cloud snapshot.
+func (status *Status) HasLocalChanges() bool {
 	return status.State != parameterStateClean
 }
 
-func (status Status) IsNewLocal() bool {
-	return status.PendingOperation() == parameterStateNew
+// IsNewLocal reports whether this status represents a not-yet-pushed parameter.
+func (status *Status) IsNewLocal() bool {
+	return status.pendingOperation() == parameterStateNew
 }
 
-func (status Status) PendingOperation() parameterState {
+// pendingOperation returns the operation that should be pushed for this status.
+func (status *Status) pendingOperation() parameterState {
 	if status.State == parameterStateError && status.PendingState != parameterStateClean {
 		return status.PendingState
 	}
@@ -324,7 +328,7 @@ func (status Status) PendingOperation() parameterState {
 	return status.State
 }
 
-func (status Status) snapshot() parameterSnapshot {
+func (status *Status) snapshot() parameterSnapshot {
 	return parameterSnapshot{
 		Item:         status.Item,
 		Pending:      status.Pending,
@@ -345,7 +349,7 @@ func (status Status) snapshot() parameterSnapshot {
 	}
 }
 
-func (snapshot parameterSnapshot) status() Status {
+func (snapshot *parameterSnapshot) status() Status {
 	return Status{
 		Item:         snapshot.Item,
 		Pending:      snapshot.Pending,
@@ -366,7 +370,7 @@ func (snapshot parameterSnapshot) status() Status {
 	}
 }
 
-func (snapshot parameterSnapshot) isZero() bool {
+func (snapshot *parameterSnapshot) isZero() bool {
 	return snapshot.Item.Path == "" &&
 		snapshot.Item.Region == "" &&
 		!snapshot.Pending &&
@@ -386,7 +390,7 @@ func (snapshot parameterSnapshot) isZero() bool {
 		snapshot.Error == ""
 }
 
-func (snapshot parameterSnapshot) sameLocalValue(status *Status) bool {
+func (snapshot *parameterSnapshot) sameLocalValue(status *Status) bool {
 	if status == nil {
 		return false
 	}
@@ -419,6 +423,7 @@ func (status *Status) clearLocalState() {
 
 func (status *Status) refreshDerivedFields() {
 	status.Length = len(status.Value)
+
 	status.Empty = status.Exists && status.Value == ""
 	if status.Value == "" {
 		status.SHA256Prefix = ""
@@ -428,8 +433,8 @@ func (status *Status) refreshDerivedFields() {
 	status.SHA256Prefix = hashPrefix(status.Value)
 }
 
-func (status *Status) applyLocalModification(cloud parameterSnapshot, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) {
-	status.Cloud = cloud
+func (status *Status) applyLocalModification(cloud *parameterSnapshot, parameterType ssm.ParameterType, opts ssm.PutParameterOptions) {
+	status.Cloud = *cloud
 	status.PendingState = parameterStateModified
 	status.State = parameterStateModified
 	status.PushError = ""
@@ -454,6 +459,7 @@ func (status *Status) applyLocalCreate(parameterType ssm.ParameterType, opts ssm
 
 func (status *Status) applyLocalDelete() {
 	status.ensureCloudSnapshot()
+
 	cloud := status.Cloud
 	if !cloud.isZero() {
 		*status = cloud.status()
@@ -467,17 +473,18 @@ func (status *Status) applyLocalDelete() {
 
 func (status *Status) applyPushError(operation parameterState, err error) {
 	if operation == parameterStateClean {
-		operation = status.PendingOperation()
+		operation = status.pendingOperation()
 	}
 
 	status.State = parameterStateError
+
 	status.PendingState = operation
 	if err != nil {
 		status.PushError = err.Error()
 	}
 }
 
-func (status Status) pushType() ssm.ParameterType {
+func (status *Status) pushType() ssm.ParameterType {
 	if status.DraftType.IsValid() {
 		return status.DraftType
 	}
@@ -489,7 +496,7 @@ func (status Status) pushType() ssm.ParameterType {
 	return ssm.DefaultParameterType
 }
 
-func (status Status) pushOptions() ssm.PutParameterOptions {
+func (status *Status) pushOptions() ssm.PutParameterOptions {
 	opts := status.DraftOptions
 	if !opts.Tier.IsValid() {
 		if tier, err := ssm.ParseParameterTier(status.Tier); err == nil {
@@ -522,17 +529,17 @@ func (status Status) pushOptions() ssm.PutParameterOptions {
 	return opts
 }
 
-func (status Status) cloudStatus() Status {
+func (status *Status) cloudStatus() Status {
 	if status.Cloud.isZero() {
-		return status
+		return *status
 	}
 
-	return status.Cloud.status()
+	return (&status.Cloud).status()
 }
 
-func (status Status) localStatus() Status {
-	if status.PendingOperation() != parameterStateDeleted {
-		return status
+func (status *Status) localStatus() Status {
+	if status.pendingOperation() != parameterStateDeleted {
+		return *status
 	}
 
 	item := status.Item

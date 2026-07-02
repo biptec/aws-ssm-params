@@ -15,20 +15,20 @@ type editorState struct {
 	editDescriptionInput textinput.Model
 	editFileInput        textinput.Model
 
-	editField           editField
+	editField            editField
 	editorButtonsFocused bool
 	editorButtonCursor   int
-	viInsertMode        bool
-	editRegionOptions   []string
-	pendingFileWrite    fileWriteConfirmation
-	editRegion          string
-	editType            ssm.ParameterType
-	editTier            ssm.ParameterTier
-	editDataType        ssm.ParameterDataType
-	editOverwrite       bool
-	editNewParameter    bool
-	editInitialSnapshot editSnapshot
-	typeReturnScreen    screen
+	viInsertMode         bool
+	editRegionOptions    []string
+	pendingFileWrite     fileWriteConfirmation
+	editRegion           string
+	editType             ssm.ParameterType
+	editTier             ssm.ParameterTier
+	editDataType         ssm.ParameterDataType
+	editOverwrite        bool
+	editNewParameter     bool
+	editInitialSnapshot  editSnapshot
+	typeReturnScreen     screen
 
 	expandedFields  map[editField]bool
 	showGutters     bool

@@ -109,7 +109,7 @@ func (component editorIOComponent) loadValueFromFile() (tea.Model, tea.Cmd) {
 }
 
 // writeValueToFile writes the current active file-action field to the path from the edit screen.
-// SecureString value writes and overwrite operations require explicit y confirmation to reduce accidental local writes.
+// SecureString value writes and overwrite operations require explicit confirmation to reduce accidental local writes.
 func (component editorIOComponent) writeValueToFile(secureConfirmed, overwriteConfirmed bool) (tea.Model, tea.Cmd) {
 	m := component.model
 
@@ -259,16 +259,19 @@ func (component *editorIOComponent) startPushConfirm(prompt string, indexes []in
 	m.confirmAction = confirmActionPush
 	m.confirmButtonCursor = importActionPrimary
 	m.confirmFocus = confirmFocusPrimaryButton
+
 	m.confirmStatusIndexes = append([]int(nil), indexes...)
 	if withStateFilters {
 		m.confirmStateFilterOrder = component.confirmPushStateFilterOrder(indexes)
 	} else {
 		m.confirmStateFilterOrder = nil
 	}
+
 	m.confirmStateFilterSelected = map[parameterState]bool{}
 	for _, state := range m.confirmStateFilterOrder {
 		m.confirmStateFilterSelected[state] = true
 	}
+
 	m.returnScreen = ret
 	m.input.SetValue("")
 	m.input.Placeholder = ""
@@ -281,13 +284,14 @@ func (component editorIOComponent) confirmPushStateFilterOrder(indexes []int) []
 	m := component.model
 	seen := map[parameterState]bool{}
 	order := []parameterState{}
+
 	for _, state := range []parameterState{parameterStateNew, parameterStateModified, parameterStateDeleted} {
 		for _, idx := range indexes {
 			if idx < 0 || idx >= len(m.statuses) {
 				continue
 			}
 
-			if m.statuses[idx].PendingOperation() == state && !seen[state] {
+			if m.statuses[idx].pendingOperation() == state && !seen[state] {
 				seen[state] = true
 				order = append(order, state)
 			}
@@ -325,6 +329,7 @@ func (component editorIOComponent) generateRandomValueIntoEditor(kind string) (t
 	m = m.focusEditField(editFieldValue)
 	m.message = "Random value inserted. Press Ctrl-Space to save."
 	m.errMessage = ""
+
 	m.warningMessage = ""
 	if m.editorPopupActiveOrStack() {
 		m.returnToEditorPopup()
@@ -423,6 +428,7 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		rawPolicies := strings.TrimSpace(m.editPoliciesArea.Value())
 
 		policies = normalizePoliciesForAWS(rawPolicies)
+
 		localPolicies = policies
 		if strings.TrimSpace(policies) == "[{}]" {
 			policiesSet = true
@@ -450,7 +456,8 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		local.applyLocalCreate(m.normalizedEditType(), opts)
 		m.replaceStatusByKey(itemKey(item.Region, item.Path), &local)
 		m.applySortWithRules(m.sortRulesOrDefault())
-		m.selectItem(item)
+		m.selectItem(&item)
+
 		if m.opts.ApplyImmediately {
 			m.discardEditorChanges()
 			return m.applyImmediatelyDirtyStatuses(m.dirtyStatusIndexes(), "Saving parameter...")
@@ -474,7 +481,7 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 	}
 
 	current := m.statuses[idx]
-	if current.PendingOperation() == parameterStateDeleted {
+	if current.pendingOperation() == parameterStateDeleted {
 		m.errMessage = "Revert deleted parameter before editing it."
 		m.message = ""
 		m.warningMessage = ""
@@ -482,7 +489,7 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		return m, nil
 	}
 
-	if current.PendingOperation() == parameterStateNew {
+	if current.pendingOperation() == parameterStateNew {
 		local.applyLocalCreate(m.normalizedEditType(), opts)
 	} else {
 		base := current.cloudStatus()
@@ -495,12 +502,12 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 			cloud = current.snapshot()
 		}
 
-		local.applyLocalModification(cloud, m.normalizedEditType(), opts)
+		local.applyLocalModification(&cloud, m.normalizedEditType(), opts)
 	}
 
 	m.statuses[idx] = local
 	m.applySortWithRules(m.sortRulesOrDefault())
-	m.selectItem(item)
+	m.selectItem(&item)
 
 	if m.opts.ApplyImmediately {
 		if !local.HasLocalChanges() {
@@ -513,6 +520,7 @@ func (component editorIOComponent) saveValue(value string) (tea.Model, tea.Cmd) 
 		}
 
 		m.discardEditorChanges()
+
 		return m.applyImmediatelyDirtyStatuses(m.dirtyStatusIndexes(), "Saving parameter...")
 	}
 
@@ -586,7 +594,7 @@ func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, 
 	localKey := itemKey(status.Item.Region, status.Item.Path)
 	cloud := status.cloudStatus()
 	cloudKey := itemKey(cloud.Item.Region, cloud.Item.Path)
-	operation := status.PendingOperation()
+	operation := status.pendingOperation()
 
 	result := pushResult{localKey: localKey, cloudKey: cloudKey, operation: operation, item: status.Item}
 	switch operation {
@@ -599,6 +607,7 @@ func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, 
 
 		result.status = msg.status
 		result.warning = msg.warning
+
 		return result
 	case parameterStateModified:
 		msg := backend.saveParameter(ctx, &status.Item, cloud.Item.Path, status.Value, status.pushType(), status.pushOptions(), pathsFile, allowNamesFileUpdate)
@@ -612,6 +621,7 @@ func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, 
 			if deleteMsg.err != nil {
 				result.err = deleteMsg.err
 				result.warning = joinWarnings(msg.warning, deleteMsg.warning)
+
 				return result
 			}
 
@@ -621,6 +631,7 @@ func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, 
 		}
 
 		result.status = msg.status
+
 		return result
 	case parameterStateDeleted:
 		deleteItem := cloud.Item
@@ -637,11 +648,14 @@ func pushOneLocalChange(ctx context.Context, backend uiBackend, status *Status, 
 		result.item = deleteItem
 		result.removeRow = msg.removeRows
 		result.warning = msg.warning
+
 		return result
-	default:
+	case parameterStateClean, parameterStateError:
 		result.err = errors.New("no local change to push")
 		return result
 	}
+
+	return result
 }
 
 func joinWarnings(left, right string) string {

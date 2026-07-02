@@ -1,3 +1,4 @@
+// Package exportplan contains the shared export planning logic used by the CLI and TUI.
 package exportplan
 
 import (

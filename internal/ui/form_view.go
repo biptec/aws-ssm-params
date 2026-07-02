@@ -31,6 +31,7 @@ func (m model) formTextInputFieldLineWithValidation(name string, input *textinpu
 	input.SetCursor(input.Position())
 
 	renderedValue := input.View()
+
 	if invalid {
 		if focused {
 			renderedValue = m.inputValueWithInvalidRunes(input.Value(), input.Position(), input.Width)
@@ -38,6 +39,7 @@ func (m model) formTextInputFieldLineWithValidation(name string, input *textinpu
 			renderedValue = m.valueWithInvalidRunes(truncateInline(input.Value(), input.Width))
 		}
 	}
+
 	if !focused && input.Value() == "" {
 		renderedValue = m.muted(nonePlaceholderText)
 	}
@@ -58,7 +60,7 @@ func (m model) formStandaloneLabel(label string, focused bool) string {
 
 func (m model) formFocusPrefix(focused bool) string {
 	if focused {
-		return m.focusMarker("> ")
+		return m.focusMarker()
 	}
 
 	return "  "
@@ -74,6 +76,7 @@ func (m model) inputValueWithInvalidRunes(value string, pos, width int) string {
 	}
 
 	start := 0
+
 	if pos >= len(runes) {
 		textWidth := max(0, width-1)
 		if len(runes) > textWidth {
@@ -99,6 +102,7 @@ func (m model) inputValueWithInvalidRunes(value string, pos, width int) string {
 	end := min(len(runes), start+width)
 
 	var b strings.Builder
+
 	for i := start; i < end; i++ {
 		if i == pos {
 			b.WriteString(inputCursorForRune(runes[i], m.opts.NoColor))
@@ -141,14 +145,14 @@ func (m model) formSingleActionButtonLine(label string, focused bool) string {
 func (m model) formActionButton(label string, focused bool) string {
 	prefix := "  "
 	if focused {
-		prefix = m.focusMarker("> ")
+		prefix = m.focusMarker()
 	}
 
 	return prefix + m.muted(label)
 }
 
 // formOptionValue renders the value side of a selector row.
-func (m model) formOptionValue(_ bool, value string) string {
+func (m model) formOptionValue(value string) string {
 	if value == "" {
 		return m.muted(nonePlaceholderText)
 	}
@@ -253,14 +257,6 @@ func (m model) formMultilineAreaLines(area *textarea.Model, maxRows, contentWidt
 	}
 
 	return lines
-}
-
-func (m model) formEmptyMultilineAreaLine(contentWidth, lineWidth int) string {
-	if !m.showGutters {
-		return rawLeftLinePrefix + strings.Repeat(" ", max(1, contentWidth))
-	}
-
-	return strings.Repeat(" ", max(1, lineWidth))
 }
 
 type formTextareaLayoutItem struct {
@@ -415,12 +411,6 @@ func (m model) withCursorMarker(line string, offset int) string {
 	}
 
 	return string(runes[:offset]) + cursorStyle.Render(string(runes[offset])) + string(runes[offset+1:])
-}
-
-// formInputValue renders an unlabelled text input value, for compact input pairs
-// such as the import map-path rows.
-func (m model) formInputValue(input *textinput.Model, width int) string {
-	return m.formInputValueWithPlaceholder(input, width, true)
 }
 
 func (m model) formInputValueWithPlaceholder(input *textinput.Model, width int, showPlaceholder bool) string {

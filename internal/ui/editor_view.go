@@ -29,41 +29,41 @@ func (component editorViewComponent) renderTextAreaScreen() string {
 
 func (component editorViewComponent) renderEditorPopup() string {
 	m := component.model
-	title, lines := component.editorFormLines(max(1, m.popupContentLineBudget() - 2))
+	title, lines := component.editorFormLines(max(1, m.popupContentLineBudget()-2))
 	lines = append(lines, "", component.editorActionButtonsLine())
 
 	return m.renderPopupBoxMinWidth(title, lines, editorPopupMinInnerWidth())
 }
 
-func (component editorViewComponent) editorFormLines(innerHeight int) (string, []string) {
+func (component editorViewComponent) editorFormLines(innerHeight int) (title string, lines []string) {
 	m := component.model
 
-	title := "Edit Parameter"
+	title = "Edit Parameter"
 	if m.editNewParameter || !m.currentStatus().Exists {
 		title = "New Parameter"
 	}
 
 	labelWidth := 11
 
-	lines := []string{m.editTextInputFieldLine(editFieldSSMPath, "Name", &m.editPathInput, labelWidth)}
+	lines = []string{m.editTextInputFieldLine(editFieldSSMPath, "Name", &m.editPathInput, labelWidth)}
 	if m.editFieldAllowed(editFieldRegion) {
-		lines = append(lines, m.editFieldLine(editFieldRegion, "Region", m.editOptionValue(editFieldRegion, valueOrDash(m.editRegion)), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldRegion, "Region", m.editOptionValue(valueOrDash(m.editRegion)), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldType) {
-		lines = append(lines, m.editFieldLine(editFieldType, "Type", m.editOptionValue(editFieldType, m.normalizedEditType().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldType, "Type", m.editOptionValue(m.normalizedEditType().String()), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldTier) {
-		lines = append(lines, m.editFieldLine(editFieldTier, "Tier", m.editOptionValue(editFieldTier, m.normalizedEditTier().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldTier, "Tier", m.editOptionValue(m.normalizedEditTier().String()), labelWidth))
 	}
 
 	if m.editFieldAllowed(editFieldDataType) {
-		lines = append(lines, m.editFieldLine(editFieldDataType, "DataType", m.editOptionValue(editFieldDataType, m.normalizedEditDataType().String()), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldDataType, "DataType", m.editOptionValue(m.normalizedEditDataType().String()), labelWidth))
 	}
 
 	if m.shouldShowOverwriteField() {
-		lines = append(lines, m.editFieldLine(editFieldOverwrite, "Overwrite", m.editOptionValue(editFieldOverwrite, strconv.FormatBool(m.editOverwrite)), labelWidth))
+		lines = append(lines, m.editFieldLine(editFieldOverwrite, "Overwrite", m.editOptionValue(strconv.FormatBool(m.editOverwrite)), labelWidth))
 	}
 
 	expandableFields := component.editorExpandableFieldViews()
@@ -288,45 +288,6 @@ func (component editorViewComponent) renderMultilineFieldLines(field editField, 
 	return m.formMultilineAreaLines(area, maxRows, component.editorTextareaContentWidth(area), focused)
 }
 
-func (component editorViewComponent) editorTextareaMaxRows(field editField) int {
-	m := component.model
-	innerHeight := m.textAreaBodyHeight() - 2
-	if m.editorPopupActiveOrStack() {
-		innerHeight = max(1, m.popupContentLineBudget()-2)
-	}
-
-	fixedLines := 1
-	if m.editFieldAllowed(editFieldRegion) {
-		fixedLines++
-	}
-	if m.editFieldAllowed(editFieldType) {
-		fixedLines++
-	}
-	if m.editFieldAllowed(editFieldTier) {
-		fixedLines++
-	}
-	if m.editFieldAllowed(editFieldDataType) {
-		fixedLines++
-	}
-	if m.shouldShowOverwriteField() {
-		fixedLines++
-	}
-
-	expandableFields := component.editorExpandableFieldViews()
-	expandedFields := component.expandedEditorTextareaItems(expandableFields)
-	fixedLines += len(expandableFields) + component.editorExpandableSeparatorCount(expandableFields)
-	if m.shouldShowEncryptedEditPlaceholder() {
-		fixedLines++
-	}
-
-	rowLimits := formTextareaRowLimits(expandedFields, max(1, innerHeight-fixedLines))
-	if rows := rowLimits[int(field)]; rows > 0 {
-		return rows
-	}
-
-	return 1
-}
-
 type multilineVisualSegment struct {
 	logical int
 	start   int
@@ -426,15 +387,19 @@ func (component editorViewComponent) editorPopupLineWidth() int {
 	if m.editFieldAllowed(editFieldRegion) {
 		valueWidth = max(valueWidth, lipgloss.Width(valueOrDash(m.editRegion))+1)
 	}
+
 	if m.editFieldAllowed(editFieldType) {
 		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditType().String())+1)
 	}
+
 	if m.editFieldAllowed(editFieldTier) {
 		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditTier().String())+1)
 	}
+
 	if m.editFieldAllowed(editFieldDataType) {
 		valueWidth = max(valueWidth, lipgloss.Width(m.normalizedEditDataType().String())+1)
 	}
+
 	if m.shouldShowOverwriteField() {
 		valueWidth = max(valueWidth, lipgloss.Width(strconv.FormatBool(m.editOverwrite))+1)
 	}
@@ -454,13 +419,16 @@ func (component editorViewComponent) editorPopupLineWidth() int {
 
 func (component editorViewComponent) editorPopupTextareasForWidth() []*textarea.Model {
 	m := component.model
+
 	areas := []*textarea.Model{}
 	if m.editFieldAllowed(editFieldDescription) {
 		areas = append(areas, &m.editDescriptionArea)
 	}
+
 	if m.shouldShowPoliciesField() {
 		areas = append(areas, &m.editPoliciesArea)
 	}
+
 	if !m.shouldShowEncryptedEditPlaceholder() && m.editFieldAllowed(editFieldValue) {
 		areas = append(areas, &m.textArea)
 	}
@@ -525,9 +493,9 @@ func (component editorViewComponent) shouldTypePrintableQInEditField() bool {
 	return m.keymapStyle() == keymapEmacs || m.viInsertMode
 }
 
-func (component editorViewComponent) editOptionValue(field editField, value string) string {
+func (component editorViewComponent) editOptionValue(value string) string {
 	m := component.model
-	return m.formOptionValue(component.editorFieldFocused(field), value)
+	return m.formOptionValue(value)
 }
 
 func (component editorViewComponent) editorFieldFocused(field editField) bool {
@@ -561,49 +529,5 @@ func (component *editorViewComponent) moveActiveMultilinePage(direction int) {
 // textAreaFooterText includes region-switching shortcut help only when multiple concrete regions are available.
 func (component editorViewComponent) textAreaFooterText() string {
 	m := component.model
-	valueAction := ""
-
-	switch m.editField {
-	case editFieldSSMPath, editFieldRegion, editFieldType, editFieldTier, editFieldDataType, editFieldOverwrite, editFieldFilePath:
-	case editFieldValue:
-		valueAction = " • alt+e value actions"
-	case editFieldDescription:
-		valueAction = " • alt+e description actions"
-	case editFieldPolicies:
-		valueAction = " • alt+e policies actions"
-
-	default:
-	}
-
-	lineAction := ""
-	if isExpandableEditField(m.editField) {
-		lineAction = " • ctrl+l lines"
-	}
-
-	if m.usesViEditMode() {
-		if m.viInsertMode {
-			return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + " • esc normal"
-		}
-
-		return "ctrl+/ help • i insert • " + primaryActionHelp() + " save" + lineAction + valueAction + " • esc back"
-	}
-
-	suffix := " • esc back"
-
-	switch m.editField {
-	case editFieldValue, editFieldSSMPath, editFieldDescription, editFieldPolicies, editFieldFilePath:
-		return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + suffix
-	case editFieldRegion:
-		return "ctrl+/ help • enter choose region • " + primaryActionHelp() + " save" + suffix
-	case editFieldType:
-		return "ctrl+/ help • enter choose type • " + primaryActionHelp() + " save" + suffix
-	case editFieldTier:
-		return "ctrl+/ help • enter choose tier • " + primaryActionHelp() + " save" + suffix
-	case editFieldDataType:
-		return "ctrl+/ help • enter choose data type • " + primaryActionHelp() + " save" + suffix
-	case editFieldOverwrite:
-		return "ctrl+/ help • enter choose overwrite • " + primaryActionHelp() + " save" + suffix
-	default:
-		return "ctrl+/ help • " + primaryActionHelp() + " save" + lineAction + valueAction + suffix
-	}
+	return renderFooterBindings(editorTextAreaFooterBindings(m.keymapStyle(), m.viInsertMode, m.editField))
 }
